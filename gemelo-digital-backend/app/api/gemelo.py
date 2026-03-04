@@ -13,7 +13,8 @@ from app.services.gemelo_service import GemeloService
 
 logger = logging.getLogger("uvicorn.error")
 
-router = APIRouter(prefix="/gemelo", tags=["Gemelo Digital"])
+router = APIRouter(prefix="/gemelo", tags=["gemelo"])
+
 
 
 def get_service(bs=Depends(get_brightspace_client)) -> GemeloService:
@@ -126,9 +127,6 @@ async def gemelo_course_overview(
     except Exception as e:
         _http500(e, "gemelo_course_overview", orgUnitId=orgUnitId)
 
-@app.get("/health")
-def health():
-    return {"status": "ok"}
 
 @router.get("/course/{orgUnitId}/ra/dashboard")
 async def gemelo_course_ra_dashboard(

@@ -1,8 +1,8 @@
 services:
   gemelo-backend:
     build:
-      context: ..
-      dockerfile: gemelo-digital-backend/Dockerfile
+      context: .
+      dockerfile: Dockerfile
     ports:
       - "8000:8000"
     env_file:

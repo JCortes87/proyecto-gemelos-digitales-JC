@@ -7,5 +7,6 @@ RUN pip install --upgrade pip setuptools wheel \
 
 COPY app ./app
 COPY config ./config
+COPY frontend_dist ./frontend_dist
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

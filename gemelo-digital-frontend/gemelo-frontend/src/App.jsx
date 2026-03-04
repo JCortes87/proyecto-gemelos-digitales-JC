@@ -20,12 +20,21 @@ import {
  * Config
  * =========================
  */
-const API_BASE_URL = (import.meta.env?.VITE_API_BASE_URL || "").replace(/\/$/, "");
-if (!API_BASE) {
-  console.error("VITE_API_BASE_URL no está definida");
+
+const API_BASE_URL = (
+  import.meta.env?.VITE_API_BASE_URL ||
+  import.meta.env?.VITE_GEMELO_BASE_URL ||
+  ""
+).replace(/\/$/, "");
+
+if (!API_BASE_URL) {
+  console.error("⚠️ VITE_API_BASE_URL no está definida");
 }
 
-const GEMELO_API = API_BASE_URL;
+function apiUrl(path) {
+  return API_BASE_URL ? `${API_BASE_URL}${path}` : path;
+}
+
 const DEFAULT_ORG_UNIT_ID = 29120;
 
 /**
@@ -410,20 +419,20 @@ function flattenOutcomeDescriptions(payload) {
   return flat;
 }
 
-async function apiGet(url, opts = {}) {
-  const res = await fetch(url, {
+async function apiGet(path, opts = {}) {
+  const res = await fetch(apiUrl(path), {
     method: "GET",
     credentials: "include",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...(opts.headers || {}) },
     signal: opts.signal,
   });
+
   if (!res.ok) {
     const txt = await res.text();
     throw new Error(`HTTP ${res.status} - ${txt?.slice?.(0, 600) || txt}`);
   }
   return res.json();
 }
-
 async function mapLimit(arr, limit, mapper) {
   const list = Array.isArray(arr) ? arr : [];
   const results = new Array(list.length);
@@ -1116,14 +1125,9 @@ export default function App() {
   useEffect(() => {
   if (!orgUnitId) return;
 
-  fetch(`/brightspace/course/${orgUnitId}`)
-    .then(res => res.json())
-    .then(data => {
-      setCourseInfo(data);
-    })
-    .catch(err => {
-      console.error("Error cargando curso:", err);
-    });
+  apiGet(`${GEMELO_API}/brightspace/course/${orgUnitId}`)
+    .then(data => setCourseInfo(data))
+    .catch(err => console.error("Error cargando curso:", err));
 }, [orgUnitId]);
 
   /**
@@ -1330,7 +1334,7 @@ export default function App() {
             <strong style={{ fontFamily: "var(--font-mono)" }}>
               {courseInfo?.Name || orgUnitId}
             </strong>
-              {GEMELO_BASE_URL && <> · <span style={{ fontFamily: "var(--font-mono)" }}>{GEMELO_BASE_URL}</span></>}
+              {GEMELO_API && <> · <span style={{ fontFamily: "var(--font-mono)" }}>{GEMELO_API}</span></>}
             </div>
           </div>
 
