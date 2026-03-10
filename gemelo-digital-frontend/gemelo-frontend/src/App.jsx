@@ -297,7 +297,27 @@ const GLOBAL_STYLES = `
   }
   .empty-state-icon { font-size: 32px; opacity: 0.4; }
 
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(148,163,184,0.4); border-radius: 999px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(148,163,184,0.65); }
 
+  /* Keyframe animations */
+  @keyframes slideInRight {
+    from { transform: translateX(100%); opacity: 0; }
+    to   { transform: translateX(0);    opacity: 1; }
+  }
+  @keyframes slideInUp {
+    from { transform: translateY(10px); opacity: 0; }
+    to   { transform: translateY(0);    opacity: 1; }
+  }
+
+  /* Panel animation class */
+  .panel-slide { animation: slideInRight 0.22s cubic-bezier(0.4,0,0.2,1); }
+
+  /* Tag */
+  .tag { font-weight: 700 !important; }
 `;
 
 function toDate(x) {
@@ -604,7 +624,7 @@ function StatusBadge({ status }) {
 
 function Card({ title, right, children, className = "", style = {} }) {
   return (
-    <div className={`kpi-card ${className}`} style={style}>
+    <div className={`kpi-card ${className}`} style={{ display: "flex", flexDirection: "column", ...style }}>
       {(title || right) && (
         <div
           style={{
@@ -695,85 +715,39 @@ function ProgressBar({ value, color, showLabel = false, animate = true }) {
 
 function InfoTooltip({ text }) {
   const [open, setOpen] = React.useState(false);
-  const ref = React.useRef(null);
   const [pos, setPos] = React.useState({ top: 0, left: 0 });
-
+  const btnRef = React.useRef(null);
   if (!String(text || "").trim()) return null;
 
   const updatePos = () => {
-    if (!ref.current) return;
-    const rect = ref.current.getBoundingClientRect();
-
-    const tooltipWidth = Math.min(320, Math.floor(window.innerWidth * 0.75));
-    const left = Math.max(
-      12,
-      Math.min(rect.left + rect.width / 2 - tooltipWidth / 2, window.innerWidth - tooltipWidth - 12)
-    );
-
-    const tooltipHeightGuess = 90;
-    const top =
-      rect.top > tooltipHeightGuess + 16
-        ? rect.top - tooltipHeightGuess - 10
-        : rect.bottom + 10;
-
-    setPos({ top, left });
+    if (!btnRef.current) return;
+    const r = btnRef.current.getBoundingClientRect();
+    setPos({ top: r.top, left: r.left + r.width / 2 });
   };
 
-  React.useEffect(() => {
-    if (!open) return;
-    updatePos();
-    window.addEventListener("scroll", updatePos, true);
-    window.addEventListener("resize", updatePos);
-    return () => {
-      window.removeEventListener("scroll", updatePos, true);
-      window.removeEventListener("resize", updatePos);
-    };
-  }, [open]);
-
   return (
-    <>
+    <span style={{ position: "relative", display: "inline-flex", flex: "0 0 auto" }}>
       <span
-        ref={ref}
-        style={{ position: "relative", display: "inline-flex", flex: "0 0 auto" }}
-        onMouseEnter={() => {
-          updatePos();
-          setOpen(true);
-        }}
+        ref={btnRef}
+        role="button"
+        tabIndex={0}
+        aria-label="Ver descripción"
+        onMouseEnter={() => { updatePos(); setOpen(true); }}
         onMouseLeave={() => setOpen(false)}
-        onFocus={() => {
-          updatePos();
-          setOpen(true);
-        }}
+        onFocus={() => { updatePos(); setOpen(true); }}
         onBlur={() => setOpen(false)}
-        onClick={(e) => {
-          e.stopPropagation();
-          updatePos();
-          setOpen((v) => !v);
+        onClick={(e) => { e.stopPropagation(); updatePos(); setOpen((v) => !v); }}
+        style={{
+          display: "inline-flex",
+          width: 16, height: 16,
+          borderRadius: 999,
+          alignItems: "center", justifyContent: "center",
+          border: "1px solid var(--border)",
+          color: "var(--muted)", fontSize: 10, fontWeight: 900,
+          cursor: "help", background: "var(--card)",
+          lineHeight: 1, flexShrink: 0,
         }}
-      >
-        <span
-          role="button"
-          tabIndex={0}
-          aria-label="Ver descripción"
-          style={{
-            display: "inline-flex",
-            width: 16,
-            height: 16,
-            borderRadius: 999,
-            alignItems: "center",
-            justifyContent: "center",
-            border: "1px solid var(--border)",
-            color: "var(--muted)",
-            fontSize: 10,
-            fontWeight: 900,
-            cursor: "help",
-            background: "var(--card)",
-            lineHeight: 1,
-          }}
-        >
-          ?
-        </span>
-      </span>
+      >?</span>
 
       {open && (
         <div
@@ -782,23 +756,30 @@ function InfoTooltip({ text }) {
             position: "fixed",
             top: pos.top,
             left: pos.left,
-            width: "min(320px, 75vw)",
-            zIndex: 99999,
+            transform: "translate(-50%, calc(-100% - 10px))",
+            width: "min(280px, 85vw)",
+            zIndex: 99998,
             background: "var(--card)",
             border: "1px solid var(--border)",
-            boxShadow: "var(--shadow-lg)",
-            borderRadius: 12,
-            padding: 10,
-            color: "var(--text)",
-            fontSize: 12,
-            fontWeight: 600,
-            lineHeight: 1.4,
+            boxShadow: "0 8px 28px rgba(0,0,0,0.18)",
+            borderRadius: 10,
+            padding: "10px 13px",
+            color: "var(--text)", fontSize: 12, fontWeight: 500,
+            lineHeight: 1.55, whiteSpace: "normal",
+            pointerEvents: "none",
           }}
         >
+          <div style={{
+            position: "absolute", bottom: -5, left: "50%",
+            transform: "translateX(-50%) rotate(45deg)",
+            width: 8, height: 8,
+            background: "var(--card)", border: "1px solid var(--border)",
+            borderTop: "none", borderLeft: "none",
+          }} />
           {text}
         </div>
       )}
-    </>
+    </span>
   );
 }
 
@@ -825,6 +806,10 @@ function SortTh({ label, active, dir, onClick, title }) {
 }
 
 function CoverageBars({ donePct, pendingPct, overduePct }) {
+  // donePct   = calificado (nota numérica publicada)
+  // pendingPct = pendiente calificación (entregado, sin nota)
+  // overduePct = vencido sin registro (sin entrega, fecha pasada)
+  // open = 100 - d - p - ov (sin entregar, fecha futura o sin fecha)
   const d = Math.max(0, Math.min(100, Number(donePct ?? 0)));
   const p = Math.max(0, Math.min(100, Number(pendingPct ?? 0)));
   const ov = Math.max(0, Math.min(100, Number(overduePct ?? 0)));
@@ -889,21 +874,30 @@ function CoverageBars({ donePct, pendingPct, overduePct }) {
         label="Calificado"
         value={d}
         color={COLORS.ok}
-        tooltip="Evidencias con nota visible sobre el total del curso."
+        tooltip="Ítems con nota numérica publicada en el gradebook."
       />
 
       <BarRow
-        label="Pendiente"
+        label="Pendiente calificación"
         value={p}
-        color={COLORS.pending}
-        tooltip="Actividades aún sin nota visible y todavía no vencidas."
+        color={COLORS.brand}
+        tooltip="El estudiante entregó pero el docente aún no ha publicado nota numérica."
       />
+
+      {Math.max(0, 100 - d - p - ov) > 0.5 && (
+        <BarRow
+          label="Sin entregar (abierto)"
+          value={Math.max(0, 100 - d - p - ov)}
+          color={COLORS.pending}
+          tooltip="Sin nota, sin señal de entrega, y la fecha de vencimiento aún no ha llegado."
+        />
+      )}
 
       <BarRow
         label="Vencido sin registro"
         value={ov}
-        color={COLORS.critical}
-        tooltip="Actividades vencidas sin nota visible. Proxy operativo: no distingue todavía entre no entrega y entrega sin calificar."
+        color={ov > 0 ? COLORS.critical : "rgba(148,163,184,0.4)"}
+        tooltip="Sin nota, sin entrega registrada, y la fecha de vencimiento ya pasó. Requiere acción docente."
       />
     </div>
   );
@@ -1402,6 +1396,42 @@ export default function App() {
 
   const [orgUnitId, setOrgUnitId] = useState(DEFAULT_ORG_UNIT_ID);
   const [orgUnitInput, setOrgUnitInput] = useState(String(DEFAULT_ORG_UNIT_ID));
+  const [showCoursePanel, setShowCoursePanel] = useState(false);
+  const [courseList, setCourseList] = useState([]);
+  const [courseListLoading, setCourseListLoading] = useState(false);
+
+  // Fetch enrolled courses when panel opens
+  // Tries multiple common Brightspace/backend endpoints in sequence
+  React.useEffect(() => {
+    if (!showCoursePanel || courseList.length > 0) return;
+    setCourseListLoading(true);
+
+    const tryEndpoints = async () => {
+      const endpoints = [
+        "/brightspace/courses/enrolled",
+        "/brightspace/courses",
+        "/gemelo/courses",
+        `/brightspace/users/me/enrollments`,
+      ];
+      for (const ep of endpoints) {
+        try {
+          const d = await apiGet(ep);
+          const raw = Array.isArray(d) ? d
+            : (d?.Items || d?.items || d?.PagingInfo?.Bookmark
+                ? [] : d?.courses || d?.enrollments || []);
+          if (raw.length > 0) return raw;
+        } catch {
+          // try next
+        }
+      }
+      return [];
+    };
+
+    tryEndpoints()
+      .then((items) => setCourseList(items))
+      .catch(() => setCourseList([]))
+      .finally(() => setCourseListLoading(false));
+  }, [showCoursePanel]);
 
   const [outcomesMap, setOutcomesMap] = useState({});
   const [learningOutcomesPayload, setLearningOutcomesPayload] = useState(null);
@@ -1550,10 +1580,14 @@ export default function App() {
               coverageCountText,
               hasPrescription: Boolean(sum?.hasPrescription ?? s?.hasPrescription ?? false),
               mostCriticalMacro: s?.mostCriticalMacro ?? null,
-              pendingUngradedCount: sum?.pendingUngradedCount ?? 0,
-              pendingUngradedWeightPct: sum?.pendingUngradedWeightPct ?? 0,
-              overdueUnscoredCount: sum?.overdueUnscoredCount ?? 0,
-              overdueUnscoredWeightPct: sum?.overdueUnscoredWeightPct ?? 0,
+              // Nuevo: enviado sin nota (pendingSubmitted) y vencido sin registro (overdue)
+              pendingSubmittedCount: sum?.pendingSubmittedCount ?? 0,
+              pendingSubmittedWeightPct: sum?.pendingSubmittedWeightPct ?? 0,
+              overdueCount: sum?.overdueCount ?? 0,
+              overdueWeightPct: sum?.overdueWeightPct ?? 0,
+              // Aliases legacy
+              notSubmittedCount: sum?.overdueCount ?? sum?.notSubmittedCount ?? 0,
+              notSubmittedWeightPct: sum?.overdueWeightPct ?? sum?.notSubmittedWeightPct ?? 0,
             };
             row.route = suggestRouteForStudent(row, thr);
             return row;
@@ -1590,10 +1624,14 @@ export default function App() {
               coverageCountText,
               hasPrescription: Array.isArray(g?.prescription) && g.prescription.length > 0,
               mostCriticalMacro,
-              pendingUngradedCount: sum?.pendingUngradedCount ?? 0,
-              pendingUngradedWeightPct: sum?.pendingUngradedWeightPct ?? 0,
-              overdueUnscoredCount: sum?.overdueUnscoredCount ?? 0,
-              overdueUnscoredWeightPct: sum?.overdueUnscoredWeightPct ?? 0,
+              // Nuevo: enviado sin nota (pendingSubmitted) y vencido sin registro (overdue)
+              pendingSubmittedCount: sum?.pendingSubmittedCount ?? 0,
+              pendingSubmittedWeightPct: sum?.pendingSubmittedWeightPct ?? 0,
+              overdueCount: sum?.overdueCount ?? 0,
+              overdueWeightPct: sum?.overdueWeightPct ?? 0,
+              // Aliases legacy
+              notSubmittedCount: sum?.overdueCount ?? sum?.notSubmittedCount ?? 0,
+              notSubmittedWeightPct: sum?.overdueWeightPct ?? sum?.notSubmittedWeightPct ?? 0,
             };
 
             setStudentRows((prev) =>
@@ -1837,26 +1875,40 @@ const weakestAssignment = useMemo(() => {
   const avgCov = overview?.courseGradebook?.avgCoveragePct ?? null;
   const covDone = avgCov == null ? 0 : Math.max(0, Math.min(100, Number(avgCov)));
 
-  const avgPendingUngradedPct = useMemo(() => {
-    const direct = overview?.courseGradebook?.avgPendingUngradedPct;
-    if (direct != null && !Number.isNaN(Number(direct))) {
-      return Math.max(0, Math.min(100, Number(direct)));
+  // avgPendingSubmittedPct = enviado por el estudiante, aún sin nota numérica
+  const avgPendingSubmittedPct = useMemo(() => {
+    const v = overview?.courseGradebook?.avgPendingSubmittedPct;
+    if (v != null && !Number.isNaN(Number(v))) return Math.max(0, Math.min(100, Number(v)));
+    return 0;
+  }, [overview]);
+
+  // avgNotSubmittedPct = vencido sin ninguna señal de entrega (el verdadero "sin registro")
+  const avgNotSubmittedPct = useMemo(() => {
+    const gb = overview?.courseGradebook ?? {};
+    // Try all possible field names from different back versions
+    const v = gb.avgNotSubmittedPct ?? gb.avgOverdueWeightPct ?? gb.overdueWeightPct ?? gb.avgOverduePct;
+    if (v != null && !Number.isNaN(Number(v))) return Math.max(0, Math.min(100, Number(v)));
+    // Fallback: compute from studentsAtRisk average if overview fields are missing
+    const atRisk = Array.isArray(overview?.studentsAtRisk) ? overview.studentsAtRisk : [];
+    if (atRisk.length > 0) {
+      const vals = atRisk.map(s => Number(s.notSubmittedWeightPct ?? s.overdueWeightPct ?? 0)).filter(x => !isNaN(x));
+      if (vals.length > 0) return Math.min(100, vals.reduce((a, b) => a + b, 0) / vals.length);
     }
     return 0;
   }, [overview]);
 
-  const avgOverdueUnscoredPct = useMemo(() => {
-    const direct = overview?.courseGradebook?.avgOverdueUnscoredPct;
-    if (direct != null && !Number.isNaN(Number(direct))) {
-      return Math.max(0, Math.min(100, Number(direct)));
-    }
-    return 0;
-  }, [overview]);
+  // Alias para retrocompatibilidad con CoverageBars
+  const avgPendingUngradedPct = avgPendingSubmittedPct;
+  const avgOverdueUnscoredPct = avgNotSubmittedPct;
 
-  const covPending = Math.max(
-    0,
-    Math.min(100, avgPendingUngradedPct + avgOverdueUnscoredPct)
-  );
+  // covPending = lo que no está calificado, no está vencido y no está enviado pendiente
+  // Matemáticamente: 100 - calificado - enviado_sin_nota - vencido_sin_registro
+  const covPending = useMemo(() => {
+    const cov = Number(overview?.courseGradebook?.avgCoveragePct ?? 0);
+    const pending = avgPendingSubmittedPct;
+    const overdue = avgNotSubmittedPct;
+    return Math.max(0, Math.min(100, 100 - cov - pending - overdue));
+  }, [overview, avgPendingSubmittedPct, avgNotSubmittedPct]);
 
   const studentsCount = overview?.studentsCount ?? studentsList?.students?.count ?? studentRows.length ?? 0;
   const totalStudents = Number(studentsCount || 0) || 0;
@@ -1880,6 +1932,83 @@ const weakestAssignment = useMemo(() => {
     if (b > 0) return "solido";
     return "pending";
   }, [avgPerfPct, thresholds, overview]);
+
+
+  // Estudiantes prioritarios: nota < 5 | ítems vencidos | cobertura baja
+  // Fuente 1: overview.studentsAtRisk (disponible de inmediato, calculado en el back)
+  // Fuente 2: studentRows enriquecidos (disponible tras carga incremental)
+  const assignmentRiskData = useMemo(() => {
+    // Fuente 1: backend ya calculó
+    const backendRisk = Array.isArray(overview?.studentsAtRisk) ? overview.studentsAtRisk : [];
+    if (backendRisk.length > 0) {
+      const mapped = backendRisk.slice(0, 10).map((s) => {
+        const perf = s.currentPerformancePct;
+        const overduePct = Number(s.notSubmittedWeightPct ?? s.overdueWeightPct ?? 0);
+        const pendingPct = Number(s.pendingSubmittedWeightPct ?? 0);
+        const type = (perf != null && Number(perf) < 50)
+          ? "low_grade"
+          : overduePct > 0
+          ? "overdue"
+          : pendingPct > 0
+          ? "pending_submitted"
+          : "low_coverage";
+        return {
+          userId: s.userId,
+          name: s.displayName,
+          type,
+          notSubmittedWeightPct: overduePct,
+          pendingSubmittedWeightPct: pendingPct,
+          coveragePct: Number(s.coveragePct ?? 0),
+          currentPerformancePct: perf != null ? Number(perf) : null,
+          risk: s.risk,
+        };
+      });
+      // Ordenar: pendingSubmitted arriba, low_coverage medio, low_grade abajo (más urgentes visualmente al final)
+      const typeOrder = { pending_submitted: 0, low_coverage: 1, overdue: 2, low_grade: 3 };
+      return mapped.sort((a, b) => (typeOrder[a.type] ?? 2) - (typeOrder[b.type] ?? 2)).slice(0, 7);
+    }
+
+    // Fuente 2: derivar desde studentRows (carga incremental)
+    const loaded = studentRows.filter((s) => !s.isLoading);
+    if (!loaded.length) return [];
+
+    const toRow = (s, type) => ({
+      userId: s.userId,
+      name: s.displayName,
+      type,
+      notSubmittedWeightPct: Number(s.notSubmittedWeightPct ?? s.overdueWeightPct ?? 0),
+      pendingSubmittedWeightPct: Number(s.pendingSubmittedWeightPct ?? 0),
+      coveragePct: Number(s.coveragePct ?? 0),
+      currentPerformancePct: s.currentPerformancePct != null ? Number(s.currentPerformancePct) : null,
+      risk: s.risk,
+    });
+
+    const lowGrade = loaded
+      .filter((s) => s.currentPerformancePct != null && Number(s.currentPerformancePct) < 50)
+      .map((s) => toRow(s, "low_grade"))
+      .sort((a, b) => (a.currentPerformancePct ?? 0) - (b.currentPerformancePct ?? 0));
+
+    const overdue = loaded
+      .filter((s) => Number(s.notSubmittedWeightPct ?? s.overdueWeightPct ?? 0) > 0)
+      .map((s) => toRow(s, "overdue"))
+      .sort((a, b) => b.notSubmittedWeightPct - a.notSubmittedWeightPct);
+
+    const lowCov = loaded
+      .filter((s) => s.coveragePct != null && Number(s.coveragePct) < 60)
+      .map((s) => toRow(s, "low_coverage"))
+      .sort((a, b) => a.coveragePct - b.coveragePct);
+
+    const seen = new Set();
+    const merged = [];
+    // Orden: pendientes/baja-cobertura primero, críticos de nota abajo
+    for (const s of [...lowCov, ...overdue, ...lowGrade]) {
+      if (!seen.has(s.userId)) {
+        seen.add(s.userId);
+        merged.push(s);
+      }
+    }
+    return merged.slice(0, 7);
+  }, [overview, studentRows]);
 
   const filteredStudents = useMemo(() => {
     let list = Array.isArray(studentRows) ? [...studentRows] : [];
@@ -1938,31 +2067,34 @@ const contentKpis = useMemo(() => {
     return contentRhythmStatus(contentKpis?.progressRatio);
   }, [contentKpis]);
   const performanceBands = useMemo(() => {
-  const bands = [
-    { name: "Excelente", key: "excellent", value: 0, color: COLORS.ok },
-    { name: "Sólido", key: "solid", value: 0, color: COLORS.brand },
-    { name: "Seguimiento", key: "watch", value: 0, color: COLORS.watch },
-    { name: "Crítico", key: "critical", value: 0, color: COLORS.critical },
-    { name: "Sin datos", key: "pending", value: 0, color: COLORS.pending },
-  ];
+    // Aligned with dashboard thresholds (50 = critical, 70 = watch)
+    // Converted to 0-10 scale: 50% = 5.0, 70% = 7.0
+    const bands = [
+      { name: "Óptimo (≥7)", key: "solid", value: 0, students: [], color: COLORS.ok },
+      { name: "Seguimiento (5–7)", key: "watch", value: 0, students: [], color: COLORS.watch },
+      { name: "Crítico (<5)", key: "critical", value: 0, students: [], color: COLORS.critical },
+      { name: "Sin datos", key: "pending", value: 0, students: [], color: COLORS.pending },
+    ];
 
-  for (const s of studentRows) {
-    const p = s?.currentPerformancePct;
-    if (p == null || Number.isNaN(Number(p))) {
-      bands[4].value += 1;
-    } else if (Number(p) >= 85) {
-      bands[0].value += 1;
-    } else if (Number(p) >= 70) {
-      bands[1].value += 1;
-    } else if (Number(p) >= 50) {
-      bands[2].value += 1;
-    } else {
-      bands[3].value += 1;
+    for (const s of studentRows) {
+      const p = s?.currentPerformancePct;
+      if (p == null || Number.isNaN(Number(p))) {
+        bands[3].value += 1;
+        bands[3].students.push(s);
+      } else if (Number(p) >= 70) {
+        bands[0].value += 1;
+        bands[0].students.push(s);
+      } else if (Number(p) >= 50) {
+        bands[1].value += 1;
+        bands[1].students.push(s);
+      } else {
+        bands[2].value += 1;
+        bands[2].students.push(s);
+      }
     }
-  }
 
-  return bands;
-}, [studentRows]);
+    return bands;
+  }, [studentRows]);
 
   const sortedStudents = useMemo(() => {
     const list = filteredStudents.slice();
@@ -2010,8 +2142,16 @@ const contentKpis = useMemo(() => {
   const drawerPendingItems = Array.isArray(drawerGradebook?.pendingItems) ? drawerGradebook.pendingItems : [];
   const drawerMissingValues = Array.isArray(drawerGradebook?.missingValues) ? drawerGradebook.missingValues : [];
   const drawerQcFlags = Array.isArray(studentDetail?.qualityFlags) ? studentDetail.qualityFlags : [];
-  const drawerPendingUngradedPct = Number(drawerSummary?.pendingUngradedWeightPct ?? 0);
-  const drawerOverdueUnscoredPct = Number(drawerSummary?.overdueUnscoredWeightPct ?? 0);
+  // Drawer: usar nuevos campos semánticos
+  const drawerPendingSubmittedPct = Number(
+    drawerSummary?.pendingSubmittedWeightPct ?? drawerSummary?.pendingUngradedWeightPct ?? 0
+  );
+  const drawerOverduePct = Number(
+    drawerSummary?.overdueWeightPct ?? drawerSummary?.notSubmittedWeightPct ?? drawerSummary?.overdueUnscoredWeightPct ?? 0
+  );
+  // Aliases para compatibilidad con CoverageBars existente en drawer
+  const drawerPendingUngradedPct = drawerPendingSubmittedPct;
+  const drawerOverdueUnscoredPct = drawerOverduePct;
   const covGraded = Number(drawerSummary?.gradedItemsCount ?? drawerGradebook?.gradedItemsCount ?? 0) || 0;
   const covTotal = Number(drawerSummary?.totalItemsCount ?? drawerGradebook?.totalItemsCount ?? 0) || 0;
   const covText =
@@ -2061,6 +2201,151 @@ const contentKpis = useMemo(() => {
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--bg)", fontFamily: "var(--font)" }}>
+
+      {/* ── Course Panel Portal — rendered at root to avoid stacking context issues ── */}
+      {showCoursePanel && (
+        <div
+          style={{
+            position: "fixed", inset: 0, zIndex: 99999,
+            background: "rgba(15,23,42,0.55)", backdropFilter: "blur(3px)",
+            display: "flex", justifyContent: "flex-end",
+          }}
+          onClick={() => setShowCoursePanel(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="panel-slide"
+            style={{
+              width: "min(380px, 96vw)", height: "100%",
+              background: "var(--bg)",
+              boxShadow: "-8px 0 48px rgba(0,0,0,0.22)",
+              display: "flex", flexDirection: "column",
+              borderLeft: "1px solid var(--border)",
+            }}
+          >
+            {/* Header */}
+            <div style={{
+              padding: "18px 18px 14px",
+              borderBottom: "1px solid var(--border)",
+              background: "var(--card)",
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                <div>
+                  <div style={{ fontSize: 15, fontWeight: 900, color: "var(--text)", letterSpacing: "-0.02em" }}>
+                    📚 Mis cursos
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>
+                    Selecciona un curso o ingresa el ID
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowCoursePanel(false)}
+                  style={{
+                    background: "var(--bg)", border: "1px solid var(--border)",
+                    borderRadius: 8, padding: "4px 9px", cursor: "pointer",
+                    fontSize: 14, color: "var(--muted)", lineHeight: 1,
+                  }}
+                >✕</button>
+              </div>
+              {/* Inline ID search */}
+              <div style={{ marginTop: 12, display: "flex", gap: 6 }}>
+                <input
+                  value={orgUnitInput}
+                  onChange={(e) => setOrgUnitInput(e.target.value)}
+                  type="number"
+                  style={{
+                    flex: 1, border: "1px solid var(--border)", borderRadius: 8,
+                    padding: "8px 11px", fontWeight: 700, background: "var(--bg)",
+                    color: "var(--text)", fontSize: 13, outline: "none",
+                    fontFamily: "var(--font-mono)",
+                  }}
+                  placeholder="OrgUnitId…"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      const v = Number(orgUnitInput);
+                      if (v > 0) { setOrgUnitId(v); setShowCoursePanel(false); }
+                    }
+                  }}
+                />
+                <button
+                  className="btn btn-primary"
+                  style={{ paddingLeft: 14, paddingRight: 14, borderRadius: 8 }}
+                  onClick={() => {
+                    const v = Number(orgUnitInput);
+                    if (v > 0) { setOrgUnitId(v); setShowCoursePanel(false); }
+                  }}
+                >
+                  Ir →
+                </button>
+              </div>
+            </div>
+            {/* Course list */}
+            <div style={{ flex: 1, overflowY: "auto", padding: "10px 10px" }}>
+              {courseListLoading ? (
+                <div style={{ padding: "48px 20px", textAlign: "center" }}>
+                  <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}>
+                    <span className="pulse-dot" style={{ background: "var(--brand)", width: 10, height: 10 }} />
+                  </div>
+                  <div style={{ fontSize: 13, color: "var(--muted)", fontWeight: 600 }}>Cargando cursos…</div>
+                </div>
+              ) : courseList.length > 0 ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                  <div style={{ fontSize: 10, color: "var(--muted)", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em", padding: "4px 8px 6px" }}>
+                    {courseList.length} curso{courseList.length !== 1 ? "s" : ""}
+                  </div>
+                  {courseList.map((c, i) => {
+                    const cId = c.OrgUnitId || c.orgUnitId || c.Id || c.id;
+                    const cName = c.Name || c.name || c.DisplayName || c.displayName || `Curso ${cId}`;
+                    const cCode = c.Code || c.code || c.OrgUnitCode || "";
+                    const isActive = cId && Number(cId) === Number(orgUnitId);
+                    return (
+                      <button
+                        key={cId || i}
+                        onClick={() => {
+                          if (cId) { setOrgUnitId(Number(cId)); setOrgUnitInput(String(cId)); }
+                          setShowCoursePanel(false);
+                        }}
+                        style={{
+                          display: "flex", alignItems: "center", gap: 10,
+                          padding: "10px 10px", borderRadius: 10,
+                          border: isActive ? "1px solid var(--brand)" : "1px solid transparent",
+                          background: isActive ? "rgba(99,102,241,0.07)" : "var(--card)",
+                          cursor: "pointer", textAlign: "left",
+                          transition: "background 0.12s",
+                          width: "100%",
+                        }}
+                        onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = "var(--bg)"; }}
+                        onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = "var(--card)"; }}
+                      >
+                        <div style={{ width: 4, flexShrink: 0, alignSelf: "stretch", borderRadius: 999, background: isActive ? "var(--brand)" : "var(--border)" }} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", lineHeight: 1.4, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
+                            {cName}
+                          </div>
+                          <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2, fontFamily: "var(--font-mono)" }}>
+                            {cCode ? `${cCode} · ` : ""}ID {cId}
+                          </div>
+                        </div>
+                        {isActive && <div style={{ fontSize: 10, fontWeight: 800, color: "var(--brand)", flexShrink: 0 }}>Activo</div>}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div style={{ padding: "48px 20px", textAlign: "center" }}>
+                  <div style={{ fontSize: 36, marginBottom: 12, opacity: 0.4 }}>📭</div>
+                  <div style={{ fontSize: 13, color: "var(--text)", fontWeight: 700 }}>Sin cursos cargados</div>
+                  <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 6, lineHeight: 1.5 }}>
+                    El endpoint de cursos no retornó datos.<br />
+                    Usa el campo de ID arriba para navegar.
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={{ maxWidth: 1200, margin: "0 auto", padding: isMobile ? "12px" : "20px" }}>
         <div
           className="fade-up"
@@ -2073,61 +2358,71 @@ const contentKpis = useMemo(() => {
             marginBottom: 20,
           }}
         >
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <div
-                style={{
-                  fontSize: isMobile ? 18 : 22,
-                  fontWeight: 900,
-                  color: "var(--text)",
-                  letterSpacing: "-0.02em",
-                }}
-              >
-                Gemelo Digital
+          {/* ── Brand + Course breadcrumb ── */}
+          <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: isMobile ? 17 : 20, fontWeight: 900, color: "var(--text)", letterSpacing: "-0.03em" }}>
+                  Gemelo Digital
+                </span>
+                <span className="tag">Vista Docente</span>
               </div>
-              <span className="tag">Vista Docente</span>
-            </div>
-            <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 3 }}>
-              Curso{" "}
-              <strong style={{ fontFamily: "var(--font-mono)" }}>
-                {courseInfo?.Name || orgUnitId}
-              </strong>
+              <button
+                onClick={() => setShowCoursePanel(true)}
+                style={{
+                  display: "flex", alignItems: "center", gap: 5,
+                  background: "none", border: "none", cursor: "pointer",
+                  padding: 0, textAlign: "left",
+                }}
+                title="Cambiar de curso"
+              >
+                <span style={{ fontSize: 11, color: "var(--brand)", fontWeight: 700, fontFamily: "var(--font-mono)" }}>
+                  {courseInfo?.Name
+                    ? (courseInfo.Name.length > 55 ? courseInfo.Name.slice(0, 52) + "…" : courseInfo.Name)
+                    : `Curso ${orgUnitId}`}
+                </span>
+                <span style={{ fontSize: 10, color: "var(--muted)" }}>▾</span>
+              </button>
             </div>
           </div>
 
+          {/* ── Controls ── */}
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <input
-              value={orgUnitInput}
-              onChange={(e) => setOrgUnitInput(e.target.value)}
-              type="number"
-              style={{
-                width: 130,
-                border: "1px solid var(--border)",
-                borderRadius: 10,
-                padding: "8px 10px",
-                fontWeight: 700,
-                background: "var(--card)",
-                color: "var(--text)",
-                fontSize: 13,
-              }}
-              placeholder="OrgUnitId"
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  const v = Number(orgUnitInput);
-                  if (v > 0) setOrgUnitId(v);
-                }
-              }}
-            />
             <button
-              className="btn btn-primary"
-              onClick={() => {
-                const v = Number(orgUnitInput);
-                if (v > 0) setOrgUnitId(v);
-              }}
+              className="btn"
+              onClick={() => setShowCoursePanel(true)}
+              style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 700 }}
             >
-              Buscar
+              <span>📚</span>
+              <span>{isMobile ? "" : "Mis cursos"}</span>
             </button>
-            <button className="btn" onClick={() => setDarkMode((v) => !v)} title="Cambiar tema">
+
+            <div style={{ display: "flex", gap: 0, border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
+              <input
+                value={orgUnitInput}
+                onChange={(e) => setOrgUnitInput(e.target.value)}
+                type="number"
+                style={{
+                  width: 110, border: "none", borderRight: "1px solid var(--border)",
+                  padding: "8px 10px", fontWeight: 700,
+                  background: "var(--card)", color: "var(--text)", fontSize: 13,
+                  outline: "none",
+                }}
+                placeholder="OrgUnitId"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") { const v = Number(orgUnitInput); if (v > 0) setOrgUnitId(v); }
+                }}
+              />
+              <button
+                className="btn btn-primary"
+                style={{ borderRadius: 0, border: "none", paddingLeft: 12, paddingRight: 12 }}
+                onClick={() => { const v = Number(orgUnitInput); if (v > 0) setOrgUnitId(v); }}
+              >
+                →
+              </button>
+            </div>
+
+            <button className="btn" onClick={() => setDarkMode((v) => !v)} title="Cambiar tema" style={{ padding: "8px 10px" }}>
               {darkMode ? "☀️" : "🌙"}
             </button>
           </div>
@@ -2144,6 +2439,7 @@ const contentKpis = useMemo(() => {
             gridTemplateColumns: isMobile ? "1fr" : isNarrow ? "1fr 1fr" : "2fr 1fr 1fr 1fr",
             gap: 12,
             marginBottom: 12,
+            alignItems: "stretch",
           }}
         >
           <Card title="Gestión del curso" right={<StatusBadge status={courseStatus} />}>
@@ -2162,7 +2458,9 @@ const contentKpis = useMemo(() => {
                 sub={
                   avgCov == null || Number(avgCov) === 0
                     ? "Sin cobertura registrada"
-                    : `${fmtPct(covDone)} calificado · ${fmtPct(covPending)} pendiente`
+                    : avgPendingSubmittedPct > 0
+                    ? `${fmtPct(covDone)} calif. · ${fmtPct(avgPendingSubmittedPct)} pend. · ${fmtPct(avgNotSubmittedPct)} venc.`
+                    : `${fmtPct(covDone)} calificado · ${fmtPct(covPending)} sin entregar`
                 }
               />
               <Stat
@@ -2322,160 +2620,226 @@ const contentKpis = useMemo(() => {
               ) : (
                 <CoverageBars
                   donePct={covDone}
-                  pendingPct={avgPendingUngradedPct}
-                  overduePct={avgOverdueUnscoredPct}
+                  pendingPct={avgPendingSubmittedPct}
+                  overduePct={avgNotSubmittedPct}
                 />
               )}
             </div>
           </Card>
 
           <Card title="Riesgo académico">
-            <div style={{ width: "100%", height: 200 }}>
+            <div style={{ width: "100%", height: 180 }}>
               <ResponsiveContainer>
                 <PieChart>
-                  <Pie
-                    data={riskData}
-                    dataKey="value"
-                    nameKey="name"
-                    innerRadius={55}
-                    outerRadius={82}
-                    paddingAngle={3}
-                  >
+                  <Pie data={riskData} dataKey="value" nameKey="name" innerRadius={52} outerRadius={78} paddingAngle={3}>
                     {riskData.map((entry) => (
                       <Cell key={entry.key} fill={colorForRisk(entry.key)} />
                     ))}
                   </Pie>
-                  <Tooltip
-                    formatter={(value) => {
-                      const v = Number(value || 0);
-                      const pct = totalStudents > 0 ? (v / totalStudents) * 100 : 0;
-                      return [`${v} (${pct.toFixed(1)}%)`, "Estudiantes"];
-                    }}
-                  />
+                  <Tooltip formatter={(value) => {
+                    const v = Number(value || 0);
+                    const pct = totalStudents > 0 ? (v / totalStudents) * 100 : 0;
+                    return [`${v} (${pct.toFixed(1)}%)`, "Estudiantes"];
+                  }} />
                 </PieChart>
               </ResponsiveContainer>
             </div>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 12 }}>
               {riskData.map((r) => {
                 const count = Number(r.value || 0);
                 const pct = totalStudents > 0 ? (count / totalStudents) * 100 : 0;
                 return (
                   <div key={r.key} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <div
-                      style={{
-                        width: 8,
-                        height: 8,
-                        borderRadius: "50%",
-                        background: colorForRisk(r.key),
-                        flexShrink: 0,
-                      }}
-                    />
-                    <div style={{ flex: 1, fontSize: 12, color: "var(--text)", fontWeight: 600 }}>
-                      {r.name}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: 12,
-                        fontWeight: 800,
-                        fontFamily: "var(--font-mono)",
-                        color: colorForRisk(r.key),
-                      }}
-                    >
-                      {count}
-                    </div>
-                    <div style={{ fontSize: 11, color: "var(--muted)", width: 44, textAlign: "right" }}>
-                      {pct.toFixed(1)}%
-                    </div>
+                    <div style={{ width: 8, height: 8, borderRadius: "50%", background: colorForRisk(r.key), flexShrink: 0 }} />
+                    <div style={{ flex: 1, fontSize: 12, color: "var(--text)", fontWeight: 600 }}>{r.name}</div>
+                    <div style={{ fontSize: 12, fontWeight: 800, fontFamily: "var(--font-mono)", color: colorForRisk(r.key) }}>{count}</div>
+                    <div style={{ fontSize: 11, color: "var(--muted)", width: 44, textAlign: "right" }}>{pct.toFixed(1)}%</div>
                   </div>
                 );
               })}
             </div>
-          </Card>
 
-          <Card title="Foco académico del curso">
-            {weakestMacro ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 14, height: "100%" }}>
-                <div
-                  style={{
-                    padding: 14,
-                    border: "1px solid var(--border)",
-                    borderRadius: 12,
-                    background: "var(--card)",
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      gap: 8,
-                    }}
-                  >
-                    <span className="tag">{weakestMacro.code}</span>
-                    <StatusBadge
-                      status={
-                        weakestMacro.avgPct < thresholds.critical
-                          ? "critico"
-                          : weakestMacro.avgPct < thresholds.watch
-                          ? "observacion"
-                          : "solido"
-                      }
-                    />
+            <div style={{ height: 1, background: "var(--border)", margin: "4px 0 10px" }} />
+
+            <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
+              Distribución de notas
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+              {performanceBands.map((b) => {
+                const pct = totalStudents > 0 ? (b.value / totalStudents) * 100 : 0;
+                if (b.value === 0) return null;
+                return (
+                  <div key={b.key} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <div style={{ fontSize: 11, color: b.key === "critical" ? COLORS.critical : "var(--muted)", width: 78, flexShrink: 0, fontWeight: b.key === "critical" ? 800 : 600 }}>
+                      {b.name}
+                    </div>
+                    <div style={{ flex: 1, height: 6, borderRadius: 999, background: "rgba(148,163,184,0.15)", overflow: "hidden" }}>
+                      <div style={{ height: "100%", width: `${pct}%`, background: b.color, borderRadius: 999 }} />
+                    </div>
+                    <div style={{ fontSize: 12, fontWeight: 900, fontFamily: "var(--font-mono)", color: b.color, width: 24, textAlign: "right" }}>{b.value}</div>
                   </div>
+                );
+              })}
+            </div>
 
-                  <div style={{ marginTop: 10, fontSize: 12, color: "var(--muted)", fontWeight: 700 }}>
-                    Resultado de aprendizaje con menor desempeño
-                  </div>
-
-                  <div
-                    style={{
-                      fontSize: 34,
-                      fontWeight: 900,
-                      fontFamily: "var(--font-mono)",
-                      color: colorForPct(weakestMacro.avgPct, thresholds),
-                      marginTop: 6,
-                      lineHeight: 1,
-                    }}
-                  >
-                    {fmtPct(weakestMacro.avgPct)}
-                  </div>
-
-                  <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 8, lineHeight: 1.45 }}>
-                    {(weakestMacro.description || weakestMacro.name || "Sin descripción").slice(0, 140)}
-                  </div>
-
-                  <div style={{ marginTop: 10 }}>
-                    <ProgressBar
-                      value={weakestMacro.avgPct}
-                      color={colorForPct(weakestMacro.avgPct, thresholds)}
-                      animate={false}
-                    />
-                  </div>
-
-                  <div style={{ marginTop: 8, fontSize: 11, color: "var(--muted)", textAlign: "right" }}>
-                    Cobertura {fmtPct(weakestMacro.coveragePct)} · {weakestMacro.studentsWithData}/{weakestMacro.totalStudents} estudiantes
+            {avgNotSubmittedPct > 0 && (
+              <>
+                <div style={{ height: 1, background: "var(--border)", margin: "10px 0 8px" }} />
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700 }}>Vencidos sin registro</div>
+                  <div style={{ fontSize: 13, fontWeight: 900, fontFamily: "var(--font-mono)", color: COLORS.critical }}>
+                    {fmtPct(avgNotSubmittedPct)}
                   </div>
                 </div>
+                <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
+                  Promedio del curso · peso del gradebook
+                </div>
+              </>
+            )}
+          </Card>
 
-                <div
-                  style={{
-                    marginTop: "auto",
-                    fontSize: 11,
-                    color: "var(--muted)",
-                    fontFamily: "var(--font-mono)",
-                  }}
-                >
-                  ↺{" "}
-                  {raDashboard?.updatedAt
-                    ? String(raDashboard.updatedAt).replace("T", " ").slice(0, 16)
-                    : "Sin actualización"}
+          <Card
+            title="Estudiantes prioritarios"
+            right={
+              assignmentRiskData.length > 0
+                ? <span className="tag" style={{ background: "var(--critical-bg)", color: "#B42318" }}>Requieren atención</span>
+                : <StatusBadge status="solido" />
+            }
+          >
+            {studentRows.some((s) => s.isLoading) && !assignmentRiskData.length ? (
+              <div className="empty-state" style={{ minHeight: 120 }}>
+                <span className="pulse-dot" style={{ background: COLORS.brand, width: 10, height: 10 }} />
+                <span style={{ fontSize: 12 }}>Cargando datos de cobertura…</span>
+              </div>
+            ) : assignmentRiskData.length > 0 ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 4 }}>
+                  Nota &lt;5 · cobertura baja · ítems vencidos
+                </div>
+                <div style={{ overflowY: "auto", maxHeight: 420, paddingRight: 2, display: "flex", flexDirection: "column", gap: 6 }}>
+                {assignmentRiskData.map((item) => {
+                  const covColor = colorForPct(item.coveragePct, thresholds);
+                  const hasOverdue = item.notSubmittedWeightPct > 0;
+                  const hasLowGrade = item.type === "low_grade";
+                  const grade10 = item.currentPerformancePct != null ? (item.currentPerformancePct / 10).toFixed(1) : null;
+                  const gradeColor = item.currentPerformancePct != null ? colorForPct(item.currentPerformancePct, thresholds) : COLORS.pending;
+
+                  // Border/bg color priority: low grade > overdue > default
+                  const borderColor = hasLowGrade ? "#FECDCA" : hasOverdue ? "#FED7AA" : "var(--border)";
+                  const bgColor = hasLowGrade ? "var(--critical-bg)" : hasOverdue ? "var(--watch-bg)" : "var(--card)";
+
+                  return (
+                    <div
+                      key={item.userId}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => {
+                        const s = studentRows.find((r) => r.userId === item.userId);
+                        if (s) setSelectedStudent(s);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          const s = studentRows.find((r) => r.userId === item.userId);
+                          if (s) setSelectedStudent(s);
+                        }
+                      }}
+                      style={{
+                        border: `1px solid ${borderColor}`,
+                        borderRadius: 10,
+                        padding: "9px 11px",
+                        background: bgColor,
+                        cursor: "pointer",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 6,
+                        transition: "box-shadow 0.15s, transform 0.1s",
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.boxShadow = "0 2px 12px rgba(0,0,0,0.10)"; e.currentTarget.style.transform = "translateY(-1px)"; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.transform = "none"; }}
+                    >
+                      {/* Row 1: name + risk + reason tag */}
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6 }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 12, fontWeight: 800, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {item.name}
+                          </div>
+                          <div style={{ marginTop: 2 }}>
+                            {item.type === "pending_submitted" && (
+                              <span style={{ fontSize: 9, fontWeight: 800, color: COLORS.brand, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                                ⏳ Pendiente calificación
+                              </span>
+                            )}
+                            {item.type === "overdue" && (
+                              <span style={{ fontSize: 9, fontWeight: 800, color: COLORS.critical, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                                🔴 Vencido sin entrega
+                              </span>
+                            )}
+                            {item.type === "low_grade" && (
+                              <span style={{ fontSize: 9, fontWeight: 800, color: COLORS.critical, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                                ⚠️ Nota crítica
+                              </span>
+                            )}
+                            {item.type === "low_coverage" && (
+                              <span style={{ fontSize: 9, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                                📉 Cobertura baja
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <StatusBadge status={item.risk} />
+                      </div>
+
+                      {/* Row 2: metrics */}
+                      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                        {/* Grade pill */}
+                        {grade10 != null && (
+                          <div style={{ flexShrink: 0, textAlign: "center", minWidth: 38, padding: "3px 7px", borderRadius: 8, background: "rgba(255,255,255,0.6)", border: `1px solid ${gradeColor}30` }}>
+                            <div style={{ fontSize: 9, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>Nota</div>
+                            <div style={{ fontSize: 14, fontWeight: 900, fontFamily: "var(--font-mono)", color: gradeColor, lineHeight: 1.1 }}>{grade10}</div>
+                          </div>
+                        )}
+                        {/* Coverage bar */}
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 10, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", marginBottom: 3 }}>Cobertura</div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                            <div style={{ flex: 1, height: 5, borderRadius: 999, background: "rgba(148,163,184,0.2)", overflow: "hidden" }}>
+                              <div style={{ height: "100%", width: `${item.coveragePct}%`, background: covColor, borderRadius: 999 }} />
+                            </div>
+                            <span style={{ fontSize: 11, fontWeight: 900, fontFamily: "var(--font-mono)", color: covColor, flexShrink: 0 }}>
+                              {fmtPct(item.coveragePct)}
+                            </span>
+                          </div>
+                        </div>
+                        {/* Overdue pill */}
+                        {item.pendingSubmittedWeightPct > 0 && (
+                          <div style={{ flexShrink: 0, textAlign: "center", padding: "3px 7px", borderRadius: 8, background: "rgba(255,255,255,0.6)", border: "1px solid #FED7AA" }}>
+                            <div style={{ fontSize: 9, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>Pendiente</div>
+                            <div style={{ fontSize: 12, fontWeight: 900, fontFamily: "var(--font-mono)", color: COLORS.watch }}>{fmtPct(item.pendingSubmittedWeightPct)}</div>
+                          </div>
+                        )}
+                        {hasOverdue && (
+                          <div style={{ flexShrink: 0, textAlign: "center", padding: "3px 7px", borderRadius: 8, background: "rgba(255,255,255,0.6)", border: "1px solid #FECDCA" }}>
+                            <div style={{ fontSize: 9, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>Vencido</div>
+                            <div style={{ fontSize: 12, fontWeight: 900, fontFamily: "var(--font-mono)", color: COLORS.critical }}>{fmtPct(item.notSubmittedWeightPct)}</div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+                </div>
+                <div style={{ fontSize: 11, color: "var(--muted)", textAlign: "center", marginTop: 2 }}>
+                  Haz clic en un estudiante para ver su gemelo →
                 </div>
               </div>
             ) : (
-              <div className="empty-state" style={{ height: "100%" }}>
-                <span className="empty-state-icon">🎯</span>
-                <span style={{ fontSize: 12 }}>Sin información consolidada</span>
+              <div className="empty-state" style={{ minHeight: 160 }}>
+                <span className="empty-state-icon">✅</span>
+                <span style={{ fontSize: 12 }}>Sin estudiantes críticos</span>
+                <span style={{ fontSize: 11, color: "var(--muted)", textAlign: "center" }}>
+                  Todos los estudiantes tienen cobertura ≥ 60% y sin ítems vencidos.
+                </span>
               </div>
             )}
           </Card>
@@ -2485,10 +2849,10 @@ const contentKpis = useMemo(() => {
               style={{
                 display: "flex",
                 flexDirection: "column",
-                gap: 8,
-                maxHeight: 540,
+                gap: 10,
+                maxHeight: 560,
                 overflowY: "auto",
-                paddingRight: 4,
+                paddingRight: 2,
               }}
             >
               {learningOutcomesData
@@ -2502,6 +2866,8 @@ const contentKpis = useMemo(() => {
                       : m.avgPct < thresholds.watch
                       ? "observacion"
                       : "solido");
+                  const pctColor = colorForPct(m.avgPct, thresholds);
+                  const desc = (m.description || m.name || "").trim();
 
                   return (
                     <div
@@ -2513,30 +2879,16 @@ const contentKpis = useMemo(() => {
                         background: "var(--card)",
                       }}
                     >
-                      <div
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                          marginBottom: 4,
-                        }}
-                      >
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                           <span className="tag">{m.code}</span>
-                          <InfoTooltip text={(m.description || m.name || "Sin descripción disponible.").trim()} />
+                          <InfoTooltip text={desc || "Sin descripción disponible."} />
                         </div>
                         <StatusBadge status={computedStatus} />
                       </div>
 
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <span
-                          style={{
-                            fontWeight: 900,
-                            fontSize: 18,
-                            fontFamily: "var(--font-mono)",
-                            color: colorForPct(m.avgPct, thresholds),
-                          }}
-                        >
+                        <span style={{ fontWeight: 900, fontSize: 18, fontFamily: "var(--font-mono)", color: pctColor }}>
                           {fmtPct(m.avgPct)}
                         </span>
                         <span style={{ fontSize: 11, color: "var(--muted)" }}>
@@ -2546,9 +2898,10 @@ const contentKpis = useMemo(() => {
 
                       {m.coveragePct != null && (
                         <div style={{ marginTop: 4 }}>
-                          <ProgressBar value={m.coveragePct} color={colorForPct(m.coveragePct, thresholds)} />
-                          <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 3, textAlign: "right" }}>
-                            {fmtPct(m.coveragePct)} · {m.studentsWithData}/{m.totalStudents} estudiantes
+                          <ProgressBar value={m.coveragePct} color={pctColor} />
+                          <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 3, display: "flex", justifyContent: "space-between" }}>
+                            <span>{m.studentsWithData}/{m.totalStudents} estudiantes</span>
+                            <span style={{ fontFamily: "var(--font-mono)", fontWeight: 700 }}>{fmtPct(m.coveragePct)}</span>
                           </div>
                         </div>
                       )}
@@ -2993,22 +3346,73 @@ const contentKpis = useMemo(() => {
             {drawerTab === "unidades" && (
               <Card title="Subcompetencias / Unidades">
                 {drawerUnits.length > 0 ? (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {drawerUnits.map((u) => (
-                      <div key={u.code} style={{ display: "flex", flexDirection: "column", gap: 5, padding: "10px 12px", border: "1px solid var(--border)", borderRadius: 10 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                          <span className="tag">{u.code}</span>
-                          <StatusBadge status={u.status} />
-                        </div>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                          <div style={{ fontFamily: "var(--font-mono)", fontSize: 18, fontWeight: 900, color: colorForPct(u.pct, thresholds) }}>
-                            {fmtPct(u.pct)}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    {drawerUnits.map((u) => {
+                      // Find matching RA description from learningOutcomesData
+                      const raInfo = learningOutcomesData.find(
+                        (r) => String(r.code).toUpperCase() === String(u.code).toUpperCase()
+                      );
+                      const raDesc = raInfo?.description || raInfo?.name || null;
+                      const pctColor = colorForPct(u.pct, thresholds);
+                      const evCount = (u.evidence || []).length;
+                      return (
+                        <div key={u.code} style={{ border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
+                          {/* Header strip */}
+                          <div style={{
+                            display: "flex", justifyContent: "space-between", alignItems: "center",
+                            padding: "10px 14px", background: "var(--bg)", borderBottom: "1px solid var(--border)"
+                          }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                              <span className="tag" style={{ fontWeight: 900, fontSize: 12 }}>{u.code}</span>
+                              <span style={{ fontSize: 13, fontWeight: 900, fontFamily: "var(--font-mono)", color: pctColor }}>
+                                {fmtPct(u.pct)}
+                              </span>
+                            </div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                              {evCount > 0 && (
+                                <span style={{ fontSize: 11, color: "var(--muted)", background: "var(--card)", border: "1px solid var(--border)", borderRadius: 6, padding: "2px 7px" }}>
+                                  {evCount} evidencia{evCount !== 1 ? "s" : ""}
+                                </span>
+                              )}
+                              <StatusBadge status={u.status} />
+                            </div>
                           </div>
-                          <div style={{ fontSize: 11, color: "var(--muted)" }}>{(u.evidence || []).length} evidencias</div>
+                          {/* Body */}
+                          <div style={{ padding: "10px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+                            {raDesc && (
+                              <div style={{
+                                fontSize: 12, color: "var(--text)", lineHeight: 1.55, fontWeight: 500,
+                                padding: "8px 10px", background: "var(--bg)", borderRadius: 8,
+                                borderLeft: `3px solid ${pctColor}`
+                              }}>
+                                {raDesc}
+                              </div>
+                            )}
+                            <ProgressBar value={u.pct} color={pctColor} />
+                            {/* Evidence list */}
+                            {(u.evidence || []).length > 0 && (
+                              <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 2 }}>
+                                {(u.evidence || []).map((ev, i) => {
+                                  const evPct = ev.scorePct ?? ev.pct ?? null;
+                                  return (
+                                    <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11, color: "var(--muted)", gap: 8 }}>
+                                      <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                        📄 {ev.name || ev.title || `Evidencia ${i + 1}`}
+                                      </span>
+                                      {evPct != null && (
+                                        <span style={{ fontFamily: "var(--font-mono)", fontWeight: 800, color: colorForPct(evPct, thresholds), flexShrink: 0 }}>
+                                          {fmtPct(evPct)}
+                                        </span>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
                         </div>
-                        <ProgressBar value={u.pct} color={colorForPct(u.pct, thresholds)} />
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 ) : (
                   <div className="empty-state">
@@ -3084,6 +3488,6 @@ const contentKpis = useMemo(() => {
           </div>
         )}
       </Drawer>
-    </div>
+      </div>
   );
 }
