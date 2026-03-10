@@ -1,4 +1,3 @@
-# app/services/gemelo_service.py
 from __future__ import annotations
 
 import asyncio
@@ -35,7 +34,50 @@ def _is_graded_value(v: Dict[str, Any]) -> bool:
 
     return bool(v.get("DisplayedGrade") or v.get("LastModified"))
 
+def _strip_html(text: Any) -> str:
+    s = str(text or "")
+    s = re.sub(r"<[^>]+>", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
 
+
+def _looks_like_not_submitted(comment_html: Any) -> bool:
+    txt = _strip_html(comment_html).lower()
+    if not txt:
+        return False
+
+    patterns = [
+        "no entrego",
+        "no entregó",
+        "sin entrega",
+        "no presentó",
+        "no presento",
+        "not submitted",
+        "missing submission",
+        "did not submit",
+        "no submission",
+    ]
+    return any(p in txt for p in patterns)
+
+
+def _is_grade_zero(points_num: Any, displayed: Any) -> bool:
+    try:
+        if points_num is not None and float(points_num) == 0.0:
+            return True
+    except Exception:
+        pass
+
+    disp = str(displayed or "").strip().lower()
+    return disp in {"0%", "0.0%", "0"}
+
+def _parse_iso_dt(value: Any) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except Exception:
+        return None
+    
 def _as_items_list(classlist_resp: Any) -> List[Dict[str, Any]]:
     """Normaliza la respuesta de classlist a una lista de dicts."""
     if classlist_resp is None:
@@ -97,7 +139,6 @@ def _as_dict(obj: Any) -> Dict[str, Any]:
     if isinstance(obj, (str, int, float, bool, list, tuple, set)):
         return {}
 
-    # Pydantic v2
     if hasattr(obj, "model_dump"):
         try:
             result = obj.model_dump()
@@ -106,7 +147,6 @@ def _as_dict(obj: Any) -> Dict[str, Any]:
         except Exception:
             pass
 
-    # Pydantic v1
     if hasattr(obj, "dict"):
         try:
             result = obj.dict()
@@ -115,7 +155,6 @@ def _as_dict(obj: Any) -> Dict[str, Any]:
         except Exception:
             pass
 
-    # Objeto genérico con __dict__
     try:
         return {
             k: v for k, v in vars(obj).items()
@@ -132,7 +171,6 @@ def _get_thresholds(course_cfg: Any, legacy_cfg: Any) -> Dict[str, float]:
         if cfg is None or cfg is ...:
             continue
 
-        # Intento directo en atributos (Pydantic/dataclass)
         try:
             scale = getattr(cfg, "scale", None)
             if scale is not None and scale is not ...:
@@ -144,7 +182,6 @@ def _get_thresholds(course_cfg: Any, legacy_cfg: Any) -> Dict[str, float]:
         except Exception:
             pass
 
-        # Intento vía _as_dict
         try:
             d = _as_dict(cfg)
             sc = d.get("scale")
@@ -165,7 +202,6 @@ def _get_scale_settings(legacy_cfg: Any) -> Tuple[str, float]:
     if legacy_cfg is None or legacy_cfg is ...:
         return scale_type, max_level_points
 
-    # Intento directo en atributos
     try:
         scale = getattr(legacy_cfg, "scale", None)
         if scale is not None and scale is not ...:
@@ -182,7 +218,6 @@ def _get_scale_settings(legacy_cfg: Any) -> Tuple[str, float]:
     except Exception:
         pass
 
-    # Fallback vía _as_dict
     try:
         d = _as_dict(legacy_cfg)
         sc = d.get("scale", {})
@@ -200,6 +235,23 @@ def _get_scale_settings(legacy_cfg: Any) -> Tuple[str, float]:
         pass
 
     return scale_type, max_level_points
+
+def _text_has_no_submission_signal(text: Any) -> bool:
+    s = str(text or "").strip().lower()
+    if not s:
+        return False
+
+    patterns = [
+        "no entrego",
+        "no entregó",
+        "no presento",
+        "no presentó",
+        "sin entrega",
+        "no submission",
+        "not submitted",
+        "did not submit",
+    ]
+    return any(p in s for p in patterns)
 
 
 # =========================================================
@@ -435,6 +487,14 @@ def _lookup_criterion_max_points(
 # Gradebook helpers
 # =========================================================
 
+def _parse_due_datetime(raw: Any) -> Optional[datetime]:
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except Exception:
+        return None
+    
 def _is_graded(points_num: Any, points_den: Any) -> bool:
     try:
         return (
@@ -624,7 +684,6 @@ class GemeloService:
                 if uid is not None:
                     student_ids.append(uid)
 
-        # Cargar config de forma segura
         try:
             bundle = load_course_bundle(orgUnitId)
             course_cfg = bundle.get("course") if isinstance(bundle, dict) else None
@@ -648,6 +707,8 @@ class GemeloService:
                     "avgCurrentPerformancePct": 0.0,
                     "avgCoveragePct": 0.0,
                     "avgNotSubmittedPct": 0.0,
+                    "avgPendingUngradedPct": 0.0,
+                    "avgOverdueUnscoredPct": 0.0,
                     "avgGradedItemsCount": 0,
                     "avgTotalItemsCount": 0,
                     "coverageCountText": "0/0",
@@ -667,6 +728,8 @@ class GemeloService:
         graded_counts: List[float] = []
         total_counts: List[float] = []
         not_submitted_vals: List[float] = []
+        pending_ungraded_vals: List[float] = []
+        overdue_unscored_vals: List[float] = []
         macro_acc: Dict[str, List[float]] = {}
 
         for g in results:
@@ -675,11 +738,9 @@ class GemeloService:
                 continue
 
             summary = g.get("summary") or {}
-
             r = summary.get("risk") or "pending"
             risk_dist[r] = risk_dist.get(r, 0) + 1
 
-            # macro promedio
             for m in (g.get("macroUnits") or []):
                 code = str(m.get("code", ""))
                 pct = m.get("pct")
@@ -696,6 +757,8 @@ class GemeloService:
                 ("gradedItemsCount", graded_counts),
                 ("totalItemsCount", total_counts),
                 ("notSubmittedWeightPct", not_submitted_vals),
+                ("pendingUngradedWeightPct", pending_ungraded_vals),
+                ("overdueUnscoredWeightPct", overdue_unscored_vals),
             ):
                 val = summary.get(key)
                 if val is not None:
@@ -712,6 +775,8 @@ class GemeloService:
         avg_graded = int(round(_safe_avg(graded_counts))) if graded_counts else 0
         avg_total = int(round(_safe_avg(total_counts))) if total_counts else 0
         avg_not_submitted = _safe_avg(not_submitted_vals)
+        avg_pending_ungraded = _safe_avg(pending_ungraded_vals)
+        avg_overdue_unscored = _safe_avg(overdue_unscored_vals)
 
         macro_out = sorted(
             [
@@ -735,7 +800,6 @@ class GemeloService:
 
         alerts: List[Dict[str, Any]] = []
 
-        # A) Cobertura
         pending_pct = round(max(0.0, 100.0 - float(avg_cov)), 2)
         sev_cov = "critico" if avg_cov < 40 else ("observacion" if avg_cov < 70 else "solido")
         alerts.append(
@@ -759,7 +823,6 @@ class GemeloService:
             }
         )
 
-        # B) Nota promedio
         if avg_perf == 0.0 and avg_cov > 0.0:
             alerts.append(
                 {
@@ -789,7 +852,6 @@ class GemeloService:
                     }
                 )
 
-        # C) Concentración de riesgo alto
         total = len(student_ids)
         high = int(risk_dist.get("alto", 0) or 0)
         pct_high = round((high / total) * 100.0, 2) if total > 0 else 0.0
@@ -817,7 +879,6 @@ class GemeloService:
                 }
             )
 
-        # D) Macrocompetencia más comprometida
         if macro_out:
             worst = sorted(macro_out, key=lambda x: float(x.get("avgPct") or 0.0))[0]
             worst_status = worst.get("status")
@@ -842,6 +903,27 @@ class GemeloService:
                     }
                 )
 
+        if avg_not_submitted > 0:
+            sev_not_submitted = (
+                "critico"
+                if avg_not_submitted >= 25
+                else ("observacion" if avg_not_submitted >= 10 else "solido")
+            )
+            alerts.append(
+                {
+                    "id": "not_submitted_overdue",
+                    "severity": sev_not_submitted,
+                    "title": "Entregas no enviadas",
+                    "message": (
+                        f"En promedio, {avg_not_submitted:.2f}% del peso evaluativo "
+                        "corresponde a actividades vencidas no entregadas."
+                    ),
+                    "kpis": {
+                        "avgNotSubmittedPct": avg_not_submitted,
+                    },
+                }
+            )
+
         return {
             "orgUnitId": orgUnitId,
             "studentsCount": len(student_ids),
@@ -849,14 +931,16 @@ class GemeloService:
             "courseGradebook": {
                 "avgCurrentPerformancePct": avg_perf,
                 "avgCoveragePct": avg_cov,
-                "avgNotSubmittedPct": avg_not_submitted,          # ← para la barra roja
+                "avgNotSubmittedPct": avg_not_submitted,
+                "avgPendingUngradedPct": avg_pending_ungraded,
+                "avgOverdueUnscoredPct": avg_overdue_unscored,
                 "avgGradedItemsCount": avg_graded,
                 "avgTotalItemsCount": avg_total,
-                "coverageCountText": (                             # ← corregido (era ...)
+                "coverageCountText": (
                     f"{avg_graded}/{avg_total}" if avg_total else "0/0"
-                ),
-                "status": status_from_pct(avg_perf, thresholds),
-            },
+            ),
+            "status": status_from_pct(avg_perf, thresholds),
+        },
             "globalRiskDistribution": risk_dist,
             "thresholds": thresholds,
             "alerts": alerts,
@@ -884,7 +968,6 @@ class GemeloService:
         thresholds = _get_thresholds(course_cfg, cfg)
         scale_type, max_level_points = _get_scale_settings(cfg)
 
-        # 1) rol
         try:
             fn = getattr(self.bs, "get_my_enrollment", None)
             if callable(fn):
@@ -902,7 +985,6 @@ class GemeloService:
         except Exception as e:
             qc_flags.append({"type": "role_resolve_failed", "message": str(e)})
 
-        # Forzar modo docente en desarrollo
         force_teacher_mode = True
         if force_teacher_mode:
             access_level = "teacher"
@@ -916,7 +998,6 @@ class GemeloService:
         is_teacher = access_level in ("teacher", "admin")
         is_admin = access_level == "admin"
 
-        # 2) rúbricas -> units_acc
         units_acc: Dict[str, List[Tuple[float, float, Dict[str, Any]]]] = {}
 
         rubrics_cfg = None
@@ -1011,7 +1092,6 @@ class GemeloService:
                         continue
                     outcome_by_criterion[str(int(cid))] = co
 
-                # Modo A: learningUnits
                 learning_units = (
                     getattr(rubric_cfg, "learningUnits", None)
                     if not isinstance(rubric_cfg, dict)
@@ -1061,7 +1141,6 @@ class GemeloService:
                             )
                     continue
 
-                # Modo B: criteriaMap
                 criteria_map = (
                     getattr(rubric_cfg, "criteriaMap", None)
                     if not isinstance(rubric_cfg, dict)
@@ -1116,7 +1195,6 @@ class GemeloService:
                         )
                     )
 
-        # Consolidar units
         units: List[Dict[str, Any]] = sorted(
             [
                 {
@@ -1142,12 +1220,11 @@ class GemeloService:
         gradebook_block: Dict[str, Any] = {}
         projection_block: Dict[str, Any] = {}
 
-        # --------------------------------------------------
-        # Gradebook inner function
-        # --------------------------------------------------
         async def _compute_gradebook(include_evidences: bool) -> Dict[str, Any]:
             list_items_fn = getattr(self.bs, "list_grade_items", None)
             get_value_fn = getattr(self.bs, "get_grade_value", None)
+            list_dropbox_fn = getattr(self.bs, "list_dropbox_folders", None)
+
             if not (callable(list_items_fn) and callable(get_value_fn)):
                 qc_flags.append(
                     {
@@ -1187,6 +1264,48 @@ class GemeloService:
                     if int(it.get("Id")) not in exclude_ids
                 ]
 
+            # Mapa folderId -> due date desde Dropbox
+            dropbox_due_by_folder_id: Dict[int, Optional[datetime]] = {}
+            if callable(list_dropbox_fn):
+                try:
+                    folders = await list_dropbox_fn(orgUnitId)
+                    if isinstance(folders, dict):
+                        folders = folders.get("Items") or folders.get("items") or []
+                    if isinstance(folders, list):
+                        for f in folders:
+                            if not isinstance(f, dict) or f.get("Id") is None:
+                                continue
+                            fid = int(f["Id"])
+                            due_raw = (
+                                f.get("DueDate")
+                                or f.get("EndDate")
+                                or f.get("StartDate")
+                            )
+                            dropbox_due_by_folder_id[fid] = _parse_iso_dt(due_raw)
+                except Exception as e:
+                    qc_flags.append(
+                        {
+                            "type": "dropbox_due_lookup_failed",
+                            "message": str(e),
+                        }
+                    )
+
+            def _due_date_for_grade_item(it: Dict[str, Any]) -> Optional[datetime]:
+                assoc = it.get("AssociatedTool") or {}
+                tool_id = assoc.get("ToolId")
+                tool_item_id = assoc.get("ToolItemId")
+
+                # Dropbox / Assignments suele venir con ToolId 2000
+                if tool_id == 2000 and tool_item_id is not None:
+                    try:
+                        return dropbox_due_by_folder_id.get(int(tool_item_id))
+                    except Exception:
+                        return None
+
+                return _parse_iso_dt(
+                    it.get("DueDate") or it.get("EndDate") or it.get("dueDate")
+                )
+
             def _is_404(err: Exception) -> bool:
                 msg = str(err or "")
                 return (
@@ -1195,14 +1314,19 @@ class GemeloService:
                     or msg.strip().startswith("404")
                 )
 
-            values = []
-            missing_values = []
+            values: List[Dict[str, Any]] = []
+            missing_values: List[Dict[str, Any]] = []
 
             for it in items_in_scope:
                 gid = int(it["Id"])
                 try:
                     val = await get_value_fn(orgUnitId, gid, userId)
-                    values.append({"item": it, "value": val if isinstance(val, dict) else {}})
+                    values.append(
+                        {
+                            "item": it,
+                            "value": val if isinstance(val, dict) else {},
+                        }
+                    )
                 except Exception as e:
                     if _is_404(e):
                         missing_values.append(
@@ -1231,8 +1355,12 @@ class GemeloService:
             graded_weight = 0.0
             graded_items_count = 0
             total_items_count = 0
-            not_submitted_count = 0
-            not_submitted_weight = 0.0
+
+            pending_ungraded_count = 0
+            pending_ungraded_weight = 0.0
+
+            overdue_unscored_count = 0
+            overdue_unscored_weight = 0.0
 
             evidences: List[Dict[str, Any]] = []
             pending_items: List[Dict[str, Any]] = []
@@ -1250,36 +1378,32 @@ class GemeloService:
                 weighted_num = val.get("WeightedNumerator")
                 weighted_den = val.get("WeightedDenominator")
 
+                due_dt = _due_date_for_grade_item(it)
+                is_overdue = bool(due_dt and due_dt < _now)
+
                 has_grade = _is_graded(points_num, points_den)
 
-                # No enviado: sin calificar + vencido
-                if not has_grade:
-                    due_raw = (
-                        it.get("DueDate")
-                        or it.get("EndDate")
-                        or it.get("dueDate")
-                    )
-                    if due_raw:
-                        try:
-                            due_dt = datetime.fromisoformat(
-                                str(due_raw).replace("Z", "+00:00")
-                            )
-                            if due_dt < _now:
-                                not_submitted_count += 1
-                                not_submitted_weight += w
-                        except Exception:
-                            pass
-
                 score_pct = None
+                evidence_status = "pending"
+
                 if has_grade:
                     try:
-                        score_pct = round(
-                            (float(points_num) / float(points_den)) * 100.0, 2
-                        )
+                        score_pct = round((float(points_num) / float(points_den)) * 100.0, 2)
                     except Exception:
-                        pass
+                        score_pct = None
+
                     graded_items_count += 1
                     graded_weight += w
+                    evidence_status = "graded"
+                else:
+                    if is_overdue:
+                        overdue_unscored_count += 1
+                        overdue_unscored_weight += w
+                        evidence_status = "overdue_unscored"
+                    else:
+                        pending_ungraded_count += 1
+                        pending_ungraded_weight += w
+                        evidence_status = "pending"
 
                 if has_grade and weighted_num is not None and weighted_den is not None:
                     if _num(weighted_den, 0.0) > 0:
@@ -1292,20 +1416,23 @@ class GemeloService:
                             "name": it.get("Name"),
                             "weightPct": w,
                             "scorePct": score_pct,
-                            "status": (
-                                "pending"
-                                if score_pct is None
-                                else status_from_pct(score_pct, thresholds)
-                            ),
+                            "status": evidence_status,
+                            "isGraded": has_grade,
+                            "isOverdue": is_overdue,
+                            "dueDate": due_dt.isoformat() if due_dt else None,
                             "lastModified": val.get("LastModified"),
                         }
                     )
-                    if score_pct is None:
+
+                    if not has_grade:
                         pending_items.append(
                             {
                                 "gradeObjectId": int(it.get("Id")),
                                 "name": it.get("Name"),
                                 "weightPct": w,
+                                "status": evidence_status,
+                                "isOverdue": is_overdue,
+                                "dueDate": due_dt.isoformat() if due_dt else None,
                             }
                         )
 
@@ -1320,7 +1447,7 @@ class GemeloService:
 
             # Fallback si no hay ponderados
             if current_perf_pct is None:
-                acc = []
+                acc: List[Tuple[float, float]] = []
                 for row in values:
                     it = row["item"]
                     val = row["value"] or {}
@@ -1340,19 +1467,27 @@ class GemeloService:
                 round((graded_weight / total_weight) * 100.0, 2)
                 if total_weight else 0.0
             )
-            pending_weight_pct = round(max(0.0, 100.0 - coverage_pct), 2)
+
+            pending_ungraded_weight_pct = (
+                round((pending_ungraded_weight / total_weight) * 100.0, 2)
+                if total_weight else 0.0
+            )
+
+            overdue_unscored_weight_pct = (
+                round((overdue_unscored_weight / total_weight) * 100.0, 2)
+                if total_weight else 0.0
+            )
 
             out: Dict[str, Any] = {
                 "currentPerformancePct": current_perf_pct,
                 "coveragePct": coverage_pct,
-                "pendingWeightPct": pending_weight_pct,
+                "pendingWeightPct": round(max(0.0, 100.0 - coverage_pct), 2),
+                "pendingUngradedCount": pending_ungraded_count,
+                "pendingUngradedWeightPct": pending_ungraded_weight_pct,
+                "overdueUnscoredCount": overdue_unscored_count,
+                "overdueUnscoredWeightPct": overdue_unscored_weight_pct,
                 "gradedItemsCount": graded_items_count,
                 "totalItemsCount": total_items_count,
-                "notSubmittedCount": not_submitted_count,
-                "notSubmittedWeightPct": (
-                    round((not_submitted_weight / total_weight) * 100.0, 2)
-                    if total_weight else 0.0
-                ),
                 "status": status_from_pct(current_perf_pct, thresholds),
             }
 
@@ -1377,7 +1512,6 @@ class GemeloService:
             qc_flags.append({"type": "gradebook_compute_failed", "message": str(e)})
             gradebook_block = {}
 
-        # Riesgo
         globalPct = (
             round(sum(u["pct"] for u in units) / len(units), 1) if units else None
         )
@@ -1391,7 +1525,6 @@ class GemeloService:
 
         prescription = self._apply_prescription(cfg, units, thresholds)
 
-        # Proyección (solo teacher)
         if (
             is_teacher
             and gradebook_block
@@ -1458,7 +1591,6 @@ class GemeloService:
                 )
                 projection_block = {}
 
-        # modelType
         model_type = None
         if cfg is not None:
             model_type = (
@@ -1488,7 +1620,6 @@ class GemeloService:
                 "classlistRoleName": role_ctx.get("classlistRoleName"),
             }
 
-        # Ocultar detalle sensible para no-teacher
         if not is_teacher:
             gradebook_block = {
                 "currentPerformancePct": gradebook_block.get("currentPerformancePct"),
@@ -1530,8 +1661,10 @@ class GemeloService:
                 ),
                 "gradedItemsCount": graded_items_count,
                 "totalItemsCount": total_items_count,
-                "notSubmittedCount": gradebook_block.get("notSubmittedCount", 0),
-                "notSubmittedWeightPct": gradebook_block.get("notSubmittedWeightPct", 0.0),
+                "pendingUngradedCount": gradebook_block.get("pendingUngradedCount", 0),
+                "pendingUngradedWeightPct": gradebook_block.get("pendingUngradedWeightPct", 0.0),
+                "overdueUnscoredCount": gradebook_block.get("overdueUnscoredCount", 0),
+                "overdueUnscoredWeightPct": gradebook_block.get("overdueUnscoredWeightPct", 0.0),
                 "coverageCountText": (
                     f"{graded_items_count}/{total_items_count}"
                     if total_items_count
@@ -1560,11 +1693,13 @@ class GemeloService:
         """
         Devuelve por userId:
         - coveragePct / gradedItemsCount / totalItemsCount / coverageCountText
-        - notSubmittedCount / notSubmittedWeightPct  (vencidos sin entrega)
-        - currentPerformancePct (preferido: WeightedNumerator/Denominator; fallback: points)
+        - pendingUngradedCount / pendingUngradedWeightPct
+        - overdueUnscoredCount / overdueUnscoredWeightPct
+        - currentPerformancePct
         """
         list_items_fn = getattr(self.bs, "list_grade_items", None)
         list_values_fn = getattr(self.bs, "list_grade_values_for_user", None)
+        list_dropbox_fn = getattr(self.bs, "list_dropbox_folders", None)
 
         if not (callable(list_items_fn) and callable(list_values_fn)):
             return {}
@@ -1599,7 +1734,6 @@ class GemeloService:
 
         total_items_count = len(items_in_scope)
 
-        # gradeObjectId -> weight
         item_weight_by_id: Dict[int, float] = {}
         total_weight = 0.0
         for it in items_in_scope:
@@ -1608,20 +1742,45 @@ class GemeloService:
             item_weight_by_id[gid] = w
             total_weight += w
 
-        # gradeObjectId -> due_date
+        dropbox_due_by_folder_id: Dict[int, Optional[datetime]] = {}
+        if callable(list_dropbox_fn):
+            try:
+                folders = await list_dropbox_fn(orgUnitId)
+                if isinstance(folders, dict):
+                    folders = folders.get("Items") or folders.get("items") or []
+                if isinstance(folders, list):
+                    for f in folders:
+                        if not isinstance(f, dict) or f.get("Id") is None:
+                            continue
+                        fid = int(f["Id"])
+                        due_raw = (
+                            f.get("DueDate")
+                            or f.get("EndDate")
+                            or f.get("StartDate")
+                        )
+                        dropbox_due_by_folder_id[fid] = _parse_iso_dt(due_raw)
+            except Exception:
+                pass
+
+        def _due_date_for_grade_item(it: Dict[str, Any]) -> Optional[datetime]:
+            assoc = it.get("AssociatedTool") or {}
+            tool_id = assoc.get("ToolId")
+            tool_item_id = assoc.get("ToolItemId")
+
+            if tool_id == 2000 and tool_item_id is not None:
+                try:
+                    return dropbox_due_by_folder_id.get(int(tool_item_id))
+                except Exception:
+                    return None
+
+            return _parse_iso_dt(
+                it.get("DueDate") or it.get("EndDate") or it.get("dueDate")
+            )
+
         due_date_by_id: Dict[int, Optional[datetime]] = {}
         for it in items_in_scope:
             gid = int(it["Id"])
-            due_raw = it.get("DueDate") or it.get("EndDate") or it.get("dueDate")
-            if due_raw:
-                try:
-                    due_date_by_id[gid] = datetime.fromisoformat(
-                        str(due_raw).replace("Z", "+00:00")
-                    )
-                except Exception:
-                    due_date_by_id[gid] = None
-            else:
-                due_date_by_id[gid] = None
+            due_date_by_id[gid] = _due_date_for_grade_item(it)
 
         _now = datetime.now(timezone.utc)
 
@@ -1643,21 +1802,31 @@ class GemeloService:
             graded_weight = 0.0
             weighted_num_sum = 0.0
             weighted_den_sum = 0.0
-            not_submitted_count = 0
-            not_submitted_weight_sum = 0.0
+
+            pending_ungraded_count = 0
+            pending_ungraded_weight_sum = 0.0
+
+            overdue_unscored_count = 0
+            overdue_unscored_weight_sum = 0.0
+
             points_acc: List[Tuple[float, float]] = []
 
             for gid, w in item_weight_by_id.items():
                 v = by_id.get(gid) or {}
                 is_graded_v = _is_graded_value(v)
+                due_dt = due_date_by_id.get(gid)
+                is_overdue = bool(due_dt and due_dt < _now)
 
                 if is_graded_v:
                     graded_count += 1
                     graded_weight += w
-                elif due_date_by_id.get(gid) is not None:
-                    if due_date_by_id[gid] < _now:
-                        not_submitted_count += 1
-                        not_submitted_weight_sum += w
+                else:
+                    if is_overdue:
+                        overdue_unscored_count += 1
+                        overdue_unscored_weight_sum += w
+                    else:
+                        pending_ungraded_count += 1
+                        pending_ungraded_weight_sum += w
 
                 wn = v.get("WeightedNumerator")
                 wd = v.get("WeightedDenominator")
@@ -1682,8 +1851,12 @@ class GemeloService:
                 round((graded_weight / total_weight) * 100.0, 1)
                 if total_weight > 0 else 0.0
             )
-            not_submitted_weight_pct = (
-                round((not_submitted_weight_sum / total_weight) * 100.0, 1)
+            pending_ungraded_weight_pct = (
+                round((pending_ungraded_weight_sum / total_weight) * 100.0, 1)
+                if total_weight > 0 else 0.0
+            )
+            overdue_unscored_weight_pct = (
+                round((overdue_unscored_weight_sum / total_weight) * 100.0, 1)
                 if total_weight > 0 else 0.0
             )
 
@@ -1704,8 +1877,13 @@ class GemeloService:
                     if total_items_count else "0/0"
                 ),
                 "currentPerformancePct": current_perf_pct,
-                "notSubmittedCount": not_submitted_count,
-                "notSubmittedWeightPct": not_submitted_weight_pct,
+                "pendingUngradedCount": pending_ungraded_count,
+                "pendingUngradedWeightPct": pending_ungraded_weight_pct,
+                "overdueUnscoredCount": overdue_unscored_count,
+                "overdueUnscoredWeightPct": overdue_unscored_weight_pct,
+                # compatibilidad temporal
+                "notSubmittedCount": overdue_unscored_count,
+                "notSubmittedWeightPct": overdue_unscored_weight_pct,
             }
 
         pairs = await asyncio.gather(
