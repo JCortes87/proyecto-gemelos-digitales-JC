@@ -460,15 +460,48 @@ function fmtGrade10FromPct(pct) {
   return (Number(pct) / 10).toFixed(1);
 }
 
+function computeRiskFromPct(pct) {
+  // Calcula riesgo real basado en nota de 0-100:
+  //   < 50%  → alto   (nota < 5.0)
+  //   50-70% → medio  (nota 5.0 – 7.0)
+  //   ≥ 70%  → bajo   (nota ≥ 7.0)
+  //   null   → pending
+  if (pct == null || Number.isNaN(Number(pct))) return "pending";
+  const p = Number(pct);
+  if (p < 50) return "alto";
+  if (p < 70) return "medio";
+  return "bajo";
+}
+
 function flattenOutcomeDescriptions(payload) {
   const sets = payload?.outcomeSets;
   if (!Array.isArray(sets)) return [];
+
   const flat = [];
+
   for (const s of sets) {
     for (const o of s?.Outcomes || []) {
-      if (o?.Description) flat.push(String(o.Description));
+      const raw = String(o?.Description || "").trim();
+      if (!raw) continue;
+
+      const m = raw.match(/^([A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9_.-]+)\s*-\s*(.+)$/);
+
+      if (m) {
+        flat.push({
+          code: String(m[1]).trim(),
+          title: String(m[2]).trim(),
+          description: raw,
+        });
+      } else {
+        flat.push({
+          code: null,
+          title: raw,
+          description: raw,
+        });
+      }
     }
   }
+
   return flat;
 }
 
@@ -549,9 +582,11 @@ function pickCriticalMacroFromGemelo(g) {
 }
 
 function suggestRouteForStudent(s, thresholds) {
-  const risk = String(s?.risk || "").toLowerCase();
   const perf = s?.currentPerformancePct != null ? Number(s.currentPerformancePct) : null;
   const cov = s?.coveragePct != null ? Number(s.coveragePct) : null;
+  // Riesgo calculado desde nota: ignoramos el campo risk del backend
+  // porque puede ser de RA, no de nota final
+  const risk = perf != null ? computeRiskFromPct(perf) : String(s?.risk || "").toLowerCase();
 
   if (cov != null && cov < 40) {
     return {
@@ -715,14 +750,35 @@ function ProgressBar({ value, color, showLabel = false, animate = true }) {
 
 function InfoTooltip({ text }) {
   const [open, setOpen] = React.useState(false);
-  const [pos, setPos] = React.useState({ top: 0, left: 0 });
+  const [pos, setPos] = React.useState({ top: 0, left: 0, align: "center" });
   const btnRef = React.useRef(null);
+
   if (!String(text || "").trim()) return null;
 
   const updatePos = () => {
     if (!btnRef.current) return;
+
     const r = btnRef.current.getBoundingClientRect();
-    setPos({ top: r.top, left: r.left + r.width / 2 });
+    const tooltipWidth = 280;
+    const margin = 16;
+    const viewportWidth = window.innerWidth;
+
+    let left = r.left + r.width / 2;
+    let align = "center";
+
+    if (left - tooltipWidth / 2 < margin) {
+      left = margin + tooltipWidth / 2;
+      align = "left";
+    } else if (left + tooltipWidth / 2 > viewportWidth - margin) {
+      left = viewportWidth - margin - tooltipWidth / 2;
+      align = "right";
+    }
+
+    setPos({
+      top: r.top,
+      left,
+      align,
+    });
   };
 
   return (
@@ -732,22 +788,40 @@ function InfoTooltip({ text }) {
         role="button"
         tabIndex={0}
         aria-label="Ver descripción"
-        onMouseEnter={() => { updatePos(); setOpen(true); }}
+        onMouseEnter={() => {
+          updatePos();
+          setOpen(true);
+        }}
         onMouseLeave={() => setOpen(false)}
-        onFocus={() => { updatePos(); setOpen(true); }}
+        onFocus={() => {
+          updatePos();
+          setOpen(true);
+        }}
         onBlur={() => setOpen(false)}
-        onClick={(e) => { e.stopPropagation(); updatePos(); setOpen((v) => !v); }}
+        onClick={(e) => {
+          e.stopPropagation();
+          updatePos();
+          setOpen((v) => !v);
+        }}
         style={{
           display: "inline-flex",
-          width: 16, height: 16,
+          width: 16,
+          height: 16,
           borderRadius: 999,
-          alignItems: "center", justifyContent: "center",
+          alignItems: "center",
+          justifyContent: "center",
           border: "1px solid var(--border)",
-          color: "var(--muted)", fontSize: 10, fontWeight: 900,
-          cursor: "help", background: "var(--card)",
-          lineHeight: 1, flexShrink: 0,
+          color: "var(--muted)",
+          fontSize: 10,
+          fontWeight: 900,
+          cursor: "help",
+          background: "var(--card)",
+          lineHeight: 1,
+          flexShrink: 0,
         }}
-      >?</span>
+      >
+        ?
+      </span>
 
       {open && (
         <div
@@ -756,26 +830,36 @@ function InfoTooltip({ text }) {
             position: "fixed",
             top: pos.top,
             left: pos.left,
-            transform: "translate(-50%, calc(-100% - 10px))",
-            width: "min(280px, 85vw)",
+            transform: "translate(-180%)",
+            width: "min(250px, 85vw)",
             zIndex: 99998,
             background: "var(--card)",
             border: "1px solid var(--border)",
             boxShadow: "0 8px 28px rgba(0,0,0,0.18)",
             borderRadius: 10,
-            padding: "10px 13px",
-            color: "var(--text)", fontSize: 12, fontWeight: 500,
-            lineHeight: 1.55, whiteSpace: "normal",
+            padding: "5px 8px",
+            color: "var(--text)",
+            fontSize: 12,
+            fontWeight: 500,
+            lineHeight: 1.55,
+            whiteSpace: "normal",
             pointerEvents: "none",
           }}
         >
-          <div style={{
-            position: "absolute", bottom: -5, left: "50%",
-            transform: "translateX(-50%) rotate(45deg)",
-            width: 8, height: 8,
-            background: "var(--card)", border: "1px solid var(--border)",
-            borderTop: "none", borderLeft: "none",
-          }} />
+          <div
+            style={{
+              position: "absolute",
+              bottom: -0,
+              left: "50%",
+              transform: "translateX(-50  %) rotate(45deg)",
+              width: 8,
+              height: 8,
+              background: "var(--card)",
+              border: "1px solid var(--border)",
+              borderTop: "none",
+              borderLeft: "none",
+            }}
+          />
           {text}
         </div>
       )}
@@ -805,13 +889,10 @@ function SortTh({ label, active, dir, onClick, title }) {
   );
 }
 
-function CoverageBars({ donePct, pendingPct, overduePct }) {
-  // donePct   = calificado (nota numérica publicada)
-  // pendingPct = pendiente calificación (entregado, sin nota)
-  // overduePct = vencido sin registro (sin entrega, fecha pasada)
-  // open = 100 - d - p - ov (sin entregar, fecha futura o sin fecha)
+function CoverageBars({ donePct, pendingPct, openPct, overduePct }) {
   const d = Math.max(0, Math.min(100, Number(donePct ?? 0)));
   const p = Math.max(0, Math.min(100, Number(pendingPct ?? 0)));
+  const op = Math.max(0, Math.min(100, Number(openPct ?? 0)));
   const ov = Math.max(0, Math.min(100, Number(overduePct ?? 0)));
 
   const BarRow = ({ label, value, color, tooltip }) => (
@@ -884,10 +965,10 @@ function CoverageBars({ donePct, pendingPct, overduePct }) {
         tooltip="El estudiante entregó pero el docente aún no ha publicado nota numérica."
       />
 
-      {Math.max(0, 100 - d - p - ov) > 0.5 && (
+      {op > 0.5 && (
         <BarRow
           label="Sin entregar (abierto)"
-          value={Math.max(0, 100 - d - p - ov)}
+          value={op}
           color={COLORS.pending}
           tooltip="Sin nota, sin señal de entrega, y la fecha de vencimiento aún no ha llegado."
         />
@@ -897,7 +978,7 @@ function CoverageBars({ donePct, pendingPct, overduePct }) {
         label="Vencido sin registro"
         value={ov}
         color={ov > 0 ? COLORS.critical : "rgba(148,163,184,0.4)"}
-        tooltip="Sin nota, sin entrega registrada, y la fecha de vencimiento ya pasó. Requiere acción docente."
+        tooltip="Sin nota, sin entrega registrada, y la fecha de vencimiento ya pasó."
       />
     </div>
   );
@@ -1338,7 +1419,7 @@ function StudentCard({ s, onOpen }) {
           <div style={{ fontSize: 11, color: "var(--muted)", fontFamily: "var(--font-mono)", marginTop: 2 }}>ID {s.userId}</div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 5 }}>
-          <StatusBadge status={s.isLoading ? "cargando" : s.risk} />
+          <StatusBadge status={s.isLoading ? "cargando" : computeRiskFromPct(s.currentPerformancePct)} />
           {s.hasPrescription && <span className="tag" style={{ fontSize: 10 }}>📋 Prescripción</span>}
         </div>
       </div>
@@ -1356,7 +1437,7 @@ function StudentCard({ s, onOpen }) {
           <div style={{ fontSize: 10, color: "var(--muted)" }}>{s.coverageCountText || "—"}</div>
         </div>
         <div style={{ textAlign: "center", padding: "8px 4px", background: "var(--bg)", borderRadius: 8 }}>
-          <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700, marginBottom: 2 }}>RA CRÍTICO</div>
+          <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700, marginBottom: 2 }}>FOCO CRÍTICO</div>
           <div style={{ fontWeight: 800, fontSize: 12, fontFamily: "var(--font-mono)" }}>{s.mostCriticalMacro ? s.mostCriticalMacro.code : "—"}</div>
         </div>
       </div>
@@ -1591,7 +1672,7 @@ export default function App() {
               displayName: s.displayName ?? s.DisplayName ?? "—",
               roleName: s.roleName ?? "—",
               isLoading: false,
-              risk: sum?.risk || "pending",
+              risk: computeRiskFromPct(sum?.currentPerformancePct ?? null),
               globalPct: sum?.globalPct ?? null,
               currentPerformancePct: sum?.currentPerformancePct ?? null,
               coveragePct: sum?.coveragePct ?? null,
@@ -1601,13 +1682,15 @@ export default function App() {
               hasPrescription: Boolean(sum?.hasPrescription ?? s?.hasPrescription ?? false),
               mostCriticalMacro: s?.mostCriticalMacro ?? null,
               // Nuevo: enviado sin nota (pendingSubmitted) y vencido sin registro (overdue)
-              pendingSubmittedCount: sum?.pendingSubmittedCount ?? 0,
-              pendingSubmittedWeightPct: sum?.pendingSubmittedWeightPct ?? 0,
-              overdueCount: sum?.overdueCount ?? 0,
-              overdueWeightPct: sum?.overdueWeightPct ?? 0,
-              // Aliases legacy
-              notSubmittedCount: sum?.overdueCount ?? sum?.notSubmittedCount ?? 0,
-              notSubmittedWeightPct: sum?.overdueWeightPct ?? sum?.notSubmittedWeightPct ?? 0,
+              // Backend names: overdueUnscoredWeightPct / pendingUngradedWeightPct
+              pendingSubmittedCount:      sum?.pendingUngradedCount      ?? sum?.pendingSubmittedCount      ?? 0,
+              pendingSubmittedWeightPct:  sum?.pendingUngradedWeightPct  ?? sum?.pendingSubmittedWeightPct  ?? 0,
+              overdueCount:               sum?.overdueUnscoredCount       ?? sum?.overdueCount               ?? 0,
+              overdueWeightPct:           sum?.overdueUnscoredWeightPct   ?? sum?.overdueWeightPct           ?? 0,
+              openCount: sum?.openCount ?? 0,
+              openWeightPct: sum?.openWeightPct ?? 0,
+              notSubmittedCount:          sum?.overdueUnscoredCount       ?? sum?.notSubmittedCount          ?? 0,
+              notSubmittedWeightPct:      sum?.overdueUnscoredWeightPct   ?? sum?.notSubmittedWeightPct      ?? 0,
             };
             row.route = suggestRouteForStudent(row, thr);
             return row;
@@ -1635,7 +1718,7 @@ export default function App() {
 
             const patch = {
               isLoading: false,
-              risk: sum?.risk || "pending",
+              risk: computeRiskFromPct(sum?.currentPerformancePct ?? null),
               globalPct: sum?.globalPct ?? null,
               currentPerformancePct: sum?.currentPerformancePct ?? null,
               coveragePct: sum?.coveragePct ?? null,
@@ -1644,14 +1727,14 @@ export default function App() {
               coverageCountText,
               hasPrescription: Array.isArray(g?.prescription) && g.prescription.length > 0,
               mostCriticalMacro,
-              // Nuevo: enviado sin nota (pendingSubmitted) y vencido sin registro (overdue)
-              pendingSubmittedCount: sum?.pendingSubmittedCount ?? 0,
-              pendingSubmittedWeightPct: sum?.pendingSubmittedWeightPct ?? 0,
-              overdueCount: sum?.overdueCount ?? 0,
-              overdueWeightPct: sum?.overdueWeightPct ?? 0,
-              // Aliases legacy
-              notSubmittedCount: sum?.overdueCount ?? sum?.notSubmittedCount ?? 0,
-              notSubmittedWeightPct: sum?.overdueWeightPct ?? sum?.notSubmittedWeightPct ?? 0,
+              pendingSubmittedCount:      sum?.pendingUngradedCount      ?? sum?.pendingSubmittedCount      ?? 0,
+              pendingSubmittedWeightPct:  sum?.pendingUngradedWeightPct  ?? sum?.pendingSubmittedWeightPct  ?? 0,
+              overdueCount:               sum?.overdueUnscoredCount      ?? sum?.overdueCount               ?? 0,
+              overdueWeightPct:           sum?.overdueUnscoredWeightPct  ?? sum?.overdueWeightPct           ?? 0,
+              openCount:                  sum?.openCount ?? 0,
+              openWeightPct:              sum?.openWeightPct ?? 0,
+              notSubmittedCount:          sum?.overdueUnscoredCount      ?? sum?.notSubmittedCount          ?? 0,
+              notSubmittedWeightPct:      sum?.overdueUnscoredWeightPct  ?? sum?.notSubmittedWeightPct      ?? 0,
             };
 
             setStudentRows((prev) =>
@@ -1751,6 +1834,44 @@ export default function App() {
           signal: controller.signal,
         });
         if (!alive) return;
+
+        // Si el gemelo no trajo evidencias en gradebook, intentar endpoint directo de Brightspace
+        const hasEvidences = Array.isArray(g?.gradebook?.evidences) && g.gradebook.evidences.length > 0;
+        if (!hasEvidences) {
+          try {
+            const ev = await apiGet(
+              `/brightspace/course/${orgUnitId}/grades/student/${selectedStudent.userId}/evidence`,
+              { signal: controller.signal }
+            );
+            if (!alive) return;
+            // Normalizar al shape que espera el drawer
+            const items = Array.isArray(ev?.items) ? ev.items : [];
+            const normalized = items
+              .filter((e) => e.points != null || e.displayed != null)
+              .map((e) => {
+                const pts = e.points != null ? Number(e.points) : null;
+                const max = e.maxPoints != null ? Number(e.maxPoints) : null;
+                const scorePct = pts != null && max != null && max > 0
+                  ? Math.round((pts / max) * 1000) / 10
+                  : null;
+                return {
+                  gradeObjectId: e.gradeObjectId,
+                  name:     e.name || `Ítem ${e.gradeObjectId}`,
+                  weightPct: e.weight != null ? Number(e.weight) : null,
+                  scorePct,
+                  points:   pts,
+                  maxPoints: max,
+                  displayed: e.displayed,
+                  status:   pts != null ? "graded" : (e.displayed ? "pending" : "open"),
+                };
+              });
+            // Inject into gemelo response
+            g.gradebook = { ...(g.gradebook || {}), evidences: normalized };
+          } catch {
+            // Evidencias no disponibles — no bloquear el drawer
+          }
+        }
+
         setStudentDetail(g);
       } catch (e) {
         if (controller.signal.aborted || !alive) return;
@@ -1769,63 +1890,177 @@ export default function App() {
 
   const thresholds = overview?.thresholds || { critical: 50, watch: 70 };
 
+  // riskData: calculado desde la nota real de cada estudiante (no del backend por RA)
   const riskData = useMemo(() => {
-    const rd = overview?.globalRiskDistribution || {};
+    const counts = { alto: 0, medio: 0, bajo: 0 };
+    for (const s of studentRows) {
+      if (s.isLoading || s.currentPerformancePct == null) continue;
+      const r = computeRiskFromPct(s.currentPerformancePct);
+      if (r in counts) counts[r]++;
+    }
     return [
-      { name: "Alto", key: "alto", value: Number(rd.alto || 0) },
-      { name: "Medio", key: "medio", value: Number(rd.medio || 0) },
-      { name: "Bajo", key: "bajo", value: Number(rd.bajo || 0) },
+      { name: "Alto", key: "alto", value: counts.alto },
+      { name: "Medio", key: "medio", value: counts.medio },
+      { name: "Bajo", key: "bajo", value: counts.bajo },
     ];
-  }, [overview]);
+  }, [studentRows]);
 
   const learningOutcomesData = useMemo(() => {
-  const ras = Array.isArray(raDashboard?.ras) ? raDashboard.ras : [];
-  const descList = flattenOutcomeDescriptions(learningOutcomesPayload);
+    const ras = Array.isArray(raDashboard?.ras) ? raDashboard.ras : [];
+    const catalog = flattenOutcomeDescriptions(learningOutcomesPayload);
+    const totalStudents =
+      Number(overview?.studentsCount ?? raDashboard?.totalStudents ?? 0) || 0;
 
-  if (ras.length) {
-    const outcomeMap = {};
-    Object.values(outcomesMap || {}).forEach((o) => {
-      if (o?.code) outcomeMap[String(o.code).toUpperCase()] = o;
-    });
+    const normalize = (s) =>
+      String(s || "")
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
 
-    const w = 100 / ras.length;
+    // Caso 1: no hay nada
+    if (!catalog.length && !ras.length) return [];
 
-    return ras.map((r, idx) => {
-      const code = String(r.code || `RA${idx + 1}`).toUpperCase();
-      const match = outcomeMap[code];
-      const fallbackDesc = descList[idx] || "";
+    // Caso 2: solo dashboard
+    if (!catalog.length && ras.length) {
+      const w = ras.length ? 100 / ras.length : 0;
 
-      return {
-        code,
-        name: match?.title || r.label || fallbackDesc || code,
-        description: match?.description || fallbackDesc || r.label || code,
-        avgPct: Number(r.avgPct ?? 0),
-        weightPct: Number(r.weightPct ?? w),
-        status: r.status || null,
-        coveragePct: Number(r.coveragePct ?? 0),
-        studentsWithData: Number(r.studentsWithData ?? 0),
-        totalStudents: Number(r.totalStudents ?? 0),
-      };
-    });
-  }
+      return ras.map((r, idx) => {
+        const rawCode = String(r.code || "").trim();
+        const fallbackLabel = rawCode || `Resultado ${idx + 1}`;
+        const avgPct = r.avgPct == null ? null : Number(r.avgPct);
 
-  if (descList.length) {
-    const w = 100 / descList.length;
-    return descList.map((d, idx) => ({
-      code: `RA${idx + 1}`,
-      name: d,
-      description: d,
-      avgPct: 0,
-      weightPct: w,
-      status: null,
+        return {
+          key: rawCode || `metric-${idx + 1}`,
+          code: rawCode || null,
+          name: String(r.label || fallbackLabel),
+          title: String(r.label || fallbackLabel),
+          description: String(r.label || fallbackLabel),
+          avgPct,
+          weightPct: Number(r.weightPct ?? w),
+          coveragePct: Number(r.coveragePct ?? 0),
+          studentsWithData: Number(r.studentsWithData ?? 0),
+          totalStudents: Number(r.totalStudents ?? totalStudents),
+          status:
+            avgPct == null
+              ? "pending"
+              : r.status ||
+                (avgPct < thresholds.critical
+                  ? "critico"
+                  : avgPct < thresholds.watch
+                  ? "observacion"
+                  : "solido"),
+        };
+      });
+    }
+
+    // Caso 3: catálogo manda visualmente
+    const base = catalog.map((item, idx) => ({
+      key: item.code ? normalize(item.code) : `catalog-${idx + 1}`,
+      code: item.code || null,
+      name: item.code || `Resultado ${idx + 1}`,
+      title: item.title || `Resultado ${idx + 1}`,
+      description: item.description || item.title || `Resultado ${idx + 1}`,
+      avgPct: null,
+      weightPct: catalog.length ? 100 / catalog.length : 0,
       coveragePct: 0,
       studentsWithData: 0,
-      totalStudents: 0,
+      totalStudents,
+      status: "pending",
     }));
-  }
 
-  return [];
-}, [raDashboard, learningOutcomesPayload, outcomesMap]);
+    if (!ras.length) return base;
+
+    // Índices de métricas
+    const dashboardByCode = new Map();
+    const dashboardByLabel = new Map();
+
+    ras.forEach((r, idx) => {
+      const codeKey = normalize(r.code);
+      const labelKey = normalize(r.label);
+
+      if (codeKey) dashboardByCode.set(codeKey, { ...r, __idx: idx });
+      if (labelKey) dashboardByLabel.set(labelKey, { ...r, __idx: idx });
+    });
+
+    const usedMetricIndexes = new Set();
+
+    const merged = base.map((item, idx) => {
+      let metric = null;
+
+      // 1. match por código real del catálogo
+      if (item.code) {
+        metric = dashboardByCode.get(normalize(item.code)) || null;
+      }
+
+      // 2. match por título/label
+      if (!metric && item.title) {
+        metric = dashboardByLabel.get(normalize(item.title)) || null;
+      }
+
+      // 3. fallback por posición
+      if (!metric && ras[idx]) {
+        metric = { ...ras[idx], __idx: idx };
+      }
+
+      if (!metric) return item;
+
+      usedMetricIndexes.add(metric.__idx);
+
+      const avgPct = metric.avgPct == null ? null : Number(metric.avgPct);
+
+      return {
+        ...item,
+        avgPct,
+        coveragePct: Number(metric.coveragePct ?? 0),
+        studentsWithData: Number(metric.studentsWithData ?? 0),
+        totalStudents: Number(metric.totalStudents ?? totalStudents),
+        status:
+          avgPct == null
+            ? "pending"
+            : metric.status ||
+              (avgPct < thresholds.critical
+                ? "critico"
+                : avgPct < thresholds.watch
+                ? "observacion"
+                : "solido"),
+      };
+    });
+
+    // Si el dashboard trae más métricas que el catálogo, anexarlas
+    ras.forEach((r, idx) => {
+      if (usedMetricIndexes.has(idx)) return;
+
+      const avgPct = r.avgPct == null ? null : Number(r.avgPct);
+      const rawCode = String(r.code || "").trim();
+      const rawLabel = String(r.label || "").trim();
+
+      merged.push({
+        key: rawCode ? normalize(rawCode) : `extra-${idx + 1}`,
+        code: rawCode || null,
+        name: rawCode || rawLabel || `Resultado ${idx + 1}`,
+        title: rawLabel || rawCode || `Resultado ${idx + 1}`,
+        description: rawLabel || rawCode || `Resultado ${idx + 1}`,
+        avgPct,
+        weightPct: Number(r.weightPct ?? 0),
+        coveragePct: Number(r.coveragePct ?? 0),
+        studentsWithData: Number(r.studentsWithData ?? 0),
+        totalStudents: Number(r.totalStudents ?? totalStudents),
+        status:
+          avgPct == null
+            ? "pending"
+            : r.status ||
+              (avgPct < thresholds.critical
+                ? "critico"
+                : avgPct < thresholds.watch
+                ? "observacion"
+                : "solido"),
+      });
+    });
+
+    return merged;
+  }, [raDashboard, learningOutcomesPayload, overview, thresholds]);
 
 const weakestAssignment = useMemo(() => {
   const allEvidence = [];
@@ -1891,51 +2126,105 @@ const weakestAssignment = useMemo(() => {
   return valid[0];
 }, [learningOutcomesData]);
 
-  const avgPerfPct = overview?.courseGradebook?.avgCurrentPerformancePct ?? null;
-  const avgCov = overview?.courseGradebook?.avgCoveragePct ?? null;
-  const covDone = avgCov == null ? 0 : Math.max(0, Math.min(100, Number(avgCov)));
+const avgPerfPct = overview?.courseGradebook?.avgCurrentPerformancePct ?? null;
+const avgCov = overview?.courseGradebook?.avgCoveragePct ?? null;
+const covDone = avgCov == null ? 0 : Math.max(0, Math.min(100, Number(avgCov)));
 
-  // avgPendingSubmittedPct = enviado por el estudiante, aún sin nota numérica
-  const avgPendingSubmittedPct = useMemo(() => {
-    const v = overview?.courseGradebook?.avgPendingSubmittedPct;
-    if (v != null && !Number.isNaN(Number(v))) return Math.max(0, Math.min(100, Number(v)));
-    return 0;
-  }, [overview]);
+const avgPendingSubmittedPct = useMemo(() => {
+  const v =
+    overview?.courseGradebook?.avgPendingUngradedPct ??
+    overview?.courseGradebook?.avgPendingUngradedWeightPct ??
+    overview?.courseGradebook?.avgPendingSubmittedPct;
 
-  // avgNotSubmittedPct = vencido sin ninguna señal de entrega (el verdadero "sin registro")
-  const avgNotSubmittedPct = useMemo(() => {
-    const gb = overview?.courseGradebook ?? {};
-    // Try all possible field names from different back versions
-    const v = gb.avgNotSubmittedPct ?? gb.avgOverdueWeightPct ?? gb.overdueWeightPct ?? gb.avgOverduePct;
-    if (v != null && !Number.isNaN(Number(v))) return Math.max(0, Math.min(100, Number(v)));
-    // Fallback: compute from studentsAtRisk average if overview fields are missing
-    const atRisk = Array.isArray(overview?.studentsAtRisk) ? overview.studentsAtRisk : [];
-    if (atRisk.length > 0) {
-      const vals = atRisk.map(s => Number(s.notSubmittedWeightPct ?? s.overdueWeightPct ?? 0)).filter(x => !isNaN(x));
-      if (vals.length > 0) return Math.min(100, vals.reduce((a, b) => a + b, 0) / vals.length);
+  if (v != null && !Number.isNaN(Number(v))) {
+    return Math.max(0, Math.min(100, Number(v)));
+  }
+
+  const loaded = studentRows.filter((s) => !s.isLoading);
+  if (loaded.length > 0) {
+    const vals = loaded
+      .map((s) => Number(s.pendingSubmittedWeightPct ?? 0))
+      .filter((x) => !Number.isNaN(x));
+    if (vals.length > 0) {
+      return Math.min(100, vals.reduce((a, b) => a + b, 0) / loaded.length);
     }
-    return 0;
-  }, [overview]);
+  }
 
-  // Alias para retrocompatibilidad con CoverageBars
-  const avgPendingUngradedPct = avgPendingSubmittedPct;
-  const avgOverdueUnscoredPct = avgNotSubmittedPct;
+  return 0;
+}, [overview, studentRows]);
+
+const avgNotSubmittedPct = useMemo(() => {
+  const gb = overview?.courseGradebook ?? {};
+  const backendVal =
+    gb.avgNotSubmittedPct ??
+    gb.avgOverdueUnscoredPct ??
+    gb.avgOverdueWeightPct ??
+    gb.overdueWeightPct ??
+    gb.avgOverduePct;
+
+  if (backendVal != null && !Number.isNaN(Number(backendVal))) {
+    return Math.max(0, Math.min(100, Number(backendVal)));
+  }
+
+  const loaded = studentRows.filter((s) => !s.isLoading);
+  if (loaded.length > 0) {
+    const vals = loaded
+      .map((s) => Number(s.overdueWeightPct ?? s.notSubmittedWeightPct ?? 0))
+      .filter((x) => !Number.isNaN(x));
+
+    if (vals.length > 0) {
+      return Math.min(100, vals.reduce((a, b) => a + b, 0) / loaded.length);
+    }
+  }
+
+  const atRisk = Array.isArray(overview?.studentsAtRisk) ? overview.studentsAtRisk : [];
+  if (atRisk.length > 0) {
+    const total = overview?.studentsCount ?? atRisk.length;
+    const sumOverdue = atRisk.reduce(
+      (acc, s) =>
+        acc + Number(s.notSubmittedWeightPct ?? s.overdueUnscoredWeightPct ?? s.overdueWeightPct ?? 0),
+      0
+    );
+    return Math.min(100, sumOverdue / total);
+  }
+
+  return 0;
+}, [overview, studentRows]);
+
+const avgOpenPct = useMemo(() => {
+  const gb = overview?.courseGradebook ?? {};
+  const backendVal = gb.avgOpenPct ?? gb.avgOpenWeightPct;
+
+  if (backendVal != null && !Number.isNaN(Number(backendVal))) {
+    return Math.max(0, Math.min(100, Number(backendVal)));
+  }
+
+  return Math.max(
+    0,
+    Math.min(
+      100,
+      100 - Number(avgCov ?? 0) - Number(avgPendingSubmittedPct ?? 0) - Number(avgNotSubmittedPct ?? 0)
+    )
+  );
+}, [overview, avgCov, avgPendingSubmittedPct, avgNotSubmittedPct]);
+
+const avgPendingUngradedPct = avgPendingSubmittedPct;
+const avgOverdueUnscoredPct = avgNotSubmittedPct;
 
   // covPending = lo que no está calificado, no está vencido y no está enviado pendiente
   // Matemáticamente: 100 - calificado - enviado_sin_nota - vencido_sin_registro
-  const covPending = useMemo(() => {
-    const cov = Number(overview?.courseGradebook?.avgCoveragePct ?? 0);
-    const pending = avgPendingSubmittedPct;
-    const overdue = avgNotSubmittedPct;
-    return Math.max(0, Math.min(100, 100 - cov - pending - overdue));
-  }, [overview, avgPendingSubmittedPct, avgNotSubmittedPct]);
+  const covPending = avgOpenPct;
 
   const studentsCount = overview?.studentsCount ?? studentsList?.students?.count ?? studentRows.length ?? 0;
   const totalStudents = Number(studentsCount || 0) || 0;
-  const rd = overview?.globalRiskDistribution || {};
-  const atRiskCount = Number(rd.alto || 0) + Number(rd.medio || 0);
+  // atRiskCount calculado desde nota real (no desde globalRiskDistribution del backend)
+  const atRiskCount = studentRows.filter((s) => {
+    if (s.isLoading || s.currentPerformancePct == null) return false;
+    return computeRiskFromPct(s.currentPerformancePct) !== "bajo";
+  }).length;
   const atRiskPct = totalStudents > 0 ? (atRiskCount / totalStudents) * 100 : null;
 
+  // courseStatus: basado en nota promedio o, si no hay, en distribución calculada desde notas
   const courseStatus = useMemo(() => {
     if (avgPerfPct != null && Number(avgPerfPct) > 0) {
       const p = Number(avgPerfPct);
@@ -1943,96 +2232,106 @@ const weakestAssignment = useMemo(() => {
       if (p < thresholds.watch) return "en seguimiento";
       return "solido";
     }
-    const rd2 = overview?.globalRiskDistribution || {};
-    const a = Number(rd2.alto || 0);
-    const m = Number(rd2.medio || 0);
-    const b = Number(rd2.bajo || 0);
+    // Fallback: usar distribución calculada desde studentRows
+    const loaded = studentRows.filter((s) => !s.isLoading && s.currentPerformancePct != null);
+    if (!loaded.length) return "pending";
+    const a = loaded.filter((s) => computeRiskFromPct(s.currentPerformancePct) === "alto").length;
+    const m = loaded.filter((s) => computeRiskFromPct(s.currentPerformancePct) === "medio").length;
+    const b = loaded.filter((s) => computeRiskFromPct(s.currentPerformancePct) === "bajo").length;
     if (a >= m && a >= b && a > 0) return "critico";
     if (m >= a && m >= b && m > 0) return "en desarrollo";
     if (b > 0) return "solido";
     return "pending";
-  }, [avgPerfPct, thresholds, overview]);
+  }, [avgPerfPct, thresholds, studentRows]);
 
 
   // Estudiantes prioritarios: nota < 5 | ítems vencidos | cobertura baja
   // Fuente 1: overview.studentsAtRisk (disponible de inmediato, calculado en el back)
   // Fuente 2: studentRows enriquecidos (disponible tras carga incremental)
+  // Estudiantes prioritarios — solo ALTO y MEDIO (basado en nota).
+  // Riesgo BAJO se excluye siempre. Orden: alto → medio → pendiente (sin nota + problema).
   const assignmentRiskData = useMemo(() => {
-    // Fuente 1: backend ya calculó
+    // Normaliza un item de cualquier fuente al shape común
+    const toItem = (raw, perf, overduePct, pendingPct, coveragePct) => {
+      const risk = computeRiskFromPct(perf);
+      const type = risk === "alto" || (perf != null && Number(perf) < 50)
+        ? "low_grade"
+        : overduePct > 0
+        ? "overdue"
+        : pendingPct > 0
+        ? "pending_submitted"
+        : "low_coverage";
+      return { ...raw, type, risk,
+        currentPerformancePct: perf != null ? Number(perf) : null,
+        notSubmittedWeightPct: overduePct,
+        pendingSubmittedWeightPct: pendingPct,
+        coveragePct: Number(coveragePct ?? 0),
+      };
+    };
+
+    // Fuente 1: overview.studentsAtRisk del backend
     const backendRisk = Array.isArray(overview?.studentsAtRisk) ? overview.studentsAtRisk : [];
+    let candidates = [];
+
     if (backendRisk.length > 0) {
-      const mapped = backendRisk.slice(0, 10).map((s) => {
-        const perf = s.currentPerformancePct;
-        const overduePct = Number(s.notSubmittedWeightPct ?? s.overdueWeightPct ?? 0);
-        const pendingPct = Number(s.pendingSubmittedWeightPct ?? 0);
-        const type = (perf != null && Number(perf) < 50)
-          ? "low_grade"
-          : overduePct > 0
-          ? "overdue"
-          : pendingPct > 0
-          ? "pending_submitted"
-          : "low_coverage";
-        return {
-          userId: s.userId,
-          name: s.displayName,
-          type,
-          notSubmittedWeightPct: overduePct,
-          pendingSubmittedWeightPct: pendingPct,
-          coveragePct: Number(s.coveragePct ?? 0),
-          currentPerformancePct: perf != null ? Number(perf) : null,
-          risk: s.risk,
-        };
-      });
-      // Ordenar: pendingSubmitted arriba, low_coverage medio, low_grade abajo (más urgentes visualmente al final)
-      const typeOrder = { pending_submitted: 0, low_coverage: 1, overdue: 2, low_grade: 3 };
-      return mapped.sort((a, b) => (typeOrder[a.type] ?? 2) - (typeOrder[b.type] ?? 2)).slice(0, 7);
+      candidates = backendRisk.map((s) =>
+        toItem(
+          { userId: s.userId, name: s.displayName },
+          s.currentPerformancePct,
+          Number(s.notSubmittedWeightPct ?? s.overdueUnscoredWeightPct ?? s.overdueWeightPct ?? 0),
+          Number(s.pendingUngradedWeightPct ?? s.pendingSubmittedWeightPct ?? 0),
+          s.coveragePct,
+        )
+      );
+    } else {
+      // Fuente 2: studentRows enriquecidos
+      const loaded = studentRows.filter((s) => !s.isLoading);
+      candidates = loaded.map((s) =>
+        toItem(
+          { userId: s.userId, name: s.displayName },
+          s.currentPerformancePct,
+          Number(s.notSubmittedWeightPct ?? s.overdueWeightPct ?? 0),
+          Number(s.pendingSubmittedWeightPct ?? 0),
+          s.coveragePct,
+        )
+      );
     }
 
-    // Fuente 2: derivar desde studentRows (carga incremental)
-    const loaded = studentRows.filter((s) => !s.isLoading);
-    if (!loaded.length) return [];
-
-    const toRow = (s, type) => ({
-      userId: s.userId,
-      name: s.displayName,
-      type,
-      notSubmittedWeightPct: Number(s.notSubmittedWeightPct ?? s.overdueWeightPct ?? 0),
-      pendingSubmittedWeightPct: Number(s.pendingSubmittedWeightPct ?? 0),
-      coveragePct: Number(s.coveragePct ?? 0),
-      currentPerformancePct: s.currentPerformancePct != null ? Number(s.currentPerformancePct) : null,
-      risk: s.risk,
+    // FILTRO: excluir riesgo bajo (nota ≥ 70%) a menos que tengan overdue/pending significativo
+    const filtered = candidates.filter((s) => {
+      if (s.risk === "alto") return true;
+      if (s.risk === "medio") return true;
+      if (s.risk === "pending") {
+        // Sin nota aún: incluir solo si hay cobertura baja, overdue o pending
+        return s.coveragePct < 60 || s.notSubmittedWeightPct > 0 || s.pendingSubmittedWeightPct > 0;
+      }
+      // risk === "bajo" → solo incluir si hay overdue/pending real y significativo (> 10%)
+      return s.notSubmittedWeightPct > 10 || s.pendingSubmittedWeightPct > 10;
     });
 
-    const lowGrade = loaded
-      .filter((s) => s.currentPerformancePct != null && Number(s.currentPerformancePct) < 50)
-      .map((s) => toRow(s, "low_grade"))
-      .sort((a, b) => (a.currentPerformancePct ?? 0) - (b.currentPerformancePct ?? 0));
+    // ORDEN: alto (nota < 50) → medio (50-70) → pending → por nota asc dentro de cada grupo
+    const riskOrder = { alto: 0, medio: 1, pending: 2, bajo: 3 };
+    filtered.sort((a, b) => {
+      const ro = (riskOrder[a.risk] ?? 3) - (riskOrder[b.risk] ?? 3);
+      if (ro !== 0) return ro;
+      // Dentro del mismo riesgo: nota más baja primero (más urgente)
+      const pa = a.currentPerformancePct ?? 999;
+      const pb = b.currentPerformancePct ?? 999;
+      return pa - pb;
+    });
 
-    const overdue = loaded
-      .filter((s) => Number(s.notSubmittedWeightPct ?? s.overdueWeightPct ?? 0) > 0)
-      .map((s) => toRow(s, "overdue"))
-      .sort((a, b) => b.notSubmittedWeightPct - a.notSubmittedWeightPct);
-
-    const lowCov = loaded
-      .filter((s) => s.coveragePct != null && Number(s.coveragePct) < 60)
-      .map((s) => toRow(s, "low_coverage"))
-      .sort((a, b) => a.coveragePct - b.coveragePct);
-
+    // Deduplicar por userId
     const seen = new Set();
-    const merged = [];
-    // Orden: pendientes/baja-cobertura primero, críticos de nota abajo
-    for (const s of [...lowCov, ...overdue, ...lowGrade]) {
-      if (!seen.has(s.userId)) {
-        seen.add(s.userId);
-        merged.push(s);
-      }
-    }
-    return merged.slice(0, 7);
+    return filtered.filter((s) => {
+      if (seen.has(s.userId)) return false;
+      seen.add(s.userId);
+      return true;
+    }).slice(0, 8);
   }, [overview, studentRows]);
 
   const filteredStudents = useMemo(() => {
     let list = Array.isArray(studentRows) ? [...studentRows] : [];
-    if (onlyRisk) list = list.filter((s) => ["alto", "medio"].includes(normStatus(s.risk)));
+    if (onlyRisk) list = list.filter((s) => ["alto", "medio"].includes(computeRiskFromPct(s.currentPerformancePct)));
     const q = query.trim().toLowerCase();
     if (q) {
       list = list.filter(
@@ -2129,7 +2428,7 @@ const contentKpis = useMemo(() => {
         case "coverage":
           return s.coveragePct == null ? -1 : Number(s.coveragePct);
         case "risk": {
-          const r = normStatus(s.risk);
+          const r = computeRiskFromPct(s.currentPerformancePct);
           return r === "alto" ? 0 : r === "medio" ? 1 : r === "bajo" ? 2 : 3;
         }
         default:
@@ -2163,12 +2462,15 @@ const contentKpis = useMemo(() => {
   const drawerMissingValues = Array.isArray(drawerGradebook?.missingValues) ? drawerGradebook.missingValues : [];
   const drawerQcFlags = Array.isArray(studentDetail?.qualityFlags) ? studentDetail.qualityFlags : [];
   // Drawer: usar nuevos campos semánticos
+  // Backend field names: pendingUngradedWeightPct / overdueUnscoredWeightPct
   const drawerPendingSubmittedPct = Number(
-    drawerSummary?.pendingSubmittedWeightPct ?? drawerSummary?.pendingUngradedWeightPct ?? 0
+    drawerSummary?.pendingUngradedWeightPct  ?? drawerSummary?.pendingSubmittedWeightPct  ?? 0
   );
   const drawerOverduePct = Number(
-    drawerSummary?.overdueWeightPct ?? drawerSummary?.notSubmittedWeightPct ?? drawerSummary?.overdueUnscoredWeightPct ?? 0
+    drawerSummary?.overdueUnscoredWeightPct  ?? drawerSummary?.overdueWeightPct           ??
+    drawerSummary?.notSubmittedWeightPct     ?? 0
   );
+  const drawerOpenPct = Number(drawerSummary?.openWeightPct ?? 0);
   // Aliases para compatibilidad con CoverageBars existente en drawer
   const drawerPendingUngradedPct = drawerPendingSubmittedPct;
   const drawerOverdueUnscoredPct = drawerOverduePct;
@@ -2382,9 +2684,6 @@ const contentKpis = useMemo(() => {
           <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: isMobile ? 17 : 20, fontWeight: 900, color: "var(--text)", letterSpacing: "-0.03em" }}>
-                  Gemelo Digital
-                </span>
                 <span className="tag">Vista Docente</span>
               </div>
               <button
@@ -2405,7 +2704,6 @@ const contentKpis = useMemo(() => {
               </button>
             </div>
           </div>
-
           {/* ── Controls ── */}
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <button
@@ -2641,6 +2939,7 @@ const contentKpis = useMemo(() => {
                 <CoverageBars
                   donePct={covDone}
                   pendingPct={avgPendingSubmittedPct}
+                  openPct={avgOpenPct}
                   overduePct={avgNotSubmittedPct}
                 />
               )}
@@ -2658,7 +2957,8 @@ const contentKpis = useMemo(() => {
                   </Pie>
                   <Tooltip formatter={(value) => {
                     const v = Number(value || 0);
-                    const pct = totalStudents > 0 ? (v / totalStudents) * 100 : 0;
+                    const base = riskData.reduce((acc, r) => acc + r.value, 0);
+                    const pct = base > 0 ? (v / base) * 100 : 0;
                     return [`${v} (${pct.toFixed(1)}%)`, "Estudiantes"];
                   }} />
                 </PieChart>
@@ -2668,7 +2968,8 @@ const contentKpis = useMemo(() => {
             <div style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 12 }}>
               {riskData.map((r) => {
                 const count = Number(r.value || 0);
-                const pct = totalStudents > 0 ? (count / totalStudents) * 100 : 0;
+                const base = riskData.reduce((acc, x) => acc + x.value, 0);
+                const pct = base > 0 ? (count / base) * 100 : 0;
                 return (
                   <div key={r.key} style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <div style={{ width: 8, height: 8, borderRadius: "50%", background: colorForRisk(r.key), flexShrink: 0 }} />
@@ -2807,7 +3108,7 @@ const contentKpis = useMemo(() => {
                             )}
                           </div>
                         </div>
-                        <StatusBadge status={item.risk} />
+                        <StatusBadge status={computeRiskFromPct(item.currentPerformancePct)} />
                       </div>
 
                       {/* Row 2: metrics */}
@@ -2864,7 +3165,7 @@ const contentKpis = useMemo(() => {
             )}
           </Card>
 
-          <Card title="Prioridad académica">
+          <Card title="Prioridades de aprendizaje">
             <div
               style={{
                 display: "flex",
@@ -2877,7 +3178,11 @@ const contentKpis = useMemo(() => {
             >
               {learningOutcomesData
                 .slice()
-                .sort((a, b) => a.avgPct - b.avgPct)
+                .sort((a, b) => {
+                  const av = a.avgPct == null ? 999 : Number(a.avgPct);
+                  const bv = b.avgPct == null ? 999 : Number(b.avgPct);
+                  return av - bv;
+                })
                 .map((m) => {
                   const computedStatus =
                     m.status ||
@@ -2886,6 +3191,7 @@ const contentKpis = useMemo(() => {
                       : m.avgPct < thresholds.watch
                       ? "observacion"
                       : "solido");
+
                   const pctColor = colorForPct(m.avgPct, thresholds);
                   const desc = (m.description || m.name || "").trim();
 
@@ -2893,35 +3199,78 @@ const contentKpis = useMemo(() => {
                     <div
                       key={m.code}
                       style={{
-                        border: "1px solid var(--border)",
+                        border: `1px solid ${pctColor}22`,
                         borderRadius: 10,
                         padding: 10,
                         background: "var(--card)",
                       }}
                     >
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          marginBottom: 6,
+                        }}
+                      >
                         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <span className="tag">{m.code}</span>
+                          <span className="tag">
+                            {m.code || m.name || "Resultado"}
+                          </span>
                           <InfoTooltip text={desc || "Sin descripción disponible."} />
                         </div>
                         <StatusBadge status={computedStatus} />
                       </div>
 
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <span style={{ fontWeight: 900, fontSize: 18, fontFamily: "var(--font-mono)", color: pctColor }}>
-                          {fmtPct(m.avgPct)}
-                        </span>
+                        <div>
+                          <span
+                            style={{
+                              fontWeight: 900,
+                              fontSize: 18,
+                              fontFamily: "var(--font-mono)",
+                              color: m.avgPct == null ? "var(--muted)" : pctColor,
+                            }}
+                          >
+                            {m.avgPct == null ? "—" : fmtGrade10FromPct(m.avgPct)}
+                          </span>
+                          <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>
+                            {m.avgPct == null ? "Sin calificación" : fmtPct(m.avgPct)}
+                          </div>
+                        </div>
+
                         <span style={{ fontSize: 11, color: "var(--muted)" }}>
                           Peso {m.weightPct ? `${Number(m.weightPct).toFixed(0)}%` : "—"}
                         </span>
                       </div>
 
                       {m.coveragePct != null && (
-                        <div style={{ marginTop: 4 }}>
-                          <ProgressBar value={m.coveragePct} color={pctColor} />
-                          <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 3, display: "flex", justifyContent: "space-between" }}>
-                            <span>{m.studentsWithData}/{m.totalStudents} estudiantes</span>
-                            <span style={{ fontFamily: "var(--font-mono)", fontWeight: 700 }}>{fmtPct(m.coveragePct)}</span>
+                        <div style={{ marginTop: 6 }}>
+                          <div
+                            style={{
+                              fontSize: 10,
+                              color: "var(--muted)",
+                              fontWeight: 700,
+                              textTransform: "uppercase",
+                              marginBottom: 4,
+                            }}
+                          >
+                            Cobertura
+                          </div>
+                          <ProgressBar value={m.coveragePct} color={COLORS.brand} animate={false} />
+                          <div
+                            style={{
+                              fontSize: 10,
+                              color: "var(--muted)",
+                              marginTop: 4,
+                              display: "flex",
+                              justifyContent: "space-between",
+                            }}
+                          >
+                            <span>{m.studentsWithData}/{m.totalStudents || overview?.studentsCount || 0} estudiantes</span>
+                            <span style={{ fontFamily: "var(--font-mono)", fontWeight: 700 }}>
+                              {fmtPct(m.coveragePct)}
+                            </span>
                           </div>
                         </div>
                       )}
@@ -2932,7 +3281,7 @@ const contentKpis = useMemo(() => {
               {!learningOutcomesData.length && (
                 <div className="empty-state">
                   <span className="empty-state-icon">🎯</span>
-                  <span style={{ fontSize: 12 }}>Sin datos de RA</span>
+                  <span style={{ fontSize: 12 }}>Sin datos de resultados de aprendizaje</span>
                 </div>
               )}
             </div>
@@ -3084,7 +3433,7 @@ const contentKpis = useMemo(() => {
                           </div>
                         </td>
                         <td style={{ padding: "10px 10px" }}>
-                          <StatusBadge status={s.isLoading ? "cargando" : s.risk} />
+                          <StatusBadge status={s.isLoading ? "cargando" : computeRiskFromPct(s.currentPerformancePct)} />
                         </td>
                         <td style={{ padding: "10px 10px", maxWidth: compactRouteCol ? 200 : 320, minWidth: 160 }}>
                           {s.route ? (
@@ -3249,10 +3598,11 @@ const contentKpis = useMemo(() => {
                 </div>
               </div>
               <div style={{ textAlign: "center", padding: "12px 8px", background: "var(--bg)", borderRadius: 10, border: "1px solid var(--border)" }}>
-                <div style={{ fontSize: 10, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}>Riesgo</div>
+                <div style={{ fontSize: 10, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}>Riesgo académico</div>
                 <div style={{ marginTop: 4, display: "flex", justifyContent: "center" }}>
-                  <StatusBadge status={drawerSummary?.risk || "pending"} />
+                  <StatusBadge status={computeRiskFromPct(drawerSummary?.currentPerformancePct)} />
                 </div>
+                <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 3 }}>basado en nota</div>
               </div>
             </div>
 
@@ -3271,7 +3621,8 @@ const contentKpis = useMemo(() => {
 
             {drawerTab === "resumen" && (
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                {drawerMacro.length > 0 && (
+                {/* Resultados de aprendizaje: gráfico si hay datos, lista de RA si no */}
+                {drawerMacro.length > 0 ? (
                   <Card title="Resultados de aprendizaje del estudiante">
                     <div style={{ width: "100%", height: 220 }}>
                       <ResponsiveContainer>
@@ -3291,12 +3642,34 @@ const contentKpis = useMemo(() => {
                       </ResponsiveContainer>
                     </div>
                   </Card>
-                )}
+                ) : learningOutcomesData.length > 0 ? (
+                  <Card title="Resultados de aprendizaje del curso">
+                    <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 10, padding: "6px 10px", background: "var(--bg)", borderRadius: 8 }}>
+                      Sin datos de evaluación por RA para este estudiante aún. Resultados de aprendizaje del curso:
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      {learningOutcomesData.map((ra) => (
+                        <div key={ra.code} style={{
+                          display: "flex", alignItems: "flex-start", gap: 10,
+                          padding: "8px 10px", borderRadius: 8,
+                          border: "1px solid var(--border)", background: "var(--bg)",
+                        }}>
+                          <span className="tag" style={{ flexShrink: 0, marginTop: 1 }}>
+                          {ra.code || ra.name || "Resultado"}
+                        </span>
+                          <span style={{ fontSize: 12, color: "var(--text)", lineHeight: 1.5, fontWeight: 500 }}>
+                            {ra.description || ra.name || ra.code}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+                ) : null}
 
                 {drawerProjection && <ProjectionBlock projection={drawerProjection} thresholds={thresholds} />}
 
                 {selectedStudent?.route && (
-                  <Card title={selectedStudent.route.title} right={<StatusBadge status={selectedStudent.risk || "pending"} />}>
+                  <Card title={selectedStudent.route.title} right={<StatusBadge status={computeRiskFromPct(selectedStudent?.currentPerformancePct)} />}>
                     <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 10 }}>{selectedStudent.route.summary}</div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                       {(selectedStudent.route.actions || []).map((a, i) => (
