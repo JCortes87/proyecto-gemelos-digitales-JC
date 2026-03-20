@@ -297,27 +297,70 @@ const GLOBAL_STYLES = `
   }
   .empty-state-icon { font-size: 32px; opacity: 0.4; }
 
-  /* Scrollbar */
-  ::-webkit-scrollbar { width: 5px; height: 5px; }
-  ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: rgba(148,163,184,0.4); border-radius: 999px; }
-  ::-webkit-scrollbar-thumb:hover { background: rgba(148,163,184,0.65); }
+  /* ── Course Panel ── */
+  .course-panel-overlay {
+    position: fixed; inset: 0;
+    background: rgba(13,17,23,0.5);
+    z-index: 60;
+    display: flex; align-items: flex-start; justify-content: flex-end;
+    padding: 0;
+    backdrop-filter: blur(2px);
+    animation: fadeIn 0.2s ease both;
+  }
+  @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
 
-  /* Keyframe animations */
-  @keyframes slideInRight {
-    from { transform: translateX(100%); opacity: 0; }
+  .course-panel {
+    width: min(480px, 100vw);
+    height: 100vh;
+    background: var(--card);
+    border-left: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    animation: slideIn 0.28s cubic-bezier(.4,0,.2,1) both;
+    box-shadow: -8px 0 40px rgba(0,0,0,0.15);
+  }
+  @keyframes slideIn {
+    from { transform: translateX(40px); opacity: 0; }
     to   { transform: translateX(0);    opacity: 1; }
   }
-  @keyframes slideInUp {
-    from { transform: translateY(10px); opacity: 0; }
-    to   { transform: translateY(0);    opacity: 1; }
+
+  .course-item {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    transition: background 0.15s ease;
+    text-decoration: none;
+  }
+  .course-item:hover { background: var(--brand-light); }
+  .course-item.active { background: var(--brand-light); border-left: 3px solid var(--brand); }
+  .course-item-dot {
+    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
   }
 
-  /* Panel animation class */
-  .panel-slide { animation: slideInRight 0.22s cubic-bezier(0.4,0,0.2,1); }
-
-  /* Tag */
-  .tag { font-weight: 700 !important; }
+  /* ── Voice search ── */
+  .voice-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 34px; height: 34px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--card);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    font-size: 15px;
+    flex-shrink: 0;
+    color: var(--muted);
+  }
+  .voice-btn:hover { border-color: var(--brand); background: var(--brand-light); color: var(--brand); }
+  .voice-btn.listening {
+    border-color: var(--critical);
+    background: var(--critical-bg);
+    color: var(--critical);
+    animation: voicePulse 1s ease infinite;
+  }
+  @keyframes voicePulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(217,45,32,0.3); }
+    50%       { box-shadow: 0 0 0 6px rgba(217,45,32,0); }
+  }
 `;
 
 function toDate(x) {
@@ -460,48 +503,15 @@ function fmtGrade10FromPct(pct) {
   return (Number(pct) / 10).toFixed(1);
 }
 
-function computeRiskFromPct(pct) {
-  // Calcula riesgo real basado en nota de 0-100:
-  //   < 50%  → alto   (nota < 5.0)
-  //   50-70% → medio  (nota 5.0 – 7.0)
-  //   ≥ 70%  → bajo   (nota ≥ 7.0)
-  //   null   → pending
-  if (pct == null || Number.isNaN(Number(pct))) return "pending";
-  const p = Number(pct);
-  if (p < 50) return "alto";
-  if (p < 70) return "medio";
-  return "bajo";
-}
-
 function flattenOutcomeDescriptions(payload) {
   const sets = payload?.outcomeSets;
   if (!Array.isArray(sets)) return [];
-
   const flat = [];
-
   for (const s of sets) {
     for (const o of s?.Outcomes || []) {
-      const raw = String(o?.Description || "").trim();
-      if (!raw) continue;
-
-      const m = raw.match(/^([A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9_.-]+)\s*-\s*(.+)$/);
-
-      if (m) {
-        flat.push({
-          code: String(m[1]).trim(),
-          title: String(m[2]).trim(),
-          description: raw,
-        });
-      } else {
-        flat.push({
-          code: null,
-          title: raw,
-          description: raw,
-        });
-      }
+      if (o?.Description) flat.push(String(o.Description));
     }
   }
-
   return flat;
 }
 
@@ -581,12 +591,23 @@ function pickCriticalMacroFromGemelo(g) {
   return copy[0];
 }
 
+function computeRiskFromPct(pct) {
+  // Calcula riesgo basado en nota de 0-100:
+  //   < 50%  → alto   (nota < 5.0)
+  //   50-70% → medio  (nota 5.0 – 7.0)
+  //   ≥ 70%  → bajo   (nota ≥ 7.0)
+  //   null   → pending
+  if (pct == null || Number.isNaN(Number(pct))) return "pending";
+  const p = Number(pct);
+  if (p < 50) return "alto";
+  if (p < 70) return "medio";
+  return "bajo";
+}
+
 function suggestRouteForStudent(s, thresholds) {
+  const risk = String(s?.risk || "").toLowerCase();
   const perf = s?.currentPerformancePct != null ? Number(s.currentPerformancePct) : null;
   const cov = s?.coveragePct != null ? Number(s.coveragePct) : null;
-  // Riesgo calculado desde nota: ignoramos el campo risk del backend
-  // porque puede ser de RA, no de nota final
-  const risk = perf != null ? computeRiskFromPct(perf) : String(s?.risk || "").toLowerCase();
 
   if (cov != null && cov < 40) {
     return {
@@ -659,7 +680,7 @@ function StatusBadge({ status }) {
 
 function Card({ title, right, children, className = "", style = {} }) {
   return (
-    <div className={`kpi-card ${className}`} style={{ display: "flex", flexDirection: "column", ...style }}>
+    <div className={`kpi-card ${className}`} style={style}>
       {(title || right) && (
         <div
           style={{
@@ -750,44 +771,59 @@ function ProgressBar({ value, color, showLabel = false, animate = true }) {
 
 function InfoTooltip({ text }) {
   const [open, setOpen] = React.useState(false);
-  const [pos, setPos] = React.useState({ top: 0, left: 0, align: "center" });
-  const btnRef = React.useRef(null);
+  const ref = React.useRef(null);
+  const [pos, setPos] = React.useState({ top: 0, left: 0 });
 
   if (!String(text || "").trim()) return null;
 
   const updatePos = () => {
-    if (!btnRef.current) return;
+    if (!ref.current) return;
+    const rect = ref.current.getBoundingClientRect();
 
-    const r = btnRef.current.getBoundingClientRect();
-    const tooltipWidth = 280;
-    const margin = 16;
-    const viewportWidth = window.innerWidth;
-
-    let left = r.left + r.width / 2;
-    let align = "center";
-
-    if (left - tooltipWidth / 2 < margin) {
-      left = margin + tooltipWidth / 2;
-      align = "left";
-    } else if (left + tooltipWidth / 2 > viewportWidth - margin) {
-      left = viewportWidth - margin - tooltipWidth / 2;
-      align = "right";
+    const tooltipWidth = Math.min(280, Math.floor(window.innerWidth * 0.65));
+    // Prefer left-aligned to avoid overflow on rightmost columns
+    const spaceRight = window.innerWidth - rect.right;
+    const spaceLeft  = rect.left;
+    let left;
+    if (spaceRight >= tooltipWidth + 12) {
+      // enough room to the right
+      left = Math.min(rect.left, window.innerWidth - tooltipWidth - 12);
+    } else if (spaceLeft >= tooltipWidth + 12) {
+      // align to left edge of button
+      left = Math.max(12, rect.right - tooltipWidth);
+    } else {
+      // center and clamp
+      left = Math.max(12, Math.min(
+        rect.left + rect.width / 2 - tooltipWidth / 2,
+        window.innerWidth - tooltipWidth - 12
+      ));
     }
 
-    setPos({
-      top: r.top,
-      left,
-      align,
-    });
+    const tooltipHeightGuess = 100;
+    const top =
+      rect.top > tooltipHeightGuess + 16
+        ? rect.top - tooltipHeightGuess - 10
+        : rect.bottom + 10;
+
+    setPos({ top, left });
   };
 
+  React.useEffect(() => {
+    if (!open) return;
+    updatePos();
+    window.addEventListener("scroll", updatePos, true);
+    window.addEventListener("resize", updatePos);
+    return () => {
+      window.removeEventListener("scroll", updatePos, true);
+      window.removeEventListener("resize", updatePos);
+    };
+  }, [open]);
+
   return (
-    <span style={{ position: "relative", display: "inline-flex", flex: "0 0 auto" }}>
+    <>
       <span
-        ref={btnRef}
-        role="button"
-        tabIndex={0}
-        aria-label="Ver descripción"
+        ref={ref}
+        style={{ position: "relative", display: "inline-flex", flex: "0 0 auto" }}
         onMouseEnter={() => {
           updatePos();
           setOpen(true);
@@ -803,24 +839,29 @@ function InfoTooltip({ text }) {
           updatePos();
           setOpen((v) => !v);
         }}
-        style={{
-          display: "inline-flex",
-          width: 16,
-          height: 16,
-          borderRadius: 999,
-          alignItems: "center",
-          justifyContent: "center",
-          border: "1px solid var(--border)",
-          color: "var(--muted)",
-          fontSize: 10,
-          fontWeight: 900,
-          cursor: "help",
-          background: "var(--card)",
-          lineHeight: 1,
-          flexShrink: 0,
-        }}
       >
-        ?
+        <span
+          role="button"
+          tabIndex={0}
+          aria-label="Ver descripción"
+          style={{
+            display: "inline-flex",
+            width: 16,
+            height: 16,
+            borderRadius: 999,
+            alignItems: "center",
+            justifyContent: "center",
+            border: "1px solid var(--border)",
+            color: "var(--muted)",
+            fontSize: 10,
+            fontWeight: 900,
+            cursor: "help",
+            background: "var(--card)",
+            lineHeight: 1,
+          }}
+        >
+          ?
+        </span>
       </span>
 
       {open && (
@@ -830,40 +871,23 @@ function InfoTooltip({ text }) {
             position: "fixed",
             top: pos.top,
             left: pos.left,
-            transform: "translate(-180%)",
-            width: "min(250px, 85vw)",
-            zIndex: 99998,
+            width: "min(320px, 75vw)",
+            zIndex: 99999,
             background: "var(--card)",
             border: "1px solid var(--border)",
-            boxShadow: "0 8px 28px rgba(0,0,0,0.18)",
-            borderRadius: 10,
-            padding: "5px 8px",
+            boxShadow: "var(--shadow-lg)",
+            borderRadius: 12,
+            padding: 10,
             color: "var(--text)",
             fontSize: 12,
-            fontWeight: 500,
-            lineHeight: 1.55,
-            whiteSpace: "normal",
-            pointerEvents: "none",
+            fontWeight: 600,
+            lineHeight: 1.4,
           }}
         >
-          <div
-            style={{
-              position: "absolute",
-              bottom: -0,
-              left: "50%",
-              transform: "translateX(-50  %) rotate(45deg)",
-              width: 8,
-              height: 8,
-              background: "var(--card)",
-              border: "1px solid var(--border)",
-              borderTop: "none",
-              borderLeft: "none",
-            }}
-          />
           {text}
         </div>
       )}
-    </span>
+    </>
   );
 }
 
@@ -889,47 +913,27 @@ function SortTh({ label, active, dir, onClick, title }) {
   );
 }
 
-function CoverageBars({ donePct, pendingPct, openPct, overduePct }) {
-  const d = Math.max(0, Math.min(100, Number(donePct ?? 0)));
-  const p = Math.max(0, Math.min(100, Number(pendingPct ?? 0)));
-  const op = Math.max(0, Math.min(100, Number(openPct ?? 0)));
+function CoverageBars({ donePct, pendingPct, overduePct, openPct }) {
+  const d  = Math.max(0, Math.min(100, Number(donePct   ?? 0)));
+  const p  = Math.max(0, Math.min(100, Number(pendingPct ?? 0)));
   const ov = Math.max(0, Math.min(100, Number(overduePct ?? 0)));
+  // openPct puede pasarse explícitamente; si no, se calcula como residuo
+  const op = openPct != null
+    ? Math.max(0, Math.min(100, Number(openPct)))
+    : Math.max(0, 100 - d - p - ov);
 
   const BarRow = ({ label, value, color, tooltip }) => (
     <div style={{ display: "flex", flexDirection: "column", gap: 5 }} title={tooltip}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div
-          style={{
-            fontSize: 11,
-            color: "var(--muted)",
-            fontWeight: 700,
-            textTransform: "uppercase",
-            letterSpacing: "0.04em",
-            display: "flex",
-            alignItems: "center",
-            gap: 5,
-          }}
-        >
-          <span
-            style={{
-              width: 7,
-              height: 7,
-              borderRadius: "50%",
-              background: color,
-              display: "inline-block",
-              flexShrink: 0,
-            }}
-          />
+        <div style={{
+          fontSize: 11, color: "var(--muted)", fontWeight: 700,
+          textTransform: "uppercase", letterSpacing: "0.04em",
+          display: "flex", alignItems: "center", gap: 5,
+        }}>
+          <span style={{ width: 7, height: 7, borderRadius: "50%", background: color, display: "inline-block", flexShrink: 0 }} />
           {label}
         </div>
-        <div
-          style={{
-            fontSize: 12,
-            color: "var(--text)",
-            fontWeight: 800,
-            fontFamily: "var(--font-mono)",
-          }}
-        >
+        <div style={{ fontSize: 12, color: "var(--text)", fontWeight: 800, fontFamily: "var(--font-mono)" }}>
           {value.toFixed(1)}%
         </div>
       </div>
@@ -939,46 +943,22 @@ function CoverageBars({ donePct, pendingPct, openPct, overduePct }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div
-        style={{
-          fontSize: 11,
-          color: "var(--muted)",
-          fontWeight: 700,
-          textTransform: "uppercase",
-          letterSpacing: "0.05em",
-        }}
-      >
+      <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" }}>
         Índice de cumplimiento evaluativo
       </div>
-
-      <BarRow
-        label="Calificado"
-        value={d}
-        color={COLORS.ok}
-        tooltip="Ítems con nota numérica publicada en el gradebook."
-      />
-
-      <BarRow
-        label="Pendiente calificación"
-        value={p}
-        color={COLORS.brand}
-        tooltip="El estudiante entregó pero el docente aún no ha publicado nota numérica."
-      />
-
+      <BarRow label="Calificado" value={d} color={COLORS.ok}
+        tooltip="Ítems con nota numérica publicada en el gradebook." />
+      <BarRow label="Pendiente calificación" value={p} color={COLORS.brand}
+        tooltip="El estudiante entregó pero el docente aún no ha publicado nota numérica." />
       {op > 0.5 && (
-        <BarRow
-          label="Sin entregar (abierto)"
-          value={op}
-          color={COLORS.pending}
-          tooltip="Sin nota, sin señal de entrega, y la fecha de vencimiento aún no ha llegado."
-        />
+        <BarRow label="Sin entregar (abierto)" value={op} color={COLORS.pending}
+          tooltip="Sin nota, sin señal de entrega, y la fecha de vencimiento aún no ha llegado." />
       )}
-
       <BarRow
         label="Vencido sin registro"
         value={ov}
         color={ov > 0 ? COLORS.critical : "rgba(148,163,184,0.4)"}
-        tooltip="Sin nota, sin entrega registrada, y la fecha de vencimiento ya pasó."
+        tooltip="Sin nota, sin entrega registrada, y la fecha de vencimiento ya pasó. Requiere acción docente."
       />
     </div>
   );
@@ -1401,6 +1381,153 @@ function EvidencesTimeline({ evidences, thresholds }) {
   );
 }
 
+// ─────────────────────────────────────────────────────────
+// CoursePanel — lista de cursos del docente
+// ─────────────────────────────────────────────────────────
+function CoursePanel({ courses, loadingCourses, currentId, onSelect, onClose }) {
+  const [search, setSearch] = React.useState("");
+
+  const filtered = React.useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return courses;
+    return courses.filter(
+      (c) =>
+        String(c.name || "").toLowerCase().includes(q) ||
+        String(c.code || "").toLowerCase().includes(q)
+    );
+  }, [courses, search]);
+
+  const active = filtered.filter((c) => c.isActive !== false);
+  const inactive = filtered.filter((c) => c.isActive === false);
+
+  return (
+    <div className="course-panel-overlay" onClick={onClose}>
+      <div className="course-panel" onClick={(e) => e.stopPropagation()}>
+        {/* Header */}
+        <div style={{
+          padding: "16px 20px",
+          borderBottom: "1px solid var(--border)",
+          display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
+        }}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: "var(--text)" }}>Mis cursos</div>
+            <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
+              {loadingCourses ? "Cargando…" : `${courses.length} curso${courses.length !== 1 ? "s" : ""} encontrado${courses.length !== 1 ? "s" : ""}`}
+            </div>
+          </div>
+          <button className="btn" onClick={onClose} style={{ padding: "6px 12px", fontSize: 12 }}>
+            ✕ Cerrar
+          </button>
+        </div>
+
+        {/* Search */}
+        <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)" }}>
+          <input
+            autoFocus
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar por nombre o código…"
+            type="text"
+            style={{
+              width: "100%",
+              border: "1px solid var(--border)",
+              borderRadius: 10, padding: "8px 12px",
+              fontWeight: 600, background: "var(--bg)",
+              color: "var(--text)", fontSize: 13,
+              outline: "none",
+            }}
+          />
+        </div>
+
+        {/* List */}
+        <div style={{ flex: 1, overflowY: "auto" }}>
+          {loadingCourses ? (
+            <div style={{ padding: 40, textAlign: "center", color: "var(--muted)", fontSize: 13 }}>
+              <div className="pulse-dot" style={{ background: "var(--brand)", width: 10, height: 10, margin: "0 auto 12px" }} />
+              Consultando Brightspace…
+            </div>
+          ) : filtered.length === 0 ? (
+            <div style={{ padding: 40, textAlign: "center", color: "var(--muted)", fontSize: 13 }}>
+              Sin resultados para "{search}"
+            </div>
+          ) : (
+            <>
+              {active.length > 0 && (
+                <>
+                  <div style={{ padding: "8px 16px 4px", fontSize: 10, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                    Activos · {active.length}
+                  </div>
+                  {active.map((c) => (
+                    <CourseItem key={c.id} course={c} isActive={true} isCurrent={c.id === currentId} onSelect={onSelect} />
+                  ))}
+                </>
+              )}
+              {inactive.length > 0 && (
+                <>
+                  <div style={{ padding: "12px 16px 4px", fontSize: 10, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                    Históricos · {inactive.length}
+                  </div>
+                  {inactive.map((c) => (
+                    <CourseItem key={c.id} course={c} isActive={false} isCurrent={c.id === currentId} onSelect={onSelect} />
+                  ))}
+                </>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CourseItem({ course, isActive, isCurrent, onSelect }) {
+  const startYear = course.startDate ? new Date(course.startDate).getFullYear() : null;
+  const endYear   = course.endDate   ? new Date(course.endDate).getFullYear()   : null;
+  const period = startYear && endYear && startYear !== endYear
+    ? `${startYear}–${endYear}` : startYear ? String(startYear) : null;
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      className={`course-item${isCurrent ? " active" : ""}`}
+      onClick={() => onSelect(course.id)}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onSelect(course.id); }}
+    >
+      <div
+        className="course-item-dot"
+        style={{ background: isActive ? "var(--ok)" : "var(--muted)" }}
+      />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{
+          fontSize: 13, fontWeight: 700, color: "var(--text)",
+          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+        }}>
+          {course.name || `Curso ${course.id}`}
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 2, flexWrap: "wrap" }}>
+          {course.code && (
+            <span style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--muted)", fontWeight: 600 }}>
+              {course.code}
+            </span>
+          )}
+          {period && (
+            <span style={{ fontSize: 11, color: "var(--muted)" }}>{period}</span>
+          )}
+        </div>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
+        {isCurrent && (
+          <span className="tag" style={{ fontSize: 10, padding: "2px 6px" }}>Activo</span>
+        )}
+        <span style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--muted)" }}>
+          {course.id}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function StudentCard({ s, onOpen }) {
   return (
     <div
@@ -1419,7 +1546,7 @@ function StudentCard({ s, onOpen }) {
           <div style={{ fontSize: 11, color: "var(--muted)", fontFamily: "var(--font-mono)", marginTop: 2 }}>ID {s.userId}</div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 5 }}>
-          <StatusBadge status={s.isLoading ? "cargando" : computeRiskFromPct(s.currentPerformancePct)} />
+          <StatusBadge status={s.isLoading ? "cargando" : s.risk} />
           {s.hasPrescription && <span className="tag" style={{ fontSize: 10 }}>📋 Prescripción</span>}
         </div>
       </div>
@@ -1437,7 +1564,7 @@ function StudentCard({ s, onOpen }) {
           <div style={{ fontSize: 10, color: "var(--muted)" }}>{s.coverageCountText || "—"}</div>
         </div>
         <div style={{ textAlign: "center", padding: "8px 4px", background: "var(--bg)", borderRadius: 8 }}>
-          <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700, marginBottom: 2 }}>FOCO CRÍTICO</div>
+          <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700, marginBottom: 2 }}>RA CRÍTICO</div>
           <div style={{ fontWeight: 800, fontSize: 12, fontFamily: "var(--font-mono)" }}>{s.mostCriticalMacro ? s.mostCriticalMacro.code : "—"}</div>
         </div>
       </div>
@@ -1477,62 +1604,6 @@ export default function App() {
 
   const [orgUnitId, setOrgUnitId] = useState(DEFAULT_ORG_UNIT_ID);
   const [orgUnitInput, setOrgUnitInput] = useState(String(DEFAULT_ORG_UNIT_ID));
-  const [showCoursePanel, setShowCoursePanel] = useState(false);
-  const [courseList, setCourseList] = useState([]);
-  const [courseListLoading, setCourseListLoading] = useState(false);
-
-  // Fetch enrolled courses when panel opens
-  // Tries multiple common Brightspace/backend endpoints in sequence
-  React.useEffect(() => {
-    if (!showCoursePanel || courseList.length > 0) return;
-    setCourseListLoading(true);
-
-    const tryEndpoints = async () => {
-      // Rutas en orden de prioridad — las dos primeras existen en el backend actual.
-      // /brightspace/my-course-offerings  → retorna { count, items: [{id,name,code,...}] }
-      // /brightspace/courses/enrolled     → alias del anterior (mismo schema)
-      // /brightspace/my-courses           → raw Brightspace { Items: [{OrgUnit:{...}},...] }
-      const endpoints = [
-        "/brightspace/my-course-offerings",
-        "/brightspace/courses/enrolled",
-        "/brightspace/my-courses",
-      ];
-
-      for (const ep of endpoints) {
-        try {
-          const d = await apiGet(ep);
-
-          // /my-course-offerings y /courses/enrolled → { items: [...] }
-          if (Array.isArray(d?.items) && d.items.length > 0) return d.items;
-
-          // /my-courses → raw Brightspace { Items: [{OrgUnit:{Id,Name,Code,...}},...] }
-          if (Array.isArray(d?.Items) && d.Items.length > 0) {
-            return d.Items
-              .map((it) => {
-                const ou = it?.OrgUnit || {};
-                return {
-                  id:   ou.Id,
-                  name: ou.Name || "",
-                  code: ou.Code || "",
-                };
-              })
-              .filter((c) => c.id);
-          }
-
-          // Array directo (fallback)
-          if (Array.isArray(d) && d.length > 0) return d;
-        } catch {
-          // intentar siguiente ruta
-        }
-      }
-      return [];
-    };
-
-    tryEndpoints()
-      .then((items) => setCourseList(items))
-      .catch(() => setCourseList([]))
-      .finally(() => setCourseListLoading(false));
-  }, [showCoursePanel]);
 
   const [outcomesMap, setOutcomesMap] = useState({});
   const [learningOutcomesPayload, setLearningOutcomesPayload] = useState(null);
@@ -1557,6 +1628,90 @@ export default function App() {
   const [studentErr, setStudentErr] = useState("");
 
   const [drawerTab, setDrawerTab] = useState("resumen");
+
+  // ── Course panel ───────────────────────────────────────
+  const [showCoursePanel, setShowCoursePanel] = useState(false);
+  const [courseList, setCourseList] = useState([]);
+  const [loadingCourses, setLoadingCourses] = useState(false);
+  const [courseListLoaded, setCourseListLoaded] = useState(false);
+
+  // Cargar lista de cursos del docente (lazy — solo cuando abre el panel)
+  const loadCourseList = React.useCallback(async () => {
+    if (courseListLoaded || loadingCourses) return;
+    setLoadingCourses(true);
+    try {
+      const data = await apiGet("/brightspace/my-course-offerings?active_only=false&limit=500");
+      const items = Array.isArray(data?.items) ? data.items : [];
+      // Ordenar: activos primero, luego por nombre
+      items.sort((a, b) => {
+        if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
+        return String(a.name || "").localeCompare(String(b.name || ""), "es", { sensitivity: "base" });
+      });
+      setCourseList(items);
+      setCourseListLoaded(true);
+    } catch {
+      // no bloquear la app si falla
+    } finally {
+      setLoadingCourses(false);
+    }
+  }, [courseListLoaded, loadingCourses]);
+
+  const handleOpenCoursePanel = () => {
+    setShowCoursePanel(true);
+    loadCourseList();
+  };
+
+  const handleSelectCourse = (id) => {
+    const v = Number(id);
+    if (v > 0) {
+      setOrgUnitId(v);
+      setOrgUnitInput(String(v));
+    }
+    setShowCoursePanel(false);
+  };
+
+  // ── Voice search ───────────────────────────────────────
+  const [voiceListening, setVoiceListening] = useState(false);
+  const recognitionRef = React.useRef(null);
+
+  const voiceSupported = typeof window !== "undefined" &&
+    !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+
+  const toggleVoice = React.useCallback(() => {
+    if (!voiceSupported) return;
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (voiceListening) {
+      recognitionRef.current?.stop();
+      setVoiceListening(false);
+      return;
+    }
+
+    const rec = new SR();
+    rec.lang = "es-CO";
+    rec.continuous = false;
+    rec.interimResults = false;
+
+    rec.onstart = () => setVoiceListening(true);
+    rec.onend   = () => setVoiceListening(false);
+    rec.onerror = () => setVoiceListening(false);
+
+    rec.onresult = (event) => {
+      const transcript = Array.from(event.results)
+        .map((r) => r[0].transcript)
+        .join(" ")
+        .trim();
+      if (transcript) setQuery(transcript);
+    };
+
+    recognitionRef.current = rec;
+    rec.start();
+  }, [voiceListening, voiceSupported]);
+
+  // Stop recognition on unmount
+  React.useEffect(() => {
+    return () => { recognitionRef.current?.stop(); };
+  }, []);
 
   const hideGlobalProgressCol = isNarrow;
   const hideCriticalMacroCol = isMobile;
@@ -1650,17 +1805,25 @@ export default function App() {
         setStudentRows(baseRows);
         setLoading(false);
 
-        const hasInlineSummary =
-          studentItems.length > 0 &&
-          (studentItems[0]?.summary ||
-            studentItems[0]?.risk ||
-            studentItems[0]?.coveragePct != null ||
-            studentItems[0]?.currentPerformancePct != null);
+        // hasInlineSummary: detecta si el backend devolvió métricas reales con datos de nota.
+        // Requisito: al menos un estudiante tiene currentPerformancePct o coveragePct real.
+        // Si el batch endpoint retornó todos nulos (falla silenciosa), caemos al mapLimit.
+        const _hasMeaningfulData = studentItems.some((s) => {
+          const sum = s.summary ?? s.gradebook ?? {};
+          return sum?.currentPerformancePct != null || sum?.coveragePct != null;
+        });
+        // También consideramos válido si hay estructura de items (totalItemsCount > 0)
+        // para al menos un estudiante — aunque no tenga nota aún
+        const _hasStructure = studentItems.some((s) => {
+          const sum = s.summary ?? s.gradebook ?? {};
+          return (sum?.totalItemsCount != null && sum.totalItemsCount > 0);
+        });
+        const hasInlineSummary = studentItems.length > 0 && (_hasMeaningfulData || _hasStructure);
 
         if (hasInlineSummary) {
           const details = studentItems.map((s) => {
             const userId = s.userId ?? s.UserId ?? s.Identifier;
-            const sum = s.summary || s;
+            const sum = s.summary ?? s.gradebook ?? s;
             const gradedItemsCount = sum?.gradedItemsCount ?? sum?.coverageGradedCount ?? null;
             const totalItemsCount = sum?.totalItemsCount ?? sum?.coverageTotalCount ?? null;
             const coverageCountText =
@@ -1672,6 +1835,7 @@ export default function App() {
               displayName: s.displayName ?? s.DisplayName ?? "—",
               roleName: s.roleName ?? "—",
               isLoading: false,
+              // Riesgo siempre desde nota del gradebook (no del campo risk del backend que puede ser de RA)
               risk: computeRiskFromPct(sum?.currentPerformancePct ?? null),
               globalPct: sum?.globalPct ?? null,
               currentPerformancePct: sum?.currentPerformancePct ?? null,
@@ -1681,16 +1845,13 @@ export default function App() {
               coverageCountText,
               hasPrescription: Boolean(sum?.hasPrescription ?? s?.hasPrescription ?? false),
               mostCriticalMacro: s?.mostCriticalMacro ?? null,
-              // Nuevo: enviado sin nota (pendingSubmitted) y vencido sin registro (overdue)
-              // Backend names: overdueUnscoredWeightPct / pendingUngradedWeightPct
-              pendingSubmittedCount:      sum?.pendingUngradedCount      ?? sum?.pendingSubmittedCount      ?? 0,
-              pendingSubmittedWeightPct:  sum?.pendingUngradedWeightPct  ?? sum?.pendingSubmittedWeightPct  ?? 0,
-              overdueCount:               sum?.overdueUnscoredCount       ?? sum?.overdueCount               ?? 0,
-              overdueWeightPct:           sum?.overdueUnscoredWeightPct   ?? sum?.overdueWeightPct           ?? 0,
-              openCount: sum?.openCount ?? 0,
-              openWeightPct: sum?.openWeightPct ?? 0,
-              notSubmittedCount:          sum?.overdueUnscoredCount       ?? sum?.notSubmittedCount          ?? 0,
-              notSubmittedWeightPct:      sum?.overdueUnscoredWeightPct   ?? sum?.notSubmittedWeightPct      ?? 0,
+              // Nombres normalizados: pendingSubmitted + overdue para compatibilidad con toda la UI
+              pendingSubmittedCount:     sum?.pendingUngradedCount      ?? sum?.pendingSubmittedCount      ?? 0,
+              pendingSubmittedWeightPct: sum?.pendingUngradedWeightPct  ?? sum?.pendingSubmittedWeightPct  ?? 0,
+              overdueCount:              sum?.overdueUnscoredCount       ?? sum?.overdueCount               ?? 0,
+              overdueWeightPct:          sum?.overdueUnscoredWeightPct   ?? sum?.overdueWeightPct           ?? 0,
+              notSubmittedCount:         sum?.overdueUnscoredCount       ?? sum?.notSubmittedCount          ?? 0,
+              notSubmittedWeightPct:     sum?.overdueUnscoredWeightPct   ?? sum?.notSubmittedWeightPct      ?? 0,
             };
             row.route = suggestRouteForStudent(row, thr);
             return row;
@@ -1698,64 +1859,64 @@ export default function App() {
 
           if (!isMounted) return;
           setStudentRows(details);
-          return;
-        }
 
-        await mapLimit(studentItems, 4, async (s) => {
-          const userId = s.userId ?? s.UserId ?? s.Identifier;
-          try {
-            const g = await apiGet(`/gemelo/course/${orgUnitId}/student/${userId}`, { signal: controller.signal });
-            if (!isMounted) return;
+          // Enriquecer con datos de overview.studentsAtRisk (ya tiene currentPerformancePct
+          // calculado por build_course_overview que sí usa build_gemelo individual).
+          // Esto evita hacer llamadas adicionales a /student/{id} que pueden fallar por CORS
+          // en algunos entornos de producción.
+          const atRiskMap = {};
+          for (const s of (ov?.studentsAtRisk || [])) {
+            if (s.userId != null) atRiskMap[Number(s.userId)] = s;
+          }
 
-            const sum = g?.summary || {};
-            const mostCriticalMacro = pickCriticalMacroFromGemelo(g);
-            const gradedItemsCount = sum?.gradedItemsCount ?? sum?.coverageGradedCount ?? g?.gradebook?.gradedItemsCount ?? null;
-            const totalItemsCount = sum?.totalItemsCount ?? sum?.coverageTotalCount ?? g?.gradebook?.totalItemsCount ?? null;
-            const coverageCountText =
-              sum?.coverageCountText ??
-              g?.gradebook?.coverageCountText ??
-              (gradedItemsCount != null && totalItemsCount != null ? `${gradedItemsCount}/${totalItemsCount}` : null);
-
-            const patch = {
-              isLoading: false,
-              risk: computeRiskFromPct(sum?.currentPerformancePct ?? null),
-              globalPct: sum?.globalPct ?? null,
-              currentPerformancePct: sum?.currentPerformancePct ?? null,
-              coveragePct: sum?.coveragePct ?? null,
-              gradedItemsCount,
-              totalItemsCount,
-              coverageCountText,
-              hasPrescription: Array.isArray(g?.prescription) && g.prescription.length > 0,
-              mostCriticalMacro,
-              pendingSubmittedCount:      sum?.pendingUngradedCount      ?? sum?.pendingSubmittedCount      ?? 0,
-              pendingSubmittedWeightPct:  sum?.pendingUngradedWeightPct  ?? sum?.pendingSubmittedWeightPct  ?? 0,
-              overdueCount:               sum?.overdueUnscoredCount      ?? sum?.overdueCount               ?? 0,
-              overdueWeightPct:           sum?.overdueUnscoredWeightPct  ?? sum?.overdueWeightPct           ?? 0,
-              openCount:                  sum?.openCount ?? 0,
-              openWeightPct:              sum?.openWeightPct ?? 0,
-              notSubmittedCount:          sum?.overdueUnscoredCount      ?? sum?.notSubmittedCount          ?? 0,
-              notSubmittedWeightPct:      sum?.overdueUnscoredWeightPct  ?? sum?.notSubmittedWeightPct      ?? 0,
-            };
-
+          if (Object.keys(atRiskMap).length > 0) {
             setStudentRows((prev) =>
               prev.map((row) => {
-                if (row.userId !== Number(userId)) return row;
-                const merged = { ...row, ...patch };
+                const ar = atRiskMap[row.userId];
+                if (!ar) return row;
+                const perf = ar.currentPerformancePct ?? null;
+                const merged = {
+                  ...row,
+                  currentPerformancePct: perf,
+                  coveragePct: ar.coveragePct ?? row.coveragePct,
+                  risk: computeRiskFromPct(perf),
+                  notSubmittedWeightPct: Number(ar.overdueUnscoredWeightPct ?? ar.notSubmittedWeightPct ?? 0),
+                  overdueWeightPct:      Number(ar.overdueUnscoredWeightPct ?? ar.notSubmittedWeightPct ?? 0),
+                  pendingSubmittedWeightPct: Number(ar.pendingUngradedWeightPct ?? ar.pendingSubmittedWeightPct ?? 0),
+                };
                 merged.route = suggestRouteForStudent(merged, thr);
                 return merged;
               })
             );
-          } catch {
-            if (controller.signal.aborted || !isMounted) return;
-            setStudentRows((prev) =>
-              prev.map((row) =>
-                row.userId === Number(userId)
-                  ? { ...row, isLoading: false, risk: "pending" }
-                  : row
-              )
-            );
           }
-        });
+          return;
+        }
+
+        // El batch /students?include=summary no devolvió estructura (hasInlineSummary=false).
+        // Enriquecer desde overview.studentsAtRisk en lugar de llamar /student/{id}
+        // (esas llamadas pueden fallar por CORS en producción).
+        const atRiskMap2 = {};
+        for (const s of (ov?.studentsAtRisk || [])) {
+          if (s.userId != null) atRiskMap2[Number(s.userId)] = s;
+        }
+        setStudentRows((prev) =>
+          prev.map((row) => {
+            const ar = atRiskMap2[row.userId];
+            const perf = ar?.currentPerformancePct ?? null;
+            const merged = {
+              ...row,
+              isLoading: false,
+              currentPerformancePct: perf,
+              coveragePct: ar?.coveragePct ?? row.coveragePct,
+              risk: computeRiskFromPct(perf),
+              notSubmittedWeightPct: Number(ar?.overdueUnscoredWeightPct ?? ar?.notSubmittedWeightPct ?? 0),
+              overdueWeightPct:      Number(ar?.overdueUnscoredWeightPct ?? ar?.notSubmittedWeightPct ?? 0),
+              pendingSubmittedWeightPct: Number(ar?.pendingUngradedWeightPct ?? ar?.pendingSubmittedWeightPct ?? 0),
+            };
+            merged.route = suggestRouteForStudent(merged, thr);
+            return merged;
+          })
+        );
       } catch (e) {
         if (controller.signal.aborted || !isMounted) return;
         setErr(String(e?.message || e));
@@ -1835,40 +1996,36 @@ export default function App() {
         });
         if (!alive) return;
 
-        // Si el gemelo no trajo evidencias en gradebook, intentar endpoint directo de Brightspace
+        // Si el servidor no incluyó evidencias en el gradebook (modo estudiante en server antiguo),
+        // las obtenemos del endpoint directo de Brightspace.
         const hasEvidences = Array.isArray(g?.gradebook?.evidences) && g.gradebook.evidences.length > 0;
-        if (!hasEvidences) {
+        if (!hasEvidences && g?.summary?.gradedItemsCount > 0) {
           try {
             const ev = await apiGet(
               `/brightspace/course/${orgUnitId}/grades/student/${selectedStudent.userId}/evidence`,
               { signal: controller.signal }
             );
-            if (!alive) return;
-            // Normalizar al shape que espera el drawer
-            const items = Array.isArray(ev?.items) ? ev.items : [];
-            const normalized = items
-              .filter((e) => e.points != null || e.displayed != null)
-              .map((e) => {
-                const pts = e.points != null ? Number(e.points) : null;
-                const max = e.maxPoints != null ? Number(e.maxPoints) : null;
-                const scorePct = pts != null && max != null && max > 0
-                  ? Math.round((pts / max) * 1000) / 10
-                  : null;
-                return {
-                  gradeObjectId: e.gradeObjectId,
-                  name:     e.name || `Ítem ${e.gradeObjectId}`,
-                  weightPct: e.weight != null ? Number(e.weight) : null,
-                  scorePct,
-                  points:   pts,
-                  maxPoints: max,
-                  displayed: e.displayed,
-                  status:   pts != null ? "graded" : (e.displayed ? "pending" : "open"),
-                };
-              });
-            // Inject into gemelo response
-            g.gradebook = { ...(g.gradebook || {}), evidences: normalized };
+            if (alive && Array.isArray(ev?.items)) {
+              const normalized = ev.items
+                .filter((e) => e.points != null || e.displayed != null)
+                .map((e) => {
+                  const pts  = e.points   != null ? Number(e.points)    : null;
+                  const max  = e.maxPoints != null ? Number(e.maxPoints) : null;
+                  const scorePct = pts != null && max != null && max > 0
+                    ? Math.round((pts / max) * 1000) / 10
+                    : null;
+                  return {
+                    gradeObjectId: e.gradeObjectId,
+                    name:      e.name || `Ítem ${e.gradeObjectId}`,
+                    weightPct: e.weight != null ? Number(e.weight) : null,
+                    scorePct,
+                    status:    scorePct != null ? "graded" : (e.displayed ? "pending" : "open"),
+                  };
+                });
+              g.gradebook = { ...(g.gradebook || {}), evidences: normalized };
+            }
           } catch {
-            // Evidencias no disponibles — no bloquear el drawer
+            // evidencias no disponibles — no bloquear el drawer
           }
         }
 
@@ -1890,8 +2047,8 @@ export default function App() {
 
   const thresholds = overview?.thresholds || { critical: 50, watch: 70 };
 
-  // riskData: calculado desde la nota real de cada estudiante (no del backend por RA)
   const riskData = useMemo(() => {
+    // Calculado desde notas reales (no globalRiskDistribution del backend que puede ser por RA)
     const counts = { alto: 0, medio: 0, bajo: 0 };
     for (const s of studentRows) {
       if (s.isLoading || s.currentPerformancePct == null) continue;
@@ -1906,161 +2063,57 @@ export default function App() {
   }, [studentRows]);
 
   const learningOutcomesData = useMemo(() => {
-    const ras = Array.isArray(raDashboard?.ras) ? raDashboard.ras : [];
-    const catalog = flattenOutcomeDescriptions(learningOutcomesPayload);
-    const totalStudents =
-      Number(overview?.studentsCount ?? raDashboard?.totalStudents ?? 0) || 0;
+  const ras = Array.isArray(raDashboard?.ras) ? raDashboard.ras : [];
+  const descList = flattenOutcomeDescriptions(learningOutcomesPayload);
 
-    const normalize = (s) =>
-      String(s || "")
-        .toLowerCase()
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .replace(/\s+/g, " ")
-        .trim();
+  // Si los RAs existen pero TODOS tienen studentsWithData=0, no hay datos reales todavía
+  const rasWithData = ras.filter((r) => Number(r.studentsWithData ?? 0) > 0);
+  const effectiveRas = rasWithData.length > 0 ? ras : [];
 
-    // Caso 1: no hay nada
-    if (!catalog.length && !ras.length) return [];
-
-    // Caso 2: solo dashboard
-    if (!catalog.length && ras.length) {
-      const w = ras.length ? 100 / ras.length : 0;
-
-      return ras.map((r, idx) => {
-        const rawCode = String(r.code || "").trim();
-        const fallbackLabel = rawCode || `Resultado ${idx + 1}`;
-        const avgPct = r.avgPct == null ? null : Number(r.avgPct);
-
-        return {
-          key: rawCode || `metric-${idx + 1}`,
-          code: rawCode || null,
-          name: String(r.label || fallbackLabel),
-          title: String(r.label || fallbackLabel),
-          description: String(r.label || fallbackLabel),
-          avgPct,
-          weightPct: Number(r.weightPct ?? w),
-          coveragePct: Number(r.coveragePct ?? 0),
-          studentsWithData: Number(r.studentsWithData ?? 0),
-          totalStudents: Number(r.totalStudents ?? totalStudents),
-          status:
-            avgPct == null
-              ? "pending"
-              : r.status ||
-                (avgPct < thresholds.critical
-                  ? "critico"
-                  : avgPct < thresholds.watch
-                  ? "observacion"
-                  : "solido"),
-        };
-      });
-    }
-
-    // Caso 3: catálogo manda visualmente
-    const base = catalog.map((item, idx) => ({
-      key: item.code ? normalize(item.code) : `catalog-${idx + 1}`,
-      code: item.code || null,
-      name: item.code || `Resultado ${idx + 1}`,
-      title: item.title || `Resultado ${idx + 1}`,
-      description: item.description || item.title || `Resultado ${idx + 1}`,
-      avgPct: null,
-      weightPct: catalog.length ? 100 / catalog.length : 0,
-      coveragePct: 0,
-      studentsWithData: 0,
-      totalStudents,
-      status: "pending",
-    }));
-
-    if (!ras.length) return base;
-
-    // Índices de métricas
-    const dashboardByCode = new Map();
-    const dashboardByLabel = new Map();
-
-    ras.forEach((r, idx) => {
-      const codeKey = normalize(r.code);
-      const labelKey = normalize(r.label);
-
-      if (codeKey) dashboardByCode.set(codeKey, { ...r, __idx: idx });
-      if (labelKey) dashboardByLabel.set(labelKey, { ...r, __idx: idx });
+  if (effectiveRas.length) {
+    const outcomeMap = {};
+    Object.values(outcomesMap || {}).forEach((o) => {
+      if (o?.code) outcomeMap[String(o.code).toUpperCase()] = o;
     });
 
-    const usedMetricIndexes = new Set();
+    const w = 100 / effectiveRas.length;
 
-    const merged = base.map((item, idx) => {
-      let metric = null;
-
-      // 1. match por código real del catálogo
-      if (item.code) {
-        metric = dashboardByCode.get(normalize(item.code)) || null;
-      }
-
-      // 2. match por título/label
-      if (!metric && item.title) {
-        metric = dashboardByLabel.get(normalize(item.title)) || null;
-      }
-
-      // 3. fallback por posición
-      if (!metric && ras[idx]) {
-        metric = { ...ras[idx], __idx: idx };
-      }
-
-      if (!metric) return item;
-
-      usedMetricIndexes.add(metric.__idx);
-
-      const avgPct = metric.avgPct == null ? null : Number(metric.avgPct);
+    return effectiveRas.map((r, idx) => {
+      const code = String(r.code || `RA${idx + 1}`).toUpperCase();
+      const match = outcomeMap[code];
+      const fallbackDesc = descList[idx] || "";
 
       return {
-        ...item,
-        avgPct,
-        coveragePct: Number(metric.coveragePct ?? 0),
-        studentsWithData: Number(metric.studentsWithData ?? 0),
-        totalStudents: Number(metric.totalStudents ?? totalStudents),
-        status:
-          avgPct == null
-            ? "pending"
-            : metric.status ||
-              (avgPct < thresholds.critical
-                ? "critico"
-                : avgPct < thresholds.watch
-                ? "observacion"
-                : "solido"),
-      };
-    });
-
-    // Si el dashboard trae más métricas que el catálogo, anexarlas
-    ras.forEach((r, idx) => {
-      if (usedMetricIndexes.has(idx)) return;
-
-      const avgPct = r.avgPct == null ? null : Number(r.avgPct);
-      const rawCode = String(r.code || "").trim();
-      const rawLabel = String(r.label || "").trim();
-
-      merged.push({
-        key: rawCode ? normalize(rawCode) : `extra-${idx + 1}`,
-        code: rawCode || null,
-        name: rawCode || rawLabel || `Resultado ${idx + 1}`,
-        title: rawLabel || rawCode || `Resultado ${idx + 1}`,
-        description: rawLabel || rawCode || `Resultado ${idx + 1}`,
-        avgPct,
-        weightPct: Number(r.weightPct ?? 0),
+        code,
+        name: match?.title || r.label || fallbackDesc || code,
+        description: match?.description || fallbackDesc || r.label || code,
+        avgPct: Number(r.avgPct ?? 0),
+        weightPct: Number(r.weightPct ?? w),
+        status: r.status || null,
         coveragePct: Number(r.coveragePct ?? 0),
         studentsWithData: Number(r.studentsWithData ?? 0),
-        totalStudents: Number(r.totalStudents ?? totalStudents),
-        status:
-          avgPct == null
-            ? "pending"
-            : r.status ||
-              (avgPct < thresholds.critical
-                ? "critico"
-                : avgPct < thresholds.watch
-                ? "observacion"
-                : "solido"),
-      });
+        totalStudents: Number(r.totalStudents ?? 0),
+      };
     });
+  }
 
-    return merged;
-  }, [raDashboard, learningOutcomesPayload, overview, thresholds]);
+  if (descList.length) {
+    const w = 100 / descList.length;
+    return descList.map((d, idx) => ({
+      code: `RA${idx + 1}`,
+      name: d,
+      description: d,
+      avgPct: 0,
+      weightPct: w,
+      status: null,
+      coveragePct: 0,
+      studentsWithData: 0,
+      totalStudents: 0,
+    }));
+  }
+
+  return [];
+}, [raDashboard, learningOutcomesPayload, outcomesMap]);
 
 const weakestAssignment = useMemo(() => {
   const allEvidence = [];
@@ -2126,142 +2179,19 @@ const weakestAssignment = useMemo(() => {
   return valid[0];
 }, [learningOutcomesData]);
 
-const avgPerfPct = overview?.courseGradebook?.avgCurrentPerformancePct ?? null;
-const avgCov = overview?.courseGradebook?.avgCoveragePct ?? null;
-const covDone = avgCov == null ? 0 : Math.max(0, Math.min(100, Number(avgCov)));
-
-const avgPendingSubmittedPct = useMemo(() => {
-  const v =
-    overview?.courseGradebook?.avgPendingUngradedPct ??
-    overview?.courseGradebook?.avgPendingUngradedWeightPct ??
-    overview?.courseGradebook?.avgPendingSubmittedPct;
-
-  if (v != null && !Number.isNaN(Number(v))) {
-    return Math.max(0, Math.min(100, Number(v)));
-  }
-
-  const loaded = studentRows.filter((s) => !s.isLoading);
-  if (loaded.length > 0) {
-    const vals = loaded
-      .map((s) => Number(s.pendingSubmittedWeightPct ?? 0))
-      .filter((x) => !Number.isNaN(x));
-    if (vals.length > 0) {
-      return Math.min(100, vals.reduce((a, b) => a + b, 0) / loaded.length);
-    }
-  }
-
-  return 0;
-}, [overview, studentRows]);
-
-const avgNotSubmittedPct = useMemo(() => {
-  const gb = overview?.courseGradebook ?? {};
-  const backendVal =
-    gb.avgNotSubmittedPct ??
-    gb.avgOverdueUnscoredPct ??
-    gb.avgOverdueWeightPct ??
-    gb.overdueWeightPct ??
-    gb.avgOverduePct;
-
-  if (backendVal != null && !Number.isNaN(Number(backendVal))) {
-    return Math.max(0, Math.min(100, Number(backendVal)));
-  }
-
-  const loaded = studentRows.filter((s) => !s.isLoading);
-  if (loaded.length > 0) {
-    const vals = loaded
-      .map((s) => Number(s.overdueWeightPct ?? s.notSubmittedWeightPct ?? 0))
-      .filter((x) => !Number.isNaN(x));
-
-    if (vals.length > 0) {
-      return Math.min(100, vals.reduce((a, b) => a + b, 0) / loaded.length);
-    }
-  }
-
-  const atRisk = Array.isArray(overview?.studentsAtRisk) ? overview.studentsAtRisk : [];
-  if (atRisk.length > 0) {
-    const total = overview?.studentsCount ?? atRisk.length;
-    const sumOverdue = atRisk.reduce(
-      (acc, s) =>
-        acc + Number(s.notSubmittedWeightPct ?? s.overdueUnscoredWeightPct ?? s.overdueWeightPct ?? 0),
-      0
-    );
-    return Math.min(100, sumOverdue / total);
-  }
-
-  return 0;
-}, [overview, studentRows]);
-
-const avgOpenPct = useMemo(() => {
-  const gb = overview?.courseGradebook ?? {};
-  const backendVal = gb.avgOpenPct ?? gb.avgOpenWeightPct;
-
-  if (backendVal != null && !Number.isNaN(Number(backendVal))) {
-    return Math.max(0, Math.min(100, Number(backendVal)));
-  }
-
-  return Math.max(
-    0,
-    Math.min(
-      100,
-      100 - Number(avgCov ?? 0) - Number(avgPendingSubmittedPct ?? 0) - Number(avgNotSubmittedPct ?? 0)
-    )
-  );
-}, [overview, avgCov, avgPendingSubmittedPct, avgNotSubmittedPct]);
-
-const avgPendingUngradedPct = avgPendingSubmittedPct;
-const avgOverdueUnscoredPct = avgNotSubmittedPct;
-
-  // covPending = lo que no está calificado, no está vencido y no está enviado pendiente
-  // Matemáticamente: 100 - calificado - enviado_sin_nota - vencido_sin_registro
-  const covPending = avgOpenPct;
-
-  const studentsCount = overview?.studentsCount ?? studentsList?.students?.count ?? studentRows.length ?? 0;
-  const totalStudents = Number(studentsCount || 0) || 0;
-  // atRiskCount calculado desde nota real (no desde globalRiskDistribution del backend)
-  const atRiskCount = studentRows.filter((s) => {
-    if (s.isLoading || s.currentPerformancePct == null) return false;
-    return computeRiskFromPct(s.currentPerformancePct) !== "bajo";
-  }).length;
-  const atRiskPct = totalStudents > 0 ? (atRiskCount / totalStudents) * 100 : null;
-
-  // courseStatus: basado en nota promedio o, si no hay, en distribución calculada desde notas
-  const courseStatus = useMemo(() => {
-    if (avgPerfPct != null && Number(avgPerfPct) > 0) {
-      const p = Number(avgPerfPct);
-      if (p < thresholds.critical) return "critico";
-      if (p < thresholds.watch) return "en seguimiento";
-      return "solido";
-    }
-    // Fallback: usar distribución calculada desde studentRows
-    const loaded = studentRows.filter((s) => !s.isLoading && s.currentPerformancePct != null);
-    if (!loaded.length) return "pending";
-    const a = loaded.filter((s) => computeRiskFromPct(s.currentPerformancePct) === "alto").length;
-    const m = loaded.filter((s) => computeRiskFromPct(s.currentPerformancePct) === "medio").length;
-    const b = loaded.filter((s) => computeRiskFromPct(s.currentPerformancePct) === "bajo").length;
-    if (a >= m && a >= b && a > 0) return "critico";
-    if (m >= a && m >= b && m > 0) return "en desarrollo";
-    if (b > 0) return "solido";
-    return "pending";
-  }, [avgPerfPct, thresholds, studentRows]);
-
-
-  // Estudiantes prioritarios: nota < 5 | ítems vencidos | cobertura baja
-  // Fuente 1: overview.studentsAtRisk (disponible de inmediato, calculado en el back)
-  // Fuente 2: studentRows enriquecidos (disponible tras carga incremental)
-  // Estudiantes prioritarios — solo ALTO y MEDIO (basado en nota).
-  // Riesgo BAJO se excluye siempre. Orden: alto → medio → pendiente (sin nota + problema).
   const assignmentRiskData = useMemo(() => {
-    // Normaliza un item de cualquier fuente al shape común
     const toItem = (raw, perf, overduePct, pendingPct, coveragePct) => {
       const risk = computeRiskFromPct(perf);
-      const type = risk === "alto" || (perf != null && Number(perf) < 50)
-        ? "low_grade"
-        : overduePct > 0
-        ? "overdue"
-        : pendingPct > 0
-        ? "pending_submitted"
-        : "low_coverage";
-      return { ...raw, type, risk,
+      const type =
+        risk === "alto" || (perf != null && Number(perf) < 50)
+          ? "low_grade"
+          : overduePct > 0
+          ? "overdue"
+          : pendingPct > 0
+          ? "pending_submitted"
+          : "low_coverage";
+      return {
+        ...raw, type, risk,
         currentPerformancePct: perf != null ? Number(perf) : null,
         notSubmittedWeightPct: overduePct,
         pendingSubmittedWeightPct: pendingPct,
@@ -2269,22 +2199,21 @@ const avgOverdueUnscoredPct = avgNotSubmittedPct;
       };
     };
 
-    // Fuente 1: overview.studentsAtRisk del backend
+    // Fuente 1: overview.studentsAtRisk (backend)
     const backendRisk = Array.isArray(overview?.studentsAtRisk) ? overview.studentsAtRisk : [];
     let candidates = [];
-
     if (backendRisk.length > 0) {
       candidates = backendRisk.map((s) =>
         toItem(
           { userId: s.userId, name: s.displayName },
           s.currentPerformancePct,
-          Number(s.notSubmittedWeightPct ?? s.overdueUnscoredWeightPct ?? s.overdueWeightPct ?? 0),
+          Number(s.overdueUnscoredWeightPct ?? s.notSubmittedWeightPct ?? 0),
           Number(s.pendingUngradedWeightPct ?? s.pendingSubmittedWeightPct ?? 0),
           s.coveragePct,
         )
       );
     } else {
-      // Fuente 2: studentRows enriquecidos
+      // Fuente 2: studentRows cargados
       const loaded = studentRows.filter((s) => !s.isLoading);
       candidates = loaded.map((s) =>
         toItem(
@@ -2297,30 +2226,19 @@ const avgOverdueUnscoredPct = avgNotSubmittedPct;
       );
     }
 
-    // FILTRO: excluir riesgo bajo (nota ≥ 70%) a menos que tengan overdue/pending significativo
     const filtered = candidates.filter((s) => {
-      if (s.risk === "alto") return true;
-      if (s.risk === "medio") return true;
-      if (s.risk === "pending") {
-        // Sin nota aún: incluir solo si hay cobertura baja, overdue o pending
-        return s.coveragePct < 60 || s.notSubmittedWeightPct > 0 || s.pendingSubmittedWeightPct > 0;
-      }
-      // risk === "bajo" → solo incluir si hay overdue/pending real y significativo (> 10%)
+      if (s.risk === "alto" || s.risk === "medio") return true;
+      if (s.risk === "pending") return s.coveragePct < 60 || s.notSubmittedWeightPct > 0 || s.pendingSubmittedWeightPct > 0;
       return s.notSubmittedWeightPct > 10 || s.pendingSubmittedWeightPct > 10;
     });
 
-    // ORDEN: alto (nota < 50) → medio (50-70) → pending → por nota asc dentro de cada grupo
     const riskOrder = { alto: 0, medio: 1, pending: 2, bajo: 3 };
     filtered.sort((a, b) => {
       const ro = (riskOrder[a.risk] ?? 3) - (riskOrder[b.risk] ?? 3);
       if (ro !== 0) return ro;
-      // Dentro del mismo riesgo: nota más baja primero (más urgente)
-      const pa = a.currentPerformancePct ?? 999;
-      const pb = b.currentPerformancePct ?? 999;
-      return pa - pb;
+      return (a.currentPerformancePct ?? 999) - (b.currentPerformancePct ?? 999);
     });
 
-    // Deduplicar por userId
     const seen = new Set();
     return filtered.filter((s) => {
       if (seen.has(s.userId)) return false;
@@ -2329,9 +2247,94 @@ const avgOverdueUnscoredPct = avgNotSubmittedPct;
     }).slice(0, 8);
   }, [overview, studentRows]);
 
+  const avgPerfPct = overview?.courseGradebook?.avgCurrentPerformancePct ?? null;
+  const avgCov = overview?.courseGradebook?.avgCoveragePct ?? null;
+  const covDone = avgCov == null ? 0 : Math.max(0, Math.min(100, Number(avgCov)));
+
+  // avgPendingUngradedPct: enviado sin nota. Fuente 1: backend. Fuente 2: promedio de studentRows.
+  const avgPendingUngradedPct = useMemo(() => {
+    const direct =
+      overview?.courseGradebook?.avgPendingUngradedPct ??
+      overview?.courseGradebook?.avgPendingSubmittedPct;
+    if (direct != null && !Number.isNaN(Number(direct))) {
+      return Math.max(0, Math.min(100, Number(direct)));
+    }
+    const loaded = studentRows.filter((s) => !s.isLoading);
+    if (loaded.length > 0) {
+      const vals = loaded
+        .map((s) => Number(s.pendingSubmittedWeightPct ?? 0))
+        .filter((x) => !Number.isNaN(x));
+      if (vals.length > 0)
+        return Math.min(100, vals.reduce((a, b) => a + b, 0) / loaded.length);
+    }
+    return 0;
+  }, [overview, studentRows]);
+
+  // avgOverdueUnscoredPct: vencido sin registro. Fuente 1: backend. Fuente 2: promedio de studentRows.
+  const avgOverdueUnscoredPct = useMemo(() => {
+    const direct =
+      overview?.courseGradebook?.avgOverdueUnscoredPct ??
+      overview?.courseGradebook?.avgNotSubmittedPct;
+    if (direct != null && !Number.isNaN(Number(direct))) {
+      return Math.max(0, Math.min(100, Number(direct)));
+    }
+    const loaded = studentRows.filter((s) => !s.isLoading);
+    if (loaded.length > 0) {
+      const vals = loaded
+        .map((s) => Number(s.overdueWeightPct ?? s.notSubmittedWeightPct ?? 0))
+        .filter((x) => !Number.isNaN(x));
+      if (vals.length > 0)
+        return Math.min(100, vals.reduce((a, b) => a + b, 0) / loaded.length);
+    }
+    // Fallback 2: studentsAtRisk si rows aún no cargaron
+    const atRisk = Array.isArray(overview?.studentsAtRisk) ? overview.studentsAtRisk : [];
+    if (atRisk.length > 0) {
+      const total = overview?.studentsCount ?? atRisk.length;
+      const sum = atRisk.reduce(
+        (acc, s) => acc + Number(s.overdueUnscoredWeightPct ?? s.notSubmittedWeightPct ?? 0), 0
+      );
+      return Math.min(100, sum / total);
+    }
+    return 0;
+  }, [overview, studentRows]);
+
+  const covPending = Math.max(
+    0,
+    Math.min(100, 100 - covDone - avgPendingUngradedPct - avgOverdueUnscoredPct)
+  );
+
+  const studentsCount = overview?.studentsCount ?? studentsList?.students?.count ?? studentRows.length ?? 0;
+  const totalStudents = Number(studentsCount || 0) || 0;
+  // atRiskCount calculado desde nota real (computeRiskFromPct), no desde globalRiskDistribution del backend
+  // que puede basarse en RA/rúbricas y no en el gradebook final.
+  const atRiskCount = studentRows.filter((s) => {
+    if (s.isLoading || s.currentPerformancePct == null) return false;
+    return computeRiskFromPct(s.currentPerformancePct) !== "bajo";
+  }).length;
+  const atRiskPct = totalStudents > 0 ? (atRiskCount / totalStudents) * 100 : null;
+
+  const courseStatus = useMemo(() => {
+    if (avgPerfPct != null && Number(avgPerfPct) > 0) {
+      const p = Number(avgPerfPct);
+      if (p < thresholds.critical) return "critico";
+      if (p < thresholds.watch) return "en seguimiento";
+      return "solido";
+    }
+    // Fallback: distribución calculada desde notas reales de studentRows
+    const loaded = studentRows.filter((s) => !s.isLoading && s.currentPerformancePct != null);
+    if (!loaded.length) return "pending";
+    const a = loaded.filter((s) => computeRiskFromPct(s.currentPerformancePct) === "alto").length;
+    const m = loaded.filter((s) => computeRiskFromPct(s.currentPerformancePct) === "medio").length;
+    const b = loaded.filter((s) => computeRiskFromPct(s.currentPerformancePct) === "bajo").length;
+    if (a >= m && a >= b && a > 0) return "critico";
+    if (m >= a && m >= b && m > 0) return "en desarrollo";
+    if (b > 0) return "solido";
+    return "pending";
+  }, [avgPerfPct, thresholds, overview, studentRows]);
+
   const filteredStudents = useMemo(() => {
     let list = Array.isArray(studentRows) ? [...studentRows] : [];
-    if (onlyRisk) list = list.filter((s) => ["alto", "medio"].includes(computeRiskFromPct(s.currentPerformancePct)));
+    if (onlyRisk) list = list.filter((s) => ["alto", "medio"].includes(normStatus(s.risk)));
     const q = query.trim().toLowerCase();
     if (q) {
       list = list.filter(
@@ -2386,34 +2389,31 @@ const contentKpis = useMemo(() => {
     return contentRhythmStatus(contentKpis?.progressRatio);
   }, [contentKpis]);
   const performanceBands = useMemo(() => {
-    // Aligned with dashboard thresholds (50 = critical, 70 = watch)
-    // Converted to 0-10 scale: 50% = 5.0, 70% = 7.0
-    const bands = [
-      { name: "Óptimo (≥7)", key: "solid", value: 0, students: [], color: COLORS.ok },
-      { name: "Seguimiento (5–7)", key: "watch", value: 0, students: [], color: COLORS.watch },
-      { name: "Crítico (<5)", key: "critical", value: 0, students: [], color: COLORS.critical },
-      { name: "Sin datos", key: "pending", value: 0, students: [], color: COLORS.pending },
-    ];
+  const bands = [
+    { name: "Excelente", key: "excellent", value: 0, color: COLORS.ok },
+    { name: "Sólido", key: "solid", value: 0, color: COLORS.brand },
+    { name: "Seguimiento", key: "watch", value: 0, color: COLORS.watch },
+    { name: "Crítico", key: "critical", value: 0, color: COLORS.critical },
+    { name: "Sin datos", key: "pending", value: 0, color: COLORS.pending },
+  ];
 
-    for (const s of studentRows) {
-      const p = s?.currentPerformancePct;
-      if (p == null || Number.isNaN(Number(p))) {
-        bands[3].value += 1;
-        bands[3].students.push(s);
-      } else if (Number(p) >= 70) {
-        bands[0].value += 1;
-        bands[0].students.push(s);
-      } else if (Number(p) >= 50) {
-        bands[1].value += 1;
-        bands[1].students.push(s);
-      } else {
-        bands[2].value += 1;
-        bands[2].students.push(s);
-      }
+  for (const s of studentRows) {
+    const p = s?.currentPerformancePct;
+    if (p == null || Number.isNaN(Number(p))) {
+      bands[4].value += 1;
+    } else if (Number(p) >= 85) {
+      bands[0].value += 1;
+    } else if (Number(p) >= 70) {
+      bands[1].value += 1;
+    } else if (Number(p) >= 50) {
+      bands[2].value += 1;
+    } else {
+      bands[3].value += 1;
     }
+  }
 
-    return bands;
-  }, [studentRows]);
+  return bands;
+}, [studentRows]);
 
   const sortedStudents = useMemo(() => {
     const list = filteredStudents.slice();
@@ -2428,7 +2428,7 @@ const contentKpis = useMemo(() => {
         case "coverage":
           return s.coveragePct == null ? -1 : Number(s.coveragePct);
         case "risk": {
-          const r = computeRiskFromPct(s.currentPerformancePct);
+          const r = normStatus(s.risk);
           return r === "alto" ? 0 : r === "medio" ? 1 : r === "bajo" ? 2 : 3;
         }
         default:
@@ -2461,19 +2461,8 @@ const contentKpis = useMemo(() => {
   const drawerPendingItems = Array.isArray(drawerGradebook?.pendingItems) ? drawerGradebook.pendingItems : [];
   const drawerMissingValues = Array.isArray(drawerGradebook?.missingValues) ? drawerGradebook.missingValues : [];
   const drawerQcFlags = Array.isArray(studentDetail?.qualityFlags) ? studentDetail.qualityFlags : [];
-  // Drawer: usar nuevos campos semánticos
-  // Backend field names: pendingUngradedWeightPct / overdueUnscoredWeightPct
-  const drawerPendingSubmittedPct = Number(
-    drawerSummary?.pendingUngradedWeightPct  ?? drawerSummary?.pendingSubmittedWeightPct  ?? 0
-  );
-  const drawerOverduePct = Number(
-    drawerSummary?.overdueUnscoredWeightPct  ?? drawerSummary?.overdueWeightPct           ??
-    drawerSummary?.notSubmittedWeightPct     ?? 0
-  );
-  const drawerOpenPct = Number(drawerSummary?.openWeightPct ?? 0);
-  // Aliases para compatibilidad con CoverageBars existente en drawer
-  const drawerPendingUngradedPct = drawerPendingSubmittedPct;
-  const drawerOverdueUnscoredPct = drawerOverduePct;
+  const drawerPendingUngradedPct = Number(drawerSummary?.pendingUngradedWeightPct ?? 0);
+  const drawerOverdueUnscoredPct = Number(drawerSummary?.overdueUnscoredWeightPct ?? 0);
   const covGraded = Number(drawerSummary?.gradedItemsCount ?? drawerGradebook?.gradedItemsCount ?? 0) || 0;
   const covTotal = Number(drawerSummary?.totalItemsCount ?? drawerGradebook?.totalItemsCount ?? 0) || 0;
   const covText =
@@ -2523,151 +2512,6 @@ const contentKpis = useMemo(() => {
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--bg)", fontFamily: "var(--font)" }}>
-
-      {/* ── Course Panel Portal — rendered at root to avoid stacking context issues ── */}
-      {showCoursePanel && (
-        <div
-          style={{
-            position: "fixed", inset: 0, zIndex: 99999,
-            background: "rgba(15,23,42,0.55)", backdropFilter: "blur(3px)",
-            display: "flex", justifyContent: "flex-end",
-          }}
-          onClick={() => setShowCoursePanel(false)}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="panel-slide"
-            style={{
-              width: "min(380px, 96vw)", height: "100%",
-              background: "var(--bg)",
-              boxShadow: "-8px 0 48px rgba(0,0,0,0.22)",
-              display: "flex", flexDirection: "column",
-              borderLeft: "1px solid var(--border)",
-            }}
-          >
-            {/* Header */}
-            <div style={{
-              padding: "18px 18px 14px",
-              borderBottom: "1px solid var(--border)",
-              background: "var(--card)",
-            }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                <div>
-                  <div style={{ fontSize: 15, fontWeight: 900, color: "var(--text)", letterSpacing: "-0.02em" }}>
-                    📚 Mis cursos
-                  </div>
-                  <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>
-                    Selecciona un curso o ingresa el ID
-                  </div>
-                </div>
-                <button
-                  onClick={() => setShowCoursePanel(false)}
-                  style={{
-                    background: "var(--bg)", border: "1px solid var(--border)",
-                    borderRadius: 8, padding: "4px 9px", cursor: "pointer",
-                    fontSize: 14, color: "var(--muted)", lineHeight: 1,
-                  }}
-                >✕</button>
-              </div>
-              {/* Inline ID search */}
-              <div style={{ marginTop: 12, display: "flex", gap: 6 }}>
-                <input
-                  value={orgUnitInput}
-                  onChange={(e) => setOrgUnitInput(e.target.value)}
-                  type="number"
-                  style={{
-                    flex: 1, border: "1px solid var(--border)", borderRadius: 8,
-                    padding: "8px 11px", fontWeight: 700, background: "var(--bg)",
-                    color: "var(--text)", fontSize: 13, outline: "none",
-                    fontFamily: "var(--font-mono)",
-                  }}
-                  placeholder="OrgUnitId…"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      const v = Number(orgUnitInput);
-                      if (v > 0) { setOrgUnitId(v); setShowCoursePanel(false); }
-                    }
-                  }}
-                />
-                <button
-                  className="btn btn-primary"
-                  style={{ paddingLeft: 14, paddingRight: 14, borderRadius: 8 }}
-                  onClick={() => {
-                    const v = Number(orgUnitInput);
-                    if (v > 0) { setOrgUnitId(v); setShowCoursePanel(false); }
-                  }}
-                >
-                  Ir →
-                </button>
-              </div>
-            </div>
-            {/* Course list */}
-            <div style={{ flex: 1, overflowY: "auto", padding: "10px 10px" }}>
-              {courseListLoading ? (
-                <div style={{ padding: "48px 20px", textAlign: "center" }}>
-                  <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}>
-                    <span className="pulse-dot" style={{ background: "var(--brand)", width: 10, height: 10 }} />
-                  </div>
-                  <div style={{ fontSize: 13, color: "var(--muted)", fontWeight: 600 }}>Cargando cursos…</div>
-                </div>
-              ) : courseList.length > 0 ? (
-                <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                  <div style={{ fontSize: 10, color: "var(--muted)", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em", padding: "4px 8px 6px" }}>
-                    {courseList.length} curso{courseList.length !== 1 ? "s" : ""}
-                  </div>
-                  {courseList.map((c, i) => {
-                    const cId = c.OrgUnitId || c.orgUnitId || c.Id || c.id;
-                    const cName = c.Name || c.name || c.DisplayName || c.displayName || `Curso ${cId}`;
-                    const cCode = c.Code || c.code || c.OrgUnitCode || "";
-                    const isActive = cId && Number(cId) === Number(orgUnitId);
-                    return (
-                      <button
-                        key={cId || i}
-                        onClick={() => {
-                          if (cId) { setOrgUnitId(Number(cId)); setOrgUnitInput(String(cId)); }
-                          setShowCoursePanel(false);
-                        }}
-                        style={{
-                          display: "flex", alignItems: "center", gap: 10,
-                          padding: "10px 10px", borderRadius: 10,
-                          border: isActive ? "1px solid var(--brand)" : "1px solid transparent",
-                          background: isActive ? "rgba(99,102,241,0.07)" : "var(--card)",
-                          cursor: "pointer", textAlign: "left",
-                          transition: "background 0.12s",
-                          width: "100%",
-                        }}
-                        onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = "var(--bg)"; }}
-                        onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = "var(--card)"; }}
-                      >
-                        <div style={{ width: 4, flexShrink: 0, alignSelf: "stretch", borderRadius: 999, background: isActive ? "var(--brand)" : "var(--border)" }} />
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", lineHeight: 1.4, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
-                            {cName}
-                          </div>
-                          <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2, fontFamily: "var(--font-mono)" }}>
-                            {cCode ? `${cCode} · ` : ""}ID {cId}
-                          </div>
-                        </div>
-                        {isActive && <div style={{ fontSize: 10, fontWeight: 800, color: "var(--brand)", flexShrink: 0 }}>Activo</div>}
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div style={{ padding: "48px 20px", textAlign: "center" }}>
-                  <div style={{ fontSize: 36, marginBottom: 12, opacity: 0.4 }}>📭</div>
-                  <div style={{ fontSize: 13, color: "var(--text)", fontWeight: 700 }}>Sin cursos cargados</div>
-                  <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 6, lineHeight: 1.5 }}>
-                    El endpoint de cursos no retornó datos.<br />
-                    Usa el campo de ID arriba para navegar.
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
       <div style={{ maxWidth: 1200, margin: "0 auto", padding: isMobile ? "12px" : "20px" }}>
         <div
           className="fade-up"
@@ -2680,67 +2524,73 @@ const contentKpis = useMemo(() => {
             marginBottom: 20,
           }}
         >
-          {/* ── Brand + Course breadcrumb ── */}
-          <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span className="tag">Vista Docente</span>
-              </div>
-              <button
-                onClick={() => setShowCoursePanel(true)}
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div
                 style={{
-                  display: "flex", alignItems: "center", gap: 5,
-                  background: "none", border: "none", cursor: "pointer",
-                  padding: 0, textAlign: "left",
+                  fontSize: isMobile ? 18 : 22,
+                  fontWeight: 900,
+                  color: "var(--text)",
+                  letterSpacing: "-0.02em",
                 }}
-                title="Cambiar de curso"
               >
-                <span style={{ fontSize: 11, color: "var(--brand)", fontWeight: 700, fontFamily: "var(--font-mono)" }}>
-                  {courseInfo?.Name
-                    ? (courseInfo.Name.length > 55 ? courseInfo.Name.slice(0, 52) + "…" : courseInfo.Name)
-                    : `Curso ${orgUnitId}`}
-                </span>
-                <span style={{ fontSize: 10, color: "var(--muted)" }}>▾</span>
-              </button>
+                Gemelo Digital
+              </div>
+              <span className="tag">Vista Docente</span>
+            </div>
+            <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 3 }}>
+              Curso{" "}
+              <strong style={{ fontFamily: "var(--font-mono)" }}>
+                {courseInfo?.Name || orgUnitId}
+              </strong>
             </div>
           </div>
-          {/* ── Controls ── */}
+
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            {/* Mis cursos — abre el panel lateral */}
             <button
-              className="btn"
-              onClick={() => setShowCoursePanel(true)}
-              style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 700 }}
+              className="btn btn-primary"
+              onClick={handleOpenCoursePanel}
+              style={{ gap: 6 }}
             >
               <span>📚</span>
-              <span>{isMobile ? "" : "Mis cursos"}</span>
+              {isMobile ? "Cursos" : "Mis cursos"}
             </button>
 
-            <div style={{ display: "flex", gap: 0, border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
+            {/* Fallback: búsqueda directa por ID */}
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
               <input
                 value={orgUnitInput}
                 onChange={(e) => setOrgUnitInput(e.target.value)}
                 type="number"
                 style={{
-                  width: 110, border: "none", borderRight: "1px solid var(--border)",
-                  padding: "8px 10px", fontWeight: 700,
-                  background: "var(--card)", color: "var(--text)", fontSize: 13,
-                  outline: "none",
+                  width: 110,
+                  border: "1px solid var(--border)",
+                  borderRadius: 10,
+                  padding: "8px 10px",
+                  fontWeight: 700,
+                  background: "var(--card)",
+                  color: "var(--text)",
+                  fontSize: 13,
                 }}
-                placeholder="OrgUnitId"
+                placeholder="ID curso"
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") { const v = Number(orgUnitInput); if (v > 0) setOrgUnitId(v); }
+                  if (e.key === "Enter") {
+                    const v = Number(orgUnitInput);
+                    if (v > 0) { setOrgUnitId(v); }
+                  }
                 }}
               />
               <button
-                className="btn btn-primary"
-                style={{ borderRadius: 0, border: "none", paddingLeft: 12, paddingRight: 12 }}
+                className="btn"
                 onClick={() => { const v = Number(orgUnitInput); if (v > 0) setOrgUnitId(v); }}
+                title="Ir a curso"
               >
                 →
               </button>
             </div>
 
-            <button className="btn" onClick={() => setDarkMode((v) => !v)} title="Cambiar tema" style={{ padding: "8px 10px" }}>
+            <button className="btn" onClick={() => setDarkMode((v) => !v)} title="Cambiar tema">
               {darkMode ? "☀️" : "🌙"}
             </button>
           </div>
@@ -2757,7 +2607,6 @@ const contentKpis = useMemo(() => {
             gridTemplateColumns: isMobile ? "1fr" : isNarrow ? "1fr 1fr" : "2fr 1fr 1fr 1fr",
             gap: 12,
             marginBottom: 12,
-            alignItems: "stretch",
           }}
         >
           <Card title="Gestión del curso" right={<StatusBadge status={courseStatus} />}>
@@ -2776,9 +2625,7 @@ const contentKpis = useMemo(() => {
                 sub={
                   avgCov == null || Number(avgCov) === 0
                     ? "Sin cobertura registrada"
-                    : avgPendingSubmittedPct > 0
-                    ? `${fmtPct(covDone)} calif. · ${fmtPct(avgPendingSubmittedPct)} pend. · ${fmtPct(avgNotSubmittedPct)} venc.`
-                    : `${fmtPct(covDone)} calificado · ${fmtPct(covPending)} sin entregar`
+                    : `${fmtPct(covDone)} calificado · ${fmtPct(covPending)} pendiente`
                 }
               />
               <Stat
@@ -2938,86 +2785,76 @@ const contentKpis = useMemo(() => {
               ) : (
                 <CoverageBars
                   donePct={covDone}
-                  pendingPct={avgPendingSubmittedPct}
-                  openPct={avgOpenPct}
-                  overduePct={avgNotSubmittedPct}
+                  pendingPct={avgPendingUngradedPct}
+                  openPct={covPending}
+                  overduePct={avgOverdueUnscoredPct}
                 />
               )}
             </div>
           </Card>
 
           <Card title="Riesgo académico">
-            <div style={{ width: "100%", height: 180 }}>
+            <div style={{ width: "100%", height: 200 }}>
               <ResponsiveContainer>
                 <PieChart>
-                  <Pie data={riskData} dataKey="value" nameKey="name" innerRadius={52} outerRadius={78} paddingAngle={3}>
+                  <Pie
+                    data={riskData}
+                    dataKey="value"
+                    nameKey="name"
+                    innerRadius={55}
+                    outerRadius={82}
+                    paddingAngle={3}
+                  >
                     {riskData.map((entry) => (
                       <Cell key={entry.key} fill={colorForRisk(entry.key)} />
                     ))}
                   </Pie>
-                  <Tooltip formatter={(value) => {
-                    const v = Number(value || 0);
-                    const base = riskData.reduce((acc, r) => acc + r.value, 0);
-                    const pct = base > 0 ? (v / base) * 100 : 0;
-                    return [`${v} (${pct.toFixed(1)}%)`, "Estudiantes"];
-                  }} />
+                  <Tooltip
+                    formatter={(value) => {
+                      const v = Number(value || 0);
+                      const pct = totalStudents > 0 ? (v / totalStudents) * 100 : 0;
+                      return [`${v} (${pct.toFixed(1)}%)`, "Estudiantes"];
+                    }}
+                  />
                 </PieChart>
               </ResponsiveContainer>
             </div>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 12 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
               {riskData.map((r) => {
                 const count = Number(r.value || 0);
-                const base = riskData.reduce((acc, x) => acc + x.value, 0);
-                const pct = base > 0 ? (count / base) * 100 : 0;
+                const pct = totalStudents > 0 ? (count / totalStudents) * 100 : 0;
                 return (
                   <div key={r.key} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <div style={{ width: 8, height: 8, borderRadius: "50%", background: colorForRisk(r.key), flexShrink: 0 }} />
-                    <div style={{ flex: 1, fontSize: 12, color: "var(--text)", fontWeight: 600 }}>{r.name}</div>
-                    <div style={{ fontSize: 12, fontWeight: 800, fontFamily: "var(--font-mono)", color: colorForRisk(r.key) }}>{count}</div>
-                    <div style={{ fontSize: 11, color: "var(--muted)", width: 44, textAlign: "right" }}>{pct.toFixed(1)}%</div>
+                    <div
+                      style={{
+                        width: 8,
+                        height: 8,
+                        borderRadius: "50%",
+                        background: colorForRisk(r.key),
+                        flexShrink: 0,
+                      }}
+                    />
+                    <div style={{ flex: 1, fontSize: 12, color: "var(--text)", fontWeight: 600 }}>
+                      {r.name}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 800,
+                        fontFamily: "var(--font-mono)",
+                        color: colorForRisk(r.key),
+                      }}
+                    >
+                      {count}
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--muted)", width: 44, textAlign: "right" }}>
+                      {pct.toFixed(1)}%
+                    </div>
                   </div>
                 );
               })}
             </div>
-
-            <div style={{ height: 1, background: "var(--border)", margin: "4px 0 10px" }} />
-
-            <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
-              Distribución de notas
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-              {performanceBands.map((b) => {
-                const pct = totalStudents > 0 ? (b.value / totalStudents) * 100 : 0;
-                if (b.value === 0) return null;
-                return (
-                  <div key={b.key} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <div style={{ fontSize: 11, color: b.key === "critical" ? COLORS.critical : "var(--muted)", width: 78, flexShrink: 0, fontWeight: b.key === "critical" ? 800 : 600 }}>
-                      {b.name}
-                    </div>
-                    <div style={{ flex: 1, height: 6, borderRadius: 999, background: "rgba(148,163,184,0.15)", overflow: "hidden" }}>
-                      <div style={{ height: "100%", width: `${pct}%`, background: b.color, borderRadius: 999 }} />
-                    </div>
-                    <div style={{ fontSize: 12, fontWeight: 900, fontFamily: "var(--font-mono)", color: b.color, width: 24, textAlign: "right" }}>{b.value}</div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {avgNotSubmittedPct > 0 && (
-              <>
-                <div style={{ height: 1, background: "var(--border)", margin: "10px 0 8px" }} />
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700 }}>Vencidos sin registro</div>
-                  <div style={{ fontSize: 13, fontWeight: 900, fontFamily: "var(--font-mono)", color: COLORS.critical }}>
-                    {fmtPct(avgNotSubmittedPct)}
-                  </div>
-                </div>
-                <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
-                  Promedio del curso · peso del gradebook
-                </div>
-              </>
-            )}
           </Card>
 
           <Card
@@ -3045,8 +2882,6 @@ const contentKpis = useMemo(() => {
                   const hasLowGrade = item.type === "low_grade";
                   const grade10 = item.currentPerformancePct != null ? (item.currentPerformancePct / 10).toFixed(1) : null;
                   const gradeColor = item.currentPerformancePct != null ? colorForPct(item.currentPerformancePct, thresholds) : COLORS.pending;
-
-                  // Border/bg color priority: low grade > overdue > default
                   const borderColor = hasLowGrade ? "#FECDCA" : hasOverdue ? "#FED7AA" : "var(--border)";
                   const bgColor = hasLowGrade ? "var(--critical-bg)" : hasOverdue ? "var(--watch-bg)" : "var(--card)";
 
@@ -3079,7 +2914,6 @@ const contentKpis = useMemo(() => {
                       onMouseEnter={(e) => { e.currentTarget.style.boxShadow = "0 2px 12px rgba(0,0,0,0.10)"; e.currentTarget.style.transform = "translateY(-1px)"; }}
                       onMouseLeave={(e) => { e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.transform = "none"; }}
                     >
-                      {/* Row 1: name + risk + reason tag */}
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6 }}>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontSize: 12, fontWeight: 800, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -3087,40 +2921,29 @@ const contentKpis = useMemo(() => {
                           </div>
                           <div style={{ marginTop: 2 }}>
                             {item.type === "pending_submitted" && (
-                              <span style={{ fontSize: 9, fontWeight: 800, color: COLORS.brand, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                                ⏳ Pendiente calificación
-                              </span>
+                              <span style={{ fontSize: 9, fontWeight: 800, color: COLORS.brand, textTransform: "uppercase", letterSpacing: "0.06em" }}>⏳ Pendiente calificación</span>
                             )}
                             {item.type === "overdue" && (
-                              <span style={{ fontSize: 9, fontWeight: 800, color: COLORS.critical, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                                🔴 Vencido sin entrega
-                              </span>
+                              <span style={{ fontSize: 9, fontWeight: 800, color: COLORS.critical, textTransform: "uppercase", letterSpacing: "0.06em" }}>🔴 Vencido sin entrega</span>
                             )}
                             {item.type === "low_grade" && (
-                              <span style={{ fontSize: 9, fontWeight: 800, color: COLORS.critical, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                                ⚠️ Nota crítica
-                              </span>
+                              <span style={{ fontSize: 9, fontWeight: 800, color: COLORS.critical, textTransform: "uppercase", letterSpacing: "0.06em" }}>⚠️ Nota crítica</span>
                             )}
                             {item.type === "low_coverage" && (
-                              <span style={{ fontSize: 9, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                                📉 Cobertura baja
-                              </span>
+                              <span style={{ fontSize: 9, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>📉 Cobertura baja</span>
                             )}
                           </div>
                         </div>
                         <StatusBadge status={computeRiskFromPct(item.currentPerformancePct)} />
                       </div>
 
-                      {/* Row 2: metrics */}
                       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                        {/* Grade pill */}
                         {grade10 != null && (
                           <div style={{ flexShrink: 0, textAlign: "center", minWidth: 38, padding: "3px 7px", borderRadius: 8, background: "rgba(255,255,255,0.6)", border: `1px solid ${gradeColor}30` }}>
                             <div style={{ fontSize: 9, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>Nota</div>
                             <div style={{ fontSize: 14, fontWeight: 900, fontFamily: "var(--font-mono)", color: gradeColor, lineHeight: 1.1 }}>{grade10}</div>
                           </div>
                         )}
-                        {/* Coverage bar */}
                         <div style={{ flex: 1 }}>
                           <div style={{ fontSize: 10, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", marginBottom: 3 }}>Cobertura</div>
                           <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
@@ -3132,7 +2955,6 @@ const contentKpis = useMemo(() => {
                             </span>
                           </div>
                         </div>
-                        {/* Overdue pill */}
                         {item.pendingSubmittedWeightPct > 0 && (
                           <div style={{ flexShrink: 0, textAlign: "center", padding: "3px 7px", borderRadius: 8, background: "rgba(255,255,255,0.6)", border: "1px solid #FED7AA" }}>
                             <div style={{ fontSize: 9, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>Pendiente</div>
@@ -3165,24 +2987,20 @@ const contentKpis = useMemo(() => {
             )}
           </Card>
 
-          <Card title="Prioridades de aprendizaje">
+          <Card title="Prioridad académica">
             <div
               style={{
                 display: "flex",
                 flexDirection: "column",
-                gap: 10,
-                maxHeight: 560,
+                gap: 8,
+                maxHeight: 540,
                 overflowY: "auto",
-                paddingRight: 2,
+                paddingRight: 4,
               }}
             >
               {learningOutcomesData
                 .slice()
-                .sort((a, b) => {
-                  const av = a.avgPct == null ? 999 : Number(a.avgPct);
-                  const bv = b.avgPct == null ? 999 : Number(b.avgPct);
-                  return av - bv;
-                })
+                .sort((a, b) => a.avgPct - b.avgPct)
                 .map((m) => {
                   const computedStatus =
                     m.status ||
@@ -3192,14 +3010,11 @@ const contentKpis = useMemo(() => {
                       ? "observacion"
                       : "solido");
 
-                  const pctColor = colorForPct(m.avgPct, thresholds);
-                  const desc = (m.description || m.name || "").trim();
-
                   return (
                     <div
                       key={m.code}
                       style={{
-                        border: `1px solid ${pctColor}22`,
+                        border: "1px solid var(--border)",
                         borderRadius: 10,
                         padding: 10,
                         background: "var(--card)",
@@ -3210,67 +3025,37 @@ const contentKpis = useMemo(() => {
                           display: "flex",
                           justifyContent: "space-between",
                           alignItems: "center",
-                          marginBottom: 6,
+                          marginBottom: 4,
                         }}
                       >
                         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <span className="tag">
-                            {m.code || m.name || "Resultado"}
-                          </span>
-                          <InfoTooltip text={desc || "Sin descripción disponible."} />
+                          <span className="tag">{m.code}</span>
+                          <InfoTooltip text={(m.description || m.name || "Sin descripción disponible.").trim()} />
                         </div>
                         <StatusBadge status={computedStatus} />
                       </div>
 
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <div>
-                          <span
-                            style={{
-                              fontWeight: 900,
-                              fontSize: 18,
-                              fontFamily: "var(--font-mono)",
-                              color: m.avgPct == null ? "var(--muted)" : pctColor,
-                            }}
-                          >
-                            {m.avgPct == null ? "—" : fmtGrade10FromPct(m.avgPct)}
-                          </span>
-                          <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>
-                            {m.avgPct == null ? "Sin calificación" : fmtPct(m.avgPct)}
-                          </div>
-                        </div>
-
+                        <span
+                          style={{
+                            fontWeight: 900,
+                            fontSize: 18,
+                            fontFamily: "var(--font-mono)",
+                            color: colorForPct(m.avgPct, thresholds),
+                          }}
+                        >
+                          {fmtPct(m.avgPct)}
+                        </span>
                         <span style={{ fontSize: 11, color: "var(--muted)" }}>
                           Peso {m.weightPct ? `${Number(m.weightPct).toFixed(0)}%` : "—"}
                         </span>
                       </div>
 
                       {m.coveragePct != null && (
-                        <div style={{ marginTop: 6 }}>
-                          <div
-                            style={{
-                              fontSize: 10,
-                              color: "var(--muted)",
-                              fontWeight: 700,
-                              textTransform: "uppercase",
-                              marginBottom: 4,
-                            }}
-                          >
-                            Cobertura
-                          </div>
-                          <ProgressBar value={m.coveragePct} color={COLORS.brand} animate={false} />
-                          <div
-                            style={{
-                              fontSize: 10,
-                              color: "var(--muted)",
-                              marginTop: 4,
-                              display: "flex",
-                              justifyContent: "space-between",
-                            }}
-                          >
-                            <span>{m.studentsWithData}/{m.totalStudents || overview?.studentsCount || 0} estudiantes</span>
-                            <span style={{ fontFamily: "var(--font-mono)", fontWeight: 700 }}>
-                              {fmtPct(m.coveragePct)}
-                            </span>
+                        <div style={{ marginTop: 4 }}>
+                          <ProgressBar value={m.coveragePct} color={colorForPct(m.coveragePct, thresholds)} />
+                          <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 3, textAlign: "right" }}>
+                            {fmtPct(m.coveragePct)} · {m.studentsWithData}/{m.totalStudents} estudiantes
                           </div>
                         </div>
                       )}
@@ -3281,7 +3066,7 @@ const contentKpis = useMemo(() => {
               {!learningOutcomesData.length && (
                 <div className="empty-state">
                   <span className="empty-state-icon">🎯</span>
-                  <span style={{ fontSize: 12 }}>Sin datos de resultados de aprendizaje</span>
+                  <span style={{ fontSize: 12 }}>Sin datos de RA</span>
                 </div>
               )}
             </div>
@@ -3319,22 +3104,34 @@ const contentKpis = useMemo(() => {
                   <input type="checkbox" checked={onlyRisk} onChange={(e) => setOnlyRisk(e.target.checked)} />
                   Solo en riesgo
                 </label>
-                <input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Buscar por ID o nombre…"
-                  type="text"
-                  style={{
-                    width: isMobile ? "100%" : 220,
-                    border: "1px solid var(--border)",
-                    borderRadius: 10,
-                    padding: "7px 10px",
-                    fontWeight: 600,
-                    background: "var(--card)",
-                    color: "var(--text)",
-                    fontSize: 12,
-                  }}
-                />
+                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  <input
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder={voiceListening ? "🎙️ Escuchando…" : "Buscar por ID o nombre…"}
+                    type="text"
+                    style={{
+                      width: isMobile ? 160 : 200,
+                      border: `1px solid ${voiceListening ? "var(--critical)" : "var(--border)"}`,
+                      borderRadius: 10,
+                      padding: "7px 10px",
+                      fontWeight: 600,
+                      background: voiceListening ? "var(--critical-bg)" : "var(--card)",
+                      color: "var(--text)",
+                      fontSize: 12,
+                      transition: "border-color 0.2s, background 0.2s",
+                    }}
+                  />
+                  {voiceSupported && (
+                    <button
+                      className={`voice-btn${voiceListening ? " listening" : ""}`}
+                      onClick={toggleVoice}
+                      title={voiceListening ? "Detener escucha" : "Buscar por voz"}
+                    >
+                      {voiceListening ? "⏹" : "🎙️"}
+                    </button>
+                  )}
+                </div>
               </div>
             }
           >
@@ -3433,7 +3230,7 @@ const contentKpis = useMemo(() => {
                           </div>
                         </td>
                         <td style={{ padding: "10px 10px" }}>
-                          <StatusBadge status={s.isLoading ? "cargando" : computeRiskFromPct(s.currentPerformancePct)} />
+                          <StatusBadge status={s.isLoading ? "cargando" : s.risk} />
                         </td>
                         <td style={{ padding: "10px 10px", maxWidth: compactRouteCol ? 200 : 320, minWidth: 160 }}>
                           {s.route ? (
@@ -3552,6 +3349,17 @@ const contentKpis = useMemo(() => {
         </div>
       </div>
 
+      {/* Course Panel overlay */}
+      {showCoursePanel && (
+        <CoursePanel
+          courses={courseList}
+          loadingCourses={loadingCourses}
+          currentId={orgUnitId}
+          onSelect={handleSelectCourse}
+          onClose={() => setShowCoursePanel(false)}
+        />
+      )}
+
       <Drawer
         open={!!selectedStudent}
         onClose={() => {
@@ -3598,11 +3406,10 @@ const contentKpis = useMemo(() => {
                 </div>
               </div>
               <div style={{ textAlign: "center", padding: "12px 8px", background: "var(--bg)", borderRadius: 10, border: "1px solid var(--border)" }}>
-                <div style={{ fontSize: 10, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}>Riesgo académico</div>
+                <div style={{ fontSize: 10, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}>Riesgo</div>
                 <div style={{ marginTop: 4, display: "flex", justifyContent: "center" }}>
-                  <StatusBadge status={computeRiskFromPct(drawerSummary?.currentPerformancePct)} />
+                  <StatusBadge status={drawerSummary?.risk || "pending"} />
                 </div>
-                <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 3 }}>basado en nota</div>
               </div>
             </div>
 
@@ -3621,7 +3428,18 @@ const contentKpis = useMemo(() => {
 
             {drawerTab === "resumen" && (
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                {/* Resultados de aprendizaje: gráfico si hay datos, lista de RA si no */}
+                {/* Cobertura individual del estudiante */}
+                {drawerSummary?.coveragePct != null && (
+                  <Card title="Cobertura de evaluación">
+                    <CoverageBars
+                      donePct={drawerSummary?.coveragePct ?? 0}
+                      pendingPct={drawerPendingUngradedPct}
+                      openPct={Math.max(0, 100 - (drawerSummary?.coveragePct ?? 0) - drawerPendingUngradedPct - drawerOverdueUnscoredPct)}
+                      overduePct={drawerOverdueUnscoredPct}
+                    />
+                  </Card>
+                )}
+
                 {drawerMacro.length > 0 ? (
                   <Card title="Resultados de aprendizaje del estudiante">
                     <div style={{ width: "100%", height: 220 }}>
@@ -3645,7 +3463,7 @@ const contentKpis = useMemo(() => {
                 ) : learningOutcomesData.length > 0 ? (
                   <Card title="Resultados de aprendizaje del curso">
                     <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 10, padding: "6px 10px", background: "var(--bg)", borderRadius: 8 }}>
-                      Sin datos de evaluación por RA para este estudiante aún. Resultados de aprendizaje del curso:
+                      Sin datos de evaluación por RA para este estudiante aún. Resultados del curso:
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                       {learningOutcomesData.map((ra) => (
@@ -3654,9 +3472,7 @@ const contentKpis = useMemo(() => {
                           padding: "8px 10px", borderRadius: 8,
                           border: "1px solid var(--border)", background: "var(--bg)",
                         }}>
-                          <span className="tag" style={{ flexShrink: 0, marginTop: 1 }}>
-                          {ra.code || ra.name || "Resultado"}
-                        </span>
+                          <span className="tag" style={{ flexShrink: 0, marginTop: 1 }}>{ra.code}</span>
                           <span style={{ fontSize: 12, color: "var(--text)", lineHeight: 1.5, fontWeight: 500 }}>
                             {ra.description || ra.name || ra.code}
                           </span>
@@ -3739,73 +3555,22 @@ const contentKpis = useMemo(() => {
             {drawerTab === "unidades" && (
               <Card title="Subcompetencias / Unidades">
                 {drawerUnits.length > 0 ? (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    {drawerUnits.map((u) => {
-                      // Find matching RA description from learningOutcomesData
-                      const raInfo = learningOutcomesData.find(
-                        (r) => String(r.code).toUpperCase() === String(u.code).toUpperCase()
-                      );
-                      const raDesc = raInfo?.description || raInfo?.name || null;
-                      const pctColor = colorForPct(u.pct, thresholds);
-                      const evCount = (u.evidence || []).length;
-                      return (
-                        <div key={u.code} style={{ border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
-                          {/* Header strip */}
-                          <div style={{
-                            display: "flex", justifyContent: "space-between", alignItems: "center",
-                            padding: "10px 14px", background: "var(--bg)", borderBottom: "1px solid var(--border)"
-                          }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                              <span className="tag" style={{ fontWeight: 900, fontSize: 12 }}>{u.code}</span>
-                              <span style={{ fontSize: 13, fontWeight: 900, fontFamily: "var(--font-mono)", color: pctColor }}>
-                                {fmtPct(u.pct)}
-                              </span>
-                            </div>
-                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                              {evCount > 0 && (
-                                <span style={{ fontSize: 11, color: "var(--muted)", background: "var(--card)", border: "1px solid var(--border)", borderRadius: 6, padding: "2px 7px" }}>
-                                  {evCount} evidencia{evCount !== 1 ? "s" : ""}
-                                </span>
-                              )}
-                              <StatusBadge status={u.status} />
-                            </div>
-                          </div>
-                          {/* Body */}
-                          <div style={{ padding: "10px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
-                            {raDesc && (
-                              <div style={{
-                                fontSize: 12, color: "var(--text)", lineHeight: 1.55, fontWeight: 500,
-                                padding: "8px 10px", background: "var(--bg)", borderRadius: 8,
-                                borderLeft: `3px solid ${pctColor}`
-                              }}>
-                                {raDesc}
-                              </div>
-                            )}
-                            <ProgressBar value={u.pct} color={pctColor} />
-                            {/* Evidence list */}
-                            {(u.evidence || []).length > 0 && (
-                              <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 2 }}>
-                                {(u.evidence || []).map((ev, i) => {
-                                  const evPct = ev.scorePct ?? ev.pct ?? null;
-                                  return (
-                                    <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11, color: "var(--muted)", gap: 8 }}>
-                                      <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                        📄 {ev.name || ev.title || `Evidencia ${i + 1}`}
-                                      </span>
-                                      {evPct != null && (
-                                        <span style={{ fontFamily: "var(--font-mono)", fontWeight: 800, color: colorForPct(evPct, thresholds), flexShrink: 0 }}>
-                                          {fmtPct(evPct)}
-                                        </span>
-                                      )}
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            )}
-                          </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {drawerUnits.map((u) => (
+                      <div key={u.code} style={{ display: "flex", flexDirection: "column", gap: 5, padding: "10px 12px", border: "1px solid var(--border)", borderRadius: 10 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <span className="tag">{u.code}</span>
+                          <StatusBadge status={u.status} />
                         </div>
-                      );
-                    })}
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <div style={{ fontFamily: "var(--font-mono)", fontSize: 18, fontWeight: 900, color: colorForPct(u.pct, thresholds) }}>
+                            {fmtPct(u.pct)}
+                          </div>
+                          <div style={{ fontSize: 11, color: "var(--muted)" }}>{(u.evidence || []).length} evidencias</div>
+                        </div>
+                        <ProgressBar value={u.pct} color={colorForPct(u.pct, thresholds)} />
+                      </div>
+                    ))}
                   </div>
                 ) : (
                   <div className="empty-state">
@@ -3881,6 +3646,6 @@ const contentKpis = useMemo(() => {
           </div>
         )}
       </Drawer>
-      </div>
+    </div>
   );
 }

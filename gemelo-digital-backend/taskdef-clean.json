@@ -5,7 +5,7 @@
   "containerDefinitions": [
     {
       "name": "Main",
-      "image": "718624265053.dkr.ecr.us-east-1.amazonaws.com/gemelo-backend@sha256:5f78cc8e8f1da1d1636d03c4d9471155a975acd8f1345a94e08b284f06cbf544",
+      "image": "718624265053.dkr.ecr.us-east-1.amazonaws.com/gemelo-backend@sha256:f9daf4e830b1f29956782567716a02dc40e11de02fdeb9ba0044489a4474a72b",
       "cpu": 1024,
       "memory": 2048,
       "memoryReservation": 2048,

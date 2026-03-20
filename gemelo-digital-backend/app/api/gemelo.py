@@ -15,6 +15,11 @@ logger = logging.getLogger("uvicorn.error")
 
 router = APIRouter(prefix="/gemelo", tags=["gemelo"])
 
+# Cache simple en memoria para el RA dashboard (evita recalcular en cada refresh)
+import time as _time
+_RA_DASHBOARD_CACHE: dict = {}
+_RA_DASHBOARD_TTL = 300  # 5 minutos
+
 
 
 def get_service(bs=Depends(get_brightspace_client)) -> GemeloService:
@@ -141,6 +146,16 @@ async def gemelo_course_ra_dashboard(
     por estudiante. Retorna promedio (%) y cobertura por RA.
     """
     try:
+        now_ts = _time.time()
+        cached = _RA_DASHBOARD_CACHE.get(orgUnitId)
+        if cached and (now_ts - cached["ts"] < _RA_DASHBOARD_TTL):
+            # Solo usar cache si tiene datos reales (al menos 1 RA con studentsWithData > 0)
+            cached_ras = (cached["data"].get("ras") or [])
+            has_real_data = any(r.get("studentsWithData", 0) > 0 for r in cached_ras)
+            if has_real_data:
+                return cached["data"]
+            # Cache vacío/inválido → recalcular
+
         students_payload = await svc.list_course_students(orgUnitId)
         items = (
             students_payload.get("items") or []
@@ -236,12 +251,15 @@ async def gemelo_course_ra_dashboard(
                 "totalStudents": total_students,
             })
 
-        return {
+        payload = {
             "orgUnitId": orgUnitId,
             "totalStudents": total_students,
             "updatedAt": last_updated_at,
             "ras": ras,
         }
+
+        _RA_DASHBOARD_CACHE[orgUnitId] = {"ts": _time.time(), "data": payload}
+        return payload
 
     except Exception as e:
         _http500(e, "gemelo_course_ra_dashboard", orgUnitId=orgUnitId)
@@ -251,6 +269,7 @@ async def gemelo_course_ra_dashboard(
 async def gemelo_course_students(
     orgUnitId: int,
     with_metrics: bool = Query(False),
+    include: Optional[str] = Query(None),   # "summary" → activa métricas batch
     svc: GemeloService = Depends(get_service),
 ):
     try:
@@ -291,7 +310,10 @@ async def gemelo_course_students(
 
         items: List[Dict[str, Any]] = students.get("items") or []
 
-        if with_metrics and items:
+        # include=summary es alias de with_metrics=true (usado por el frontend)
+        load_metrics = with_metrics or (include == "summary")
+
+        if load_metrics and items:
             student_ids = [
                 int(x["userId"])
                 for x in items
@@ -307,7 +329,7 @@ async def gemelo_course_students(
             for s in items:
                 uid = int(s["userId"])
                 m = metrics_by_user.get(uid, {})
-                enriched.append({**s, "gradebook": m})
+                enriched.append({**s, "summary": m, "gradebook": m})
             items = enriched
 
         return {

@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import httpx
 import logging
 
-from fastapi import FastAPI, Request, Query
+from fastapi import FastAPI, Request, Query, APIRouter
 from fastapi.responses import RedirectResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
