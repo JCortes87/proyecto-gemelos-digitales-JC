@@ -786,6 +786,17 @@ class GemeloService:
                 or float(cov_pct_s) < 60
             )
             if is_at_risk and uid is not None:
+                # Compute mostCriticalMacro from macroUnits (worst RA for this student)
+                _macro_units = g.get("macroUnits") or g.get("macro", {}).get("units") or []
+                _worst_macro = None
+                if _macro_units:
+                    _valid = [
+                        {"code": str(m.get("code", "")), "pct": float(m.get("pct") or 0)}
+                        for m in _macro_units if m.get("code") and m.get("pct") is not None
+                    ]
+                    if _valid:
+                        _worst_macro = min(_valid, key=lambda x: x["pct"])
+
                 students_at_risk.append({
                     "userId": uid,
                     "displayName": student_names.get(uid, str(uid)),
@@ -795,6 +806,7 @@ class GemeloService:
                     "notSubmittedWeightPct": round(float(overdue_pct_s), 1),
                     "overdueUnscoredWeightPct": round(float(overdue_pct_s), 1),
                     "pendingUngradedWeightPct": round(float(pending_pct_s), 1),
+                    "mostCriticalMacro": _worst_macro,
                 })
 
             for m in (g.get("macroUnits") or []):
@@ -979,6 +991,84 @@ class GemeloService:
                     },
                 }
             )
+
+        # ── Alert: grade items without RA mapping ────────────
+        try:
+            # Collect all folderId/gradeObjectIds that ARE linked to RA rubric criteria
+            linked_ids: set = set()
+            if isinstance(cfg, dict):
+                for ra in (cfg.get("outcomes") or []):
+                    for crit in (ra.get("criteria") or []):
+                        fid = crit.get("folderId") or crit.get("gradeObjectId")
+                        if fid is not None:
+                            linked_ids.add(int(fid))
+            elif hasattr(cfg, "outcomes"):
+                for ra in (getattr(cfg, "outcomes", None) or []):
+                    for crit in (getattr(ra, "criteria", None) or []):
+                        fid = getattr(crit, "folderId", None) or getattr(crit, "gradeObjectId", None)
+                        if fid is not None:
+                            linked_ids.add(int(fid))
+
+            # Get all grade items from Brightspace
+            _grade_items_raw = await self.bs.list_grade_items(orgUnitId)
+            if isinstance(_grade_items_raw, dict):
+                _grade_items_raw = _grade_items_raw.get("Items") or _grade_items_raw.get("items") or []
+            _grade_items_raw = _grade_items_raw if isinstance(_grade_items_raw, list) else []
+
+            # Filter: items with weight > 0 (evaluable) that are NOT linked to RA
+            unlinked_items = []
+            for it in _grade_items_raw:
+                if not isinstance(it, dict):
+                    continue
+                gid = it.get("Id") or it.get("id")
+                if gid is None:
+                    continue
+                weight = float(it.get("Weight") or it.get("weight") or 0)
+                if weight <= 0:
+                    continue  # skip unweighted items
+                if int(gid) not in linked_ids:
+                    unlinked_items.append({
+                        "gradeObjectId": int(gid),
+                        "name": it.get("Name") or it.get("name") or f"Ítem {gid}",
+                        "weightPct": round(weight, 2),
+                    })
+
+            if unlinked_items and linked_ids:
+                # Only alert if there are SOME linked items (course uses RAs)
+                # and SOME unlinked (some items lack RA mapping)
+                total_w = sum(x["weightPct"] for x in unlinked_items)
+                alerts.append({
+                    "id": "items_without_ra",
+                    "severity": "observacion",
+                    "title": f"Actividades sin Resultado de Aprendizaje ({len(unlinked_items)})",
+                    "message": (
+                        f"{len(unlinked_items)} actividad{'es' if len(unlinked_items) != 1 else ''} "
+                        f"calificada{'s' if len(unlinked_items) != 1 else ''} no están vinculadas "
+                        f"a ningún RA en la rúbrica ({total_w:.1f}% del peso total). "
+                        f"Estas notas no se reflejan en el análisis de competencias."
+                    ),
+                    "kpis": {
+                        "sin_ra": len(unlinked_items),
+                        "peso_total": round(total_w, 1),
+                    },
+                    "items": unlinked_items[:10],  # max 10 for payload size
+                })
+            elif unlinked_items and not linked_ids:
+                # No RA config at all — different message
+                alerts.append({
+                    "id": "no_ra_config",
+                    "severity": "observacion",
+                    "title": "Sin configuración de Resultados de Aprendizaje",
+                    "message": (
+                        "El curso tiene actividades calificadas pero no hay rúbricas "
+                        "vinculadas a Resultados de Aprendizaje. "
+                        "Configura los RA en el modelo del curso para activar el análisis por competencias."
+                    ),
+                    "kpis": {"actividades": len(unlinked_items)},
+                    "items": [],
+                })
+        except Exception:
+            pass  # alert es informativa — no bloquear si falla
 
         return {
             "orgUnitId": orgUnitId,

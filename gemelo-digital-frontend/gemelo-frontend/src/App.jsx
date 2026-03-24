@@ -361,6 +361,262 @@ const GLOBAL_STYLES = `
     0%, 100% { box-shadow: 0 0 0 0 rgba(217,45,32,0.3); }
     50%       { box-shadow: 0 0 0 6px rgba(217,45,32,0); }
   }
+
+  /* ── Voice hint ── */
+  .voice-hint {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    border-radius: 10px;
+    border: 1px dashed var(--border);
+    background: var(--bg);
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 600;
+    flex-wrap: wrap;
+  }
+
+  /* ── Main Tab Bar ── */
+  .main-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0;
+  }
+  .main-tab {
+    padding: 8px 16px 10px;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--muted);
+    cursor: pointer;
+    border-radius: 8px 8px 0 0;
+    border: 1px solid transparent;
+    border-bottom: none;
+    background: transparent;
+    transition: all 0.15s;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: -1px;
+    position: relative;
+  }
+  .main-tab:hover { color: var(--text); background: var(--card); border-color: var(--border); }
+  .main-tab.active {
+    color: var(--brand);
+    background: var(--card);
+    border-color: var(--border);
+    border-bottom-color: var(--card);
+  }
+  .main-tab .tab-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: currentColor; opacity: 0.6;
+  }
+
+  /* ── AI Assistant Panel ── */
+  .ai-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .ai-status-outer {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    transition: all 0.25s;
+    min-height: 48px;
+  }
+  .ai-status-outer.listening {
+    border-color: rgba(217,45,32,0.45);
+    background: var(--critical-bg);
+  }
+  .ai-status-outer.thinking {
+    border-color: rgba(11,95,255,0.35);
+    background: var(--brand-light);
+  }
+  .ai-status-outer.speaking {
+    border-color: rgba(18,183,106,0.35);
+    background: var(--ok-bg);
+  }
+  .ai-status-icon {
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; flex-shrink: 0;
+    background: var(--card);
+    border: 1px solid var(--border);
+  }
+  .ai-wave {
+    display: flex; align-items: center; gap: 2px; height: 18px;
+  }
+  .ai-wave-bar {
+    width: 3px; border-radius: 2px;
+    animation: waveAI 1.1s ease-in-out infinite;
+  }
+  .ai-wave-bar:nth-child(1) { height: 6px;  animation-delay: 0s; }
+  .ai-wave-bar:nth-child(2) { height: 12px; animation-delay: 0.1s; }
+  .ai-wave-bar:nth-child(3) { height: 18px; animation-delay: 0.2s; }
+  .ai-wave-bar:nth-child(4) { height: 12px; animation-delay: 0.1s; }
+  .ai-wave-bar:nth-child(5) { height: 6px;  animation-delay: 0s; }
+  @keyframes waveAI {
+    0%, 100% { transform: scaleY(0.4); }
+    50%       { transform: scaleY(1); }
+  }
+  .ai-chat {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+    max-height: 340px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    scrollbar-width: thin;
+  }
+  .ai-bubble-wrap { display: flex; flex-direction: column; }
+  .ai-bubble-wrap.user { align-items: flex-end; }
+  .ai-bubble-wrap.bot  { align-items: flex-start; }
+  .ai-bubble {
+    max-width: 86%;
+    font-size: 12.5px;
+    line-height: 1.55;
+    padding: 9px 13px;
+    border-radius: 8px;
+  }
+  .ai-bubble.bot {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 0 8px 8px 8px;
+  }
+  .ai-bubble.user {
+    background: var(--brand-light);
+    border: 1px solid rgba(11,95,255,0.25);
+    border-radius: 8px 0 8px 8px;
+    color: var(--text);
+  }
+  .ai-meta {
+    font-size: 9px; font-weight: 800;
+    letter-spacing: 0.07em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 3px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .ai-voice-badge {
+    background: var(--brand-light); color: var(--brand);
+    border-radius: 999px; padding: 1px 7px;
+    font-size: 9px; font-weight: 700;
+  }
+  .ai-speak-btn {
+    border: 1px solid var(--border);
+    background: transparent;
+    border-radius: 999px;
+    padding: 3px 10px;
+    font-size: 10px; font-weight: 700;
+    color: var(--muted);
+    cursor: pointer;
+    margin-top: 5px;
+    transition: all 0.15s;
+  }
+  .ai-speak-btn:hover { border-color: var(--ok); color: var(--ok); }
+  .ai-speak-btn.active { border-color: var(--ok); color: var(--ok); background: var(--ok-bg); }
+  .ai-typing {
+    display: flex; align-items: center; gap: 4px; padding: 6px 2px;
+  }
+  .ai-typing-dot {
+    width: 5px; height: 5px; border-radius: 50%;
+    background: var(--brand);
+    animation: waveAI 1.2s ease-in-out infinite;
+  }
+  .ai-typing-dot:nth-child(2) { animation-delay: 0.15s; }
+  .ai-typing-dot:nth-child(3) { animation-delay: 0.3s; }
+  .ai-chip-btn {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 5px 13px;
+    font-size: 11px; font-weight: 600;
+    color: var(--muted);
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .ai-chip-btn:hover {
+    border-color: var(--brand);
+    color: var(--brand);
+    background: var(--brand-light);
+  }
+  .ai-input {
+    flex: 1;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 12px; font-weight: 600;
+    background: var(--card);
+    color: var(--text);
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+    font-family: var(--font);
+  }
+  .ai-input:focus {
+    border-color: var(--brand);
+    box-shadow: 0 0 0 3px rgba(11,95,255,0.1);
+  }
+  .ai-input::placeholder { color: var(--muted); }
+  .ai-send-btn {
+    background: var(--brand);
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    padding: 10px 18px;
+    font-size: 12px; font-weight: 800;
+    cursor: pointer;
+    transition: opacity 0.15s;
+    white-space: nowrap;
+    font-family: var(--font);
+  }
+  .ai-send-btn:hover { opacity: 0.85; }
+  .ai-toggle {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--card);
+    cursor: pointer;
+    transition: all 0.15s;
+    user-select: none;
+  }
+  .ai-toggle.active { border-color: var(--ok); background: var(--ok-bg); }
+  .ai-toggle-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--muted); transition: background 0.2s;
+  }
+  .ai-toggle.active .ai-toggle-dot { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+  .ai-stop-btn {
+    background: var(--critical-bg);
+    border: 1px solid rgba(217,45,32,0.3);
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 11px; font-weight: 700;
+    color: var(--critical);
+    cursor: pointer;
+    transition: all 0.15s;
+    display: none;
+  }
+  .ai-stop-btn.visible { display: block; }
+  .ai-guide-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+  @media (max-width: 640px) {
+    .ai-guide-grid { grid-template-columns: 1fr; }
+    .main-tabs { overflow-x: auto; }
+  }
 `;
 
 function toDate(x) {
@@ -977,7 +1233,7 @@ function CesaLoader({ title = "Gemelo V. 1.0", subtitle = "Cargando tablero..." 
           <div className="cesa-loader-sub">{subtitle}</div>
         </div>
         <div className="cesa-loader-center">
-          <div className="cesa-water-text" aria-label="Cargando CESA">
+          <div className="cesa-water-text" aria-label="Cargando">
             <span className="cesa-water-text__outline">CESA</span>
             <span className="cesa-water-text__fill" aria-hidden="true">
               CESA
@@ -987,6 +1243,57 @@ function CesaLoader({ title = "Gemelo V. 1.0", subtitle = "Cargando tablero..." 
         </div>
         <div className="cesa-loader-foot">Conectando con Brightspace y consolidando evidencias académicas…</div>
       </div>
+    </div>
+  );
+}
+
+// Lista compacta de asignaciones sin RA — usada dentro del AlertsPanel
+function UnlinkedItemsList({ items }) {
+  const [open, setOpen] = React.useState(false);
+  const list = Array.isArray(items) ? items : [];
+  if (!list.length) return null;
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      <button
+        className="btn"
+        style={{ fontSize: 11, padding: "4px 10px", gap: 5 }}
+        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+      >
+        {open ? "▴" : "▾"} Ver actividades sin RA ({list.length})
+      </button>
+      {open && (
+        <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 5 }}>
+          {list.map((it, i) => (
+            <div
+              key={it.gradeObjectId ?? i}
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+                padding: "7px 10px", borderRadius: 8,
+                border: "1px solid var(--border)", background: "var(--bg)",
+                gap: 8,
+              }}
+            >
+              <div style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {it.name || `Ítem ${it.gradeObjectId}`}
+              </div>
+              <div style={{ display: "flex", gap: 6, flexShrink: 0, alignItems: "center" }}>
+                {it.weightPct != null && (
+                  <span className="tag" style={{ background: "var(--watch-bg)", color: "#9A3412", fontSize: 10 }}>
+                    {Number(it.weightPct).toFixed(1)}% peso
+                  </span>
+                )}
+                <span style={{ fontSize: 10, color: "var(--muted)", fontFamily: "var(--font-mono)" }}>
+                  sin RA
+                </span>
+              </div>
+            </div>
+          ))}
+          <div style={{ fontSize: 11, color: "var(--muted)", padding: "4px 2px", fontStyle: "italic" }}>
+            💡 Vincula estas actividades a una rúbrica con RA en Brightspace para incluirlas en el análisis de competencias.
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1098,6 +1405,10 @@ function AlertsPanel({ alerts }) {
                     </span>
                   ))}
                 </div>
+              )}
+              {/* Items sin RA — lista expandible */}
+              {Array.isArray(a.items) && a.items.length > 0 && (
+                <UnlinkedItemsList items={a.items} />
               )}
             </div>
           ))}
@@ -1212,6 +1523,90 @@ function ProjectionBlock({ projection, thresholds }) {
         })}
       </div>
     </Card>
+  );
+}
+
+// Notificación de ítems sin RA vinculado
+function NoRaMappingNotice({ evidences, units }) {
+  // Evidences with grades but whose gradeObjectId doesn't appear in any unit's evidence list
+  const gradedEvIds = new Set(
+    (Array.isArray(evidences) ? evidences : [])
+      .filter((e) => e.scorePct != null)
+      .map((e) => String(e.gradeObjectId))
+  );
+
+  // Collect all gradeObjectIds that ARE linked to a RA unit
+  const linkedIds = new Set();
+  for (const u of (Array.isArray(units) ? units : [])) {
+    for (const ev of (u.evidence || [])) {
+      if (ev.folderId != null) linkedIds.add(String(ev.folderId));
+    }
+  }
+
+  // Items with grade but no RA link
+  const unlinked = (Array.isArray(evidences) ? evidences : []).filter(
+    (e) => e.scorePct != null && !linkedIds.has(String(e.gradeObjectId))
+  );
+
+  if (!unlinked.length) return null;
+
+  const [open, setOpen] = React.useState(false);
+
+  return (
+    <div style={{
+      marginTop: 8,
+      border: "1px solid var(--watch-bg)",
+      borderColor: "#FED7AA",
+      borderRadius: 10,
+      background: "var(--watch-bg)",
+      overflow: "hidden",
+    }}>
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => setOpen((v) => !v)}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setOpen((v) => !v); }}
+        style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "10px 14px", cursor: "pointer", userSelect: "none", gap: 10,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 14 }}>⚠️</span>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 800, color: "#9A3412" }}>
+              {unlinked.length} asignación{unlinked.length !== 1 ? "es" : ""} calificada{unlinked.length !== 1 ? "s" : ""} sin Resultado de Aprendizaje
+            </div>
+            <div style={{ fontSize: 11, color: "var(--muted)" }}>
+              Estas evidencias tienen nota pero no están vinculadas a ningún RA en la rúbrica
+            </div>
+          </div>
+        </div>
+        <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", flexShrink: 0 }}>{open ? "▴" : "▾"}</span>
+      </div>
+      {open && (
+        <div style={{ borderTop: "1px solid #FED7AA", padding: "10px 14px", display: "flex", flexDirection: "column", gap: 6 }}>
+          {unlinked.map((e, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 10px", background: "var(--card)", borderRadius: 8, border: "1px solid var(--border)" }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {e.name || `Ítem ${e.gradeObjectId}`}
+              </div>
+              <div style={{ display: "flex", gap: 8, flexShrink: 0, alignItems: "center" }}>
+                <span className="tag" style={{ background: "var(--watch-bg)", color: "#9A3412" }}>
+                  {fmtPct(e.weightPct)} peso
+                </span>
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: 13, fontWeight: 800, color: colorForPct(e.scorePct, null) }}>
+                  {e.scorePct != null ? (e.scorePct / 10).toFixed(1) : "—"}
+                </span>
+              </div>
+            </div>
+          ))}
+          <div style={{ fontSize: 11, color: "var(--muted)", padding: "4px 2px" }}>
+            💡 Para que aparezcan en el análisis de RA, vincula estas asignaciones a una rúbrica con criterios mapeados en Brightspace.
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1382,6 +1777,433 @@ function EvidencesTimeline({ evidences, thresholds }) {
 }
 
 // ─────────────────────────────────────────────────────────
+// VoiceAssistant — Panel completo con chat, voz y TTS
+// ─────────────────────────────────────────────────────────
+function VoiceAssistant({ studentRows, overview, raDashboard, courseInfo, thresholds }) {
+  const [msgs, setMsgs] = React.useState(() => [{
+    id: 0, role: "bot", fromVoice: false,
+    text: `Listo. Tengo cargados los datos de <strong>${courseInfo?.Name || "este curso"}</strong>. Puedo analizar riesgo, evidencias y desempeño por RA. Escríbeme o usa el micrófono 🎙️.`,
+  }]);
+  const [input, setInput] = React.useState("");
+  const [aiStatus, setAiStatus] = React.useState("idle");
+  const [voiceOut, setVoiceOut] = React.useState(true);
+  const [speed, setSpeed]   = React.useState(1.0);
+  const [activeSpeakId, setActiveSpeakId] = React.useState(null);
+  const [liveText, setLiveText] = React.useState("");
+  const chatRef  = React.useRef(null);
+  const synthRef = React.useRef(null);
+  const recRef   = React.useRef(null);
+  const inputRef = React.useRef(null);
+
+  React.useEffect(() => {
+    if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight;
+  }, [msgs, aiStatus]);
+
+  // ── Pre-compute course data ──
+  const withGrades = (Array.isArray(studentRows) ? studentRows : []).filter((s) => s.currentPerformancePct != null);
+  const avg = withGrades.length
+    ? (withGrades.reduce((a, s) => a + Number(s.currentPerformancePct) / 10, 0) / withGrades.length).toFixed(2)
+    : null;
+  const altos  = (Array.isArray(studentRows) ? studentRows : []).filter((s) => computeRiskFromPct(s.currentPerformancePct) === "alto");
+  const medios = (Array.isArray(studentRows) ? studentRows : []).filter((s) => computeRiskFromPct(s.currentPerformancePct) === "medio");
+  const zeros  = (Array.isArray(studentRows) ? studentRows : []).filter((s) => s.currentPerformancePct == null);
+  const top    = withGrades.filter((s) => s.currentPerformancePct / 10 >= 8);
+  const courseName = courseInfo?.Name || "el curso";
+
+  // ── Quick chips ──
+  const CHIPS = [
+    { icon: "📊", label: "estudiantes en riesgo" },
+    { icon: "⚠️", label: "alertas críticas" },
+    { icon: "🏆", label: "top estudiantes" },
+    { icon: "📋", label: "resumen del curso" },
+    { icon: "📉", label: "sin nota registrada" },
+    { icon: "🎯", label: "logro por RA" },
+  ];
+
+  // ── Command processor (returns plain text for TTS + HTML for display) ──
+  function processCmd(cmd) {
+    const c = cmd.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+
+    if (c.includes("riesgo") || c.includes("risk")) {
+      const resp = `Riesgo académico actual en ${courseName}.<br><br>
+🔴 <strong>Alto (${altos.length}):</strong><br>
+${altos.slice(0, 6).map((s) => `‣ ${s.displayName} — ${fmtGrade10FromPct(s.currentPerformancePct)}`).join("<br>")}${altos.length > 6 ? `<br>… y ${altos.length - 6} más` : ""}<br><br>
+🟡 <strong>Medio (${medios.length}):</strong><br>
+${medios.slice(0, 4).map((s) => `‣ ${s.displayName} — ${fmtGrade10FromPct(s.currentPerformancePct)}`).join("<br>")}${medios.length > 4 ? `<br>… y ${medios.length - 4} más` : ""}`;
+      return resp;
+    }
+
+    if (c.includes("alerta") || c.includes("critico")) {
+      const crit = altos.filter((s) => s.currentPerformancePct != null && s.currentPerformancePct < 50);
+      return `Alertas críticas del curso.<br><br>
+Sin nota registrada: ${zeros.length} estudiantes.<br>
+${zeros.slice(0, 4).map((s) => `‣ ${s.displayName}`).join("<br>")}<br><br>
+Nota crítica menor a 5.0: ${crit.length} estudiantes.<br>
+${crit.slice(0, 5).map((s) => `‣ ${s.displayName} — ${fmtGrade10FromPct(s.currentPerformancePct)}`).join("<br>")}<br><br>
+<strong>Acción recomendada:</strong> Contactar esta semana y verificar entregas.`;
+    }
+
+    if (c.includes("top") || c.includes("mejor") || c.includes("destacado")) {
+      const sorted = [...withGrades].sort((a, b) => b.currentPerformancePct - a.currentPerformancePct).slice(0, 5);
+      return `Top 5 estudiantes de ${courseName}:<br><br>
+${sorted.map((s, i) => `<strong>${i + 1}.</strong> ${s.displayName}<br>&nbsp;&nbsp;Nota: ${fmtGrade10FromPct(s.currentPerformancePct)} · Cobertura: ${fmtPct(s.coveragePct)}`).join("<br><br>")}`;
+    }
+
+    if (c.includes("resumen") || c.includes("informe") || c.includes("reporte")) {
+      return `Resumen de ${courseName}.<br><br>
+<strong>Estudiantes:</strong> ${studentRows.length} · ${withGrades.length} con nota<br>
+<strong>Promedio:</strong> ${avg ?? "—"}/10<br>
+<strong>Riesgo:</strong> Alto: ${altos.length} · Medio: ${medios.length} · OK: ${studentRows.length - altos.length - medios.length}<br>
+<strong>Sin nota:</strong> ${zeros.length} · <strong>Top ≥8:</strong> ${top.length}<br>
+<strong>Cobertura promedio:</strong> ${fmtPct(overview?.courseGradebook?.avgCoveragePct)}`;
+    }
+
+    if (c.includes("sin nota") || c.includes("sin evidencia") || c.includes("ruta 0")) {
+      return `Estudiantes sin nota registrada (Ruta 0).<br><br>
+<strong>${zeros.length} requieren activación urgente:</strong><br><br>
+${zeros.map((s) => `‣ ${s.displayName} (ID: ${s.userId})`).join("<br>")}<br><br>
+<strong>Acción:</strong> Verificar acceso y contactar esta semana.`;
+    }
+
+    if (c.includes("ra") || c.includes("resultado") || c.includes("aprendizaje") || c.includes("competencia")) {
+      const ras = Array.isArray(raDashboard?.ras) ? raDashboard.ras.filter((r) => r.studentsWithData > 0) : [];
+      if (!ras.length) return "No hay datos de Resultados de Aprendizaje disponibles aún. Los RAs se calculan una vez que los estudiantes tienen evaluaciones con rúbricas calificadas.";
+      return `Logro por Resultado de Aprendizaje en ${courseName}:<br><br>
+${ras.sort((a, b) => a.avgPct - b.avgPct).map((r) => {
+  const ico = Number(r.avgPct) < 50 ? "🔴" : Number(r.avgPct) < 70 ? "🟡" : "🟢";
+  return `${ico} <strong>${r.code}:</strong> ${fmtPct(r.avgPct)} · ${r.studentsWithData}/${r.totalStudents} estudiantes`;
+}).join("<br>")}<br><br>
+<strong>Foco:</strong> ${ras[0]?.code ?? "—"} es el RA con menor desempeño.`;
+    }
+
+    if (c.includes("aprobado") || c.includes("pasando")) {
+      const ap = withGrades.filter((s) => s.currentPerformancePct / 10 >= 7);
+      return `Estudiantes aprobados (nota ≥ 7.0):<br><br>
+Total: <strong>${ap.length} de ${studentRows.length}</strong> (${Math.round(ap.length / studentRows.length * 100)}%)<br><br>
+${ap.sort((a, b) => b.currentPerformancePct - a.currentPerformancePct).slice(0, 8).map((s) => `‣ ${s.displayName} — ${fmtGrade10FromPct(s.currentPerformancePct)}`).join("<br>")}${ap.length > 8 ? `<br>… y ${ap.length - 8} más` : ""}`;
+    }
+
+    return `Entendido. Puedo ayudarte con:<br><br>
+‣ "estudiantes en riesgo"<br>
+‣ "alertas críticas"<br>
+‣ "top estudiantes"<br>
+‣ "resumen del curso"<br>
+‣ "sin nota registrada"<br>
+‣ "logro por RA"<br>
+‣ "aprobados"<br><br>
+¿Qué necesitas analizar?`;
+  }
+
+  // ── TTS ──
+  function speakText(html, msgId) {
+    if (!("speechSynthesis" in window)) return;
+    window.speechSynthesis.cancel();
+    const clean = html.replace(/<[^>]*>/g, "").replace(/[→↑↓★‣·]/g, " ").replace(/\s+/g, " ").trim();
+    const utt = new SpeechSynthesisUtterance(clean);
+    utt.lang = "es-CO"; utt.rate = speed;
+    synthRef.current = utt;
+    const voices = window.speechSynthesis.getVoices();
+    const esVoice = voices.find((v) => v.lang.startsWith("es"));
+    if (esVoice) utt.voice = esVoice;
+    utt.onstart = () => { setAiStatus("speaking"); setActiveSpeakId(msgId); };
+    utt.onend   = () => { setAiStatus("idle");     setActiveSpeakId(null); };
+    utt.onerror = () => { setAiStatus("idle");     setActiveSpeakId(null); };
+    window.speechSynthesis.speak(utt);
+  }
+
+  function stopSpeaking() {
+    window.speechSynthesis?.cancel();
+    setAiStatus("idle"); setActiveSpeakId(null);
+  }
+
+  // ── Send message ──
+  function sendMsg(text, fromVoice = false) {
+    const t = (text || input).trim();
+    if (!t) return;
+    setInput("");
+    const uid = Date.now();
+    setMsgs((prev) => [...prev, { id: uid, role: "user", fromVoice, text: t }]);
+    setAiStatus("thinking");
+    setTimeout(() => {
+      const resp = processCmd(t);
+      const bid = Date.now() + 1;
+      setMsgs((prev) => [...prev, { id: bid, role: "bot", fromVoice: false, text: resp }]);
+      setAiStatus("idle");
+      if (voiceOut) speakText(resp, bid);
+    }, 500 + Math.random() * 300);
+  }
+
+  // ── Mic ──
+  const voiceOk = typeof window !== "undefined" &&
+    !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+
+  function toggleMic() {
+    if (aiStatus === "speaking") stopSpeaking();
+    if (aiStatus === "listening") {
+      recRef.current?.stop();
+      setAiStatus("idle"); setLiveText("");
+      return;
+    }
+    if (!voiceOk) return;
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const rec = new SR();
+    rec.lang = "es-CO"; rec.continuous = false; rec.interimResults = true;
+    rec.onstart  = () => { setAiStatus("listening"); setLiveText(""); };
+    rec.onend    = () => { if (aiStatus === "listening") { setAiStatus("idle"); setLiveText(""); } };
+    rec.onerror  = () => { setAiStatus("idle"); setLiveText(""); };
+    rec.onresult = (e) => {
+      const t = Array.from(e.results).map((r) => r[0].transcript).join("");
+      setLiveText(t);
+      if (e.results[e.results.length - 1].isFinal) {
+        rec.stop(); setAiStatus("thinking"); setLiveText("");
+        setTimeout(() => sendMsg(t, true), 300);
+      }
+    };
+    recRef.current = rec; rec.start();
+  }
+
+  const SM = {
+    idle:      { icon: "🎓", label: "Listo para instrucciones", sub: "Escribe o usa el micrófono", color: "var(--muted)" },
+    listening: { icon: "🎙️", label: "Escuchando…", sub: liveText || "Habla en español", color: "var(--critical)" },
+    thinking:  { icon: "⚙️", label: "Analizando datos…", sub: "Procesando tu consulta", color: "var(--brand)" },
+    speaking:  { icon: "🔊", label: "Respondiendo en voz…", sub: "Haz clic en ⏹ para detener", color: "var(--ok)" },
+  };
+  const sm = SM[aiStatus] || SM.idle;
+
+  return (
+    <div className="ai-panel">
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ width: 10, height: 10, borderRadius: "50%", background: "var(--brand)", boxShadow: "0 0 8px var(--brand)", animation: aiStatus !== "idle" ? "pulse 1.4s ease infinite" : "none" }} />
+          <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text)" }}>Asistente IA Académica</div>
+          <span className="tag" style={{ background: "var(--brand-light)", color: "var(--brand)", fontSize: 10 }}>Gemelo Digital · v2</span>
+        </div>
+        <div style={{ fontSize: 12, color: "var(--muted)" }}>
+          {studentRows.length} estudiantes · {courseInfo?.Name || "Curso activo"}
+        </div>
+      </div>
+
+      {/* Status bar */}
+      <div className={`ai-status-outer ${aiStatus !== "idle" ? aiStatus : ""}`}>
+        <div className="ai-status-icon" style={{ fontSize: 18 }}>{sm.icon}</div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em", color: sm.color }}>{sm.label}</div>
+          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{sm.sub}</div>
+        </div>
+        {(aiStatus === "listening" || aiStatus === "speaking") && (
+          <div className="ai-wave">
+            {[1,2,3,4,5].map((n) => (
+              <div key={n} className="ai-wave-bar" style={{
+                background: aiStatus === "listening" ? "var(--critical)" : "var(--ok)"
+              }} />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Chips */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+        {CHIPS.map((c) => (
+          <button key={c.label} className="ai-chip-btn" onClick={() => sendMsg(c.icon + " " + c.label)}>
+            {c.icon} {c.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Chat */}
+      <div className="ai-chat" ref={chatRef}>
+        {msgs.map((m) => (
+          <div key={m.id} className={`ai-bubble-wrap ${m.role}`}>
+            <div className="ai-meta">
+              {m.role === "bot" ? "Asistente" : "Tú"}
+              {m.fromVoice && <span className="ai-voice-badge">🎙️ voz</span>}
+            </div>
+            <div className={`ai-bubble ${m.role}`} dangerouslySetInnerHTML={{ __html: m.text }} />
+            {m.role === "bot" && (
+              <button
+                className={`ai-speak-btn${activeSpeakId === m.id ? " active" : ""}`}
+                onClick={() => activeSpeakId === m.id ? stopSpeaking() : speakText(m.text, m.id)}
+              >
+                {activeSpeakId === m.id ? "⏸ Detener" : "🔊 Escuchar"}
+              </button>
+            )}
+          </div>
+        ))}
+        {aiStatus === "thinking" && (
+          <div className="ai-bubble-wrap bot">
+            <div className="ai-meta">Asistente</div>
+            <div className="ai-bubble bot">
+              <div className="ai-typing">
+                <div className="ai-typing-dot" /><div className="ai-typing-dot" /><div className="ai-typing-dot" />
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Input row */}
+      <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
+        {voiceOk && (
+          <button
+            className={`voice-btn${aiStatus === "listening" ? " listening" : ""}`}
+            onClick={toggleMic}
+            title={aiStatus === "listening" ? "Detener" : "Hablar"}
+            style={{ height: 44, width: 44, fontSize: 18, flexShrink: 0 }}
+          >
+            {aiStatus === "listening" ? "⏹" : "🎙️"}
+          </button>
+        )}
+        <input
+          ref={inputRef}
+          className="ai-input"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMsg(); } }}
+          placeholder={aiStatus === "listening" ? "🎙️ Escuchando…" : "Escribe una instrucción o usa el micrófono…"}
+        />
+        <button className="ai-send-btn" onClick={() => sendMsg()}>Enviar ↵</button>
+      </div>
+
+      {/* Controls row */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+        <button
+          className={`ai-toggle${voiceOut ? " active" : ""}`}
+          onClick={() => { setVoiceOut((v) => !v); if (aiStatus === "speaking") stopSpeaking(); }}
+        >
+          <div className="ai-toggle-dot" />
+          <span style={{ fontSize: 11, fontWeight: 700, color: voiceOut ? "var(--ok)" : "var(--muted)" }}>
+            {voiceOut ? "🔊 Voz activada" : "🔇 Voz desactivada"}
+          </span>
+        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700 }}>Velocidad:</span>
+          <select
+            value={speed}
+            onChange={(e) => setSpeed(Number(e.target.value))}
+            style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8, padding: "4px 8px", fontSize: 11, color: "var(--text)", fontFamily: "var(--font-mono)", outline: "none" }}
+          >
+            <option value={0.8}>Lenta</option>
+            <option value={1.0}>Normal</option>
+            <option value={1.2}>Rápida</option>
+            <option value={1.5}>Muy rápida</option>
+          </select>
+          <button className={`ai-stop-btn${aiStatus === "speaking" ? " visible" : ""}`} onClick={stopSpeaking}>⏹ Detener</button>
+        </div>
+      </div>
+
+      {/* Guide cards */}
+      <div className="ai-guide-grid">
+        {[
+          { icon: "🎙️", color: "var(--brand)", title: "Entrada de Voz", desc: "Presiona el micrófono y habla en español. La transcripción se procesa automáticamente." },
+          { icon: "🔊", color: "var(--ok)", title: "Salida de Voz", desc: "Activa la voz y el asistente leerá cada respuesta. Usa '🔊 Escuchar' en mensajes anteriores." },
+          { icon: "⚡", color: "var(--watch)", title: "Datos Reales", desc: "Todas las respuestas usan los datos del curso en tiempo real — notas, cobertura, riesgo y RAs." },
+        ].map((g) => (
+          <div key={g.title} style={{ background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 10, padding: 14 }}>
+            <div style={{ fontSize: 20, marginBottom: 8 }}>{g.icon}</div>
+            <div style={{ fontSize: 10, fontWeight: 800, color: g.color, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>{g.title}</div>
+            <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>{g.desc}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
+// Voice command helpers
+// ─────────────────────────────────────────────────────────
+function normalizeVoiceText(text) {
+  return String(text || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .trim();
+}
+
+function includesAny(text, patterns) {
+  return patterns.some((p) => text.includes(p));
+}
+
+function parseVoiceCommand(rawText) {
+  const text = normalizeVoiceText(rawText);
+  if (!text) return { type: "unknown", message: "No se reconoció ningún comando." };
+
+  if (includesAny(text, ["resultado de aprendizaje","resultados de aprendizaje","prioridad academica","competencias","subcompetencias","logro por ra"])) {
+    return { type: "navigate_section", section: "learning-outcomes", message: "Mostrando resultados de aprendizaje." };
+  }
+  if (includesAny(text, ["estudiantes prioritarios","prioritarios","mayor riesgo","riesgo mas alto","riesgo alto","en riesgo"])) {
+    return { type: "highest_risk_student", message: "Buscando el estudiante con mayor riesgo académico." };
+  }
+  if (includesAny(text, ["resultado mas bajo","peor resultado","nota mas baja","menor nota","estudiante mas bajo","peor desempe"])) {
+    return { type: "lowest_result_student", message: "Buscando el estudiante con menor desempeño." };
+  }
+  if (includesAny(text, ["estudiantes en riesgo","solo riesgo","muestrame los de riesgo","filtrar riesgo"])) {
+    return { type: "filter_students_risk", message: "Filtrando estudiantes en riesgo." };
+  }
+  if (includesAny(text, ["evidencias","abre evidencias","mostrar evidencias"])) {
+    return { type: "open_drawer_tab", tab: "evidencias", message: "Abriendo evidencias." };
+  }
+  if (includesAny(text, ["unidades","subcompetencias","abre unidades"])) {
+    return { type: "open_drawer_tab", tab: "unidades", message: "Abriendo unidades." };
+  }
+  if (includesAny(text, ["intervencion","prescripcion"])) {
+    return { type: "open_drawer_tab", tab: "prescripcion", message: "Abriendo intervención personalizada." };
+  }
+  if (includesAny(text, ["calidad","flags","calidad del modelo"])) {
+    return { type: "open_drawer_tab", tab: "calidad", message: "Abriendo calidad del modelo." };
+  }
+  if (includesAny(text, ["resumen","volver al resumen"])) {
+    return { type: "open_drawer_tab", tab: "resumen", message: "Abriendo resumen del estudiante." };
+  }
+  if (includesAny(text, ["aprobados","aprobado","pasando"])) {
+    return { type: "filter_approved", message: "Mostrando estudiantes aprobados (≥7.0)." };
+  }
+
+  const buscarMatch = text.match(/(?:busca|buscar|abrir|abre|mostrar|muestrame)\s+a?\s*([a-zà-ü\s]+)$/i);
+  if (buscarMatch?.[1] && buscarMatch[1].trim().length >= 3) {
+    return { type: "find_student_by_name", name: buscarMatch[1].trim(), message: `Buscando a ${buscarMatch[1].trim()}.` };
+  }
+  if (includesAny(text, ["estudiantes","lista de estudiantes"])) {
+    return { type: "navigate_section", section: "students", message: "Mostrando listado de estudiantes." };
+  }
+  if (text.length >= 3) {
+    return { type: "text_search", text: rawText, message: `Buscando: ${rawText}` };
+  }
+  return { type: "unknown", message: "No se entendió el comando. Prueba: 'estudiante con resultado más bajo' o 'resultados de aprendizaje'." };
+}
+
+function findLowestResultStudent(rows) {
+  const valid = (Array.isArray(rows) ? rows : []).filter(
+    (s) => !s?.isLoading && s?.currentPerformancePct != null && !Number.isNaN(Number(s.currentPerformancePct))
+  );
+  if (!valid.length) return null;
+  return valid.slice().sort((a, b) => Number(a.currentPerformancePct) - Number(b.currentPerformancePct))[0];
+}
+
+function findHighestRiskStudent(rows) {
+  const valid = (Array.isArray(rows) ? rows : []).filter((s) => !s?.isLoading);
+  if (!valid.length) return null;
+  const riskRank = (s) => {
+    const risk = computeRiskFromPct(s?.currentPerformancePct);
+    if (risk === "alto") return 0;
+    if (risk === "medio") return 1;
+    if (risk === "bajo") return 2;
+    return 3;
+  };
+  return valid.slice().sort((a, b) => {
+    const rd = riskRank(a) - riskRank(b);
+    if (rd !== 0) return rd;
+    return Number(a?.currentPerformancePct ?? 999) - Number(b?.currentPerformancePct ?? 999);
+  })[0];
+}
+
+function findStudentByName(rows, name) {
+  const q = normalizeVoiceText(name);
+  return (Array.isArray(rows) ? rows : []).find((s) => normalizeVoiceText(s?.displayName).includes(q)) || null;
+}
+
+// ─────────────────────────────────────────────────────────
 // CoursePanel — lista de cursos del docente
 // ─────────────────────────────────────────────────────────
 function CoursePanel({ courses, loadingCourses, currentId, onSelect, onClose }) {
@@ -1528,7 +2350,7 @@ function CourseItem({ course, isActive, isCurrent, onSelect }) {
   );
 }
 
-function StudentCard({ s, onOpen }) {
+function StudentCard({ s, onOpen, weakestMacro }) {
   return (
     <div
       role="button"
@@ -1565,7 +2387,10 @@ function StudentCard({ s, onOpen }) {
         </div>
         <div style={{ textAlign: "center", padding: "8px 4px", background: "var(--bg)", borderRadius: 8 }}>
           <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700, marginBottom: 2 }}>RA CRÍTICO</div>
-          <div style={{ fontWeight: 800, fontSize: 12, fontFamily: "var(--font-mono)" }}>{s.mostCriticalMacro ? s.mostCriticalMacro.code : "—"}</div>
+          <div style={{ fontWeight: 800, fontSize: 12, fontFamily: "var(--font-mono)", color: s.mostCriticalMacro ? "var(--text)" : "var(--muted)" }}>
+            {s.mostCriticalMacro?.code ?? weakestMacro?.code ?? "—"}
+            {!s.mostCriticalMacro && weakestMacro && <span style={{ fontSize: 9, opacity: 0.6 }}>~</span>}
+          </div>
         </div>
       </div>
 
@@ -1597,10 +2422,35 @@ export default function App() {
   const isNarrow = useMediaQuery("(max-width: 900px)");
   const isMobile = useMediaQuery("(max-width: 640px)");
 
+  // ── Section refs for voice scroll navigation ────────────
+  const overviewRef        = React.useRef(null);
+  const priorityRef        = React.useRef(null);
+  const learningOutcomesRef = React.useRef(null);
+  const studentsRef        = React.useRef(null);
+
+  // ── Voice command state ─────────────────────────────────
+  const [voiceFeedback, setVoiceFeedback] = useState("");
+  const [activeSection, setActiveSection] = useState("students");
+  const [advancedQuery, setAdvancedQuery] = useState({ mode: "text", target: null });
+
   const [darkMode, setDarkMode] = useState(false);
   useEffect(() => {
     document.documentElement.classList.toggle("dark", darkMode);
   }, [darkMode]);
+
+  // Scroll to section when voice command navigates
+  useEffect(() => {
+    const map = {
+      overview:          overviewRef,
+      priority:          priorityRef,
+      "learning-outcomes": learningOutcomesRef,
+      students:          studentsRef,
+    };
+    const ref = map[activeSection];
+    if (ref?.current) {
+      ref.current.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [activeSection]);
 
   const [orgUnitId, setOrgUnitId] = useState(DEFAULT_ORG_UNIT_ID);
   const [orgUnitInput, setOrgUnitInput] = useState(String(DEFAULT_ORG_UNIT_ID));
@@ -1628,6 +2478,9 @@ export default function App() {
   const [studentErr, setStudentErr] = useState("");
 
   const [drawerTab, setDrawerTab] = useState("resumen");
+
+  // ── Main navigation tabs ──────────────────────────────
+  const [activeTab, setActiveTab] = useState("dashboard"); // "dashboard" | "assistant"
 
   // ── Course panel ───────────────────────────────────────
   const [showCoursePanel, setShowCoursePanel] = useState(false);
@@ -1677,6 +2530,107 @@ export default function App() {
   const voiceSupported = typeof window !== "undefined" &&
     !!(window.SpeechRecognition || window.webkitSpeechRecognition);
 
+  // executeVoiceCommand MUST be declared before toggleVoice (dependency order)
+  const executeVoiceCommand = React.useCallback((rawText) => {
+    const command = parseVoiceCommand(rawText);
+    setVoiceFeedback(command.message || "");
+
+    switch (command.type) {
+      case "navigate_section": {
+        setAdvancedQuery({ mode: "text", target: null });
+        setOnlyRisk(false);
+        setQuery("");
+        setActiveSection(command.section);
+        return;
+      }
+      case "lowest_result_student": {
+        setAdvancedQuery({ mode: "lowest-result", target: null });
+        const student = findLowestResultStudent(studentRows);
+        if (student) {
+          setActiveSection("students");
+          setSelectedStudent(student);
+          setDrawerTab("resumen");
+          setVoiceFeedback(`Abriendo a ${student.displayName} — nota más baja: ${fmtGrade10FromPct(student.currentPerformancePct)}.`);
+        } else {
+          setVoiceFeedback("No encontré estudiantes con calificación disponible.");
+        }
+        return;
+      }
+      case "highest_risk_student": {
+        setAdvancedQuery({ mode: "highest-risk", target: null });
+        const student = findHighestRiskStudent(studentRows);
+        if (student) {
+          setActiveSection("priority");
+          setSelectedStudent(student);
+          setDrawerTab("resumen");
+          setVoiceFeedback(`Abriendo a ${student.displayName} — estudiante priorizado por riesgo académico.`);
+        } else {
+          setVoiceFeedback("No encontré estudiantes priorizados.");
+        }
+        return;
+      }
+      case "filter_students_risk": {
+        setAdvancedQuery({ mode: "students-at-risk", target: null });
+        setActiveSection("students");
+        setOnlyRisk(true);
+        setQuery("");
+        setVoiceFeedback("Filtro activado: solo estudiantes en riesgo.");
+        return;
+      }
+      case "filter_approved": {
+        setAdvancedQuery({ mode: "text", target: null });
+        setActiveSection("students");
+        setOnlyRisk(false);
+        setQuery(""); // will filter via advancedQuery
+        setAdvancedQuery({ mode: "approved", target: null });
+        setVoiceFeedback("Mostrando estudiantes aprobados (nota ≥ 7.0).");
+        return;
+      }
+      case "find_student_by_name": {
+        setAdvancedQuery({ mode: "text", target: null });
+        const student = findStudentByName(studentRows, command.name);
+        if (student) {
+          setActiveSection("students");
+          setSelectedStudent(student);
+          setDrawerTab("resumen");
+          setVoiceFeedback(`Abriendo a ${student.displayName}.`);
+        } else {
+          setQuery(command.name);
+          setActiveSection("students");
+          setVoiceFeedback(`No encontré coincidencia exacta. Buscando: "${command.name}".`);
+        }
+        return;
+      }
+      case "open_drawer_tab": {
+        setAdvancedQuery({ mode: "text", target: null });
+        if (!selectedStudent) {
+          const fallback = findHighestRiskStudent(studentRows);
+          if (fallback) {
+            setSelectedStudent(fallback);
+            setDrawerTab(command.tab);
+            setVoiceFeedback(`Abriendo ${command.tab} para ${fallback.displayName}.`);
+          } else {
+            setVoiceFeedback("No hay estudiante seleccionado. Abre uno primero.");
+          }
+        } else {
+          setDrawerTab(command.tab);
+          setVoiceFeedback(`Abriendo ${command.tab} para ${selectedStudent.displayName}.`);
+        }
+        return;
+      }
+      case "text_search": {
+        setActiveSection("students");
+        setOnlyRisk(false);
+        setAdvancedQuery({ mode: "text", target: null });
+        setQuery(command.text || "");
+        return;
+      }
+      default: {
+        // feedback already set above
+      }
+    }
+  }, [studentRows, selectedStudent]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const toggleVoice = React.useCallback(() => {
     if (!voiceSupported) return;
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -1692,21 +2646,31 @@ export default function App() {
     rec.continuous = false;
     rec.interimResults = false;
 
-    rec.onstart = () => setVoiceListening(true);
+    rec.onstart = () => {
+      setVoiceListening(true);
+      setVoiceFeedback("🎙️ Escuchando... habla ahora");
+    };
     rec.onend   = () => setVoiceListening(false);
-    rec.onerror = () => setVoiceListening(false);
+    rec.onerror = () => {
+      setVoiceListening(false);
+      setVoiceFeedback("No fue posible capturar el audio. Intenta de nuevo.");
+    };
 
     rec.onresult = (event) => {
       const transcript = Array.from(event.results)
         .map((r) => r[0].transcript)
         .join(" ")
         .trim();
-      if (transcript) setQuery(transcript);
+      if (transcript) {
+        executeVoiceCommand(transcript);
+      } else {
+        setVoiceFeedback("No se detectó un comando claro.");
+      }
     };
 
     recognitionRef.current = rec;
     rec.start();
-  }, [voiceListening, voiceSupported]);
+  }, [voiceListening, voiceSupported, executeVoiceCommand]);
 
   // Stop recognition on unmount
   React.useEffect(() => {
@@ -1883,6 +2847,8 @@ export default function App() {
                   notSubmittedWeightPct: Number(ar.overdueUnscoredWeightPct ?? ar.notSubmittedWeightPct ?? 0),
                   overdueWeightPct:      Number(ar.overdueUnscoredWeightPct ?? ar.notSubmittedWeightPct ?? 0),
                   pendingSubmittedWeightPct: Number(ar.pendingUngradedWeightPct ?? ar.pendingSubmittedWeightPct ?? 0),
+                  // mostCriticalMacro now included from backend studentsAtRisk
+                  mostCriticalMacro: ar.mostCriticalMacro ?? row.mostCriticalMacro ?? null,
                 };
                 merged.route = suggestRouteForStudent(merged, thr);
                 return merged;
@@ -1912,6 +2878,7 @@ export default function App() {
               notSubmittedWeightPct: Number(ar?.overdueUnscoredWeightPct ?? ar?.notSubmittedWeightPct ?? 0),
               overdueWeightPct:      Number(ar?.overdueUnscoredWeightPct ?? ar?.notSubmittedWeightPct ?? 0),
               pendingSubmittedWeightPct: Number(ar?.pendingUngradedWeightPct ?? ar?.pendingSubmittedWeightPct ?? 0),
+              mostCriticalMacro: ar?.mostCriticalMacro ?? row.mostCriticalMacro ?? null,
             };
             merged.route = suggestRouteForStudent(merged, thr);
             return merged;
@@ -2334,7 +3301,25 @@ const weakestAssignment = useMemo(() => {
 
   const filteredStudents = useMemo(() => {
     let list = Array.isArray(studentRows) ? [...studentRows] : [];
-    if (onlyRisk) list = list.filter((s) => ["alto", "medio"].includes(normStatus(s.risk)));
+
+    // advancedQuery modes override normal filters
+    if (advancedQuery.mode === "lowest-result") {
+      const s = findLowestResultStudent(list);
+      return s ? [s] : [];
+    }
+    if (advancedQuery.mode === "highest-risk") {
+      const s = findHighestRiskStudent(list);
+      return s ? [s] : [];
+    }
+    if (advancedQuery.mode === "students-at-risk") {
+      return list.filter((s) => ["alto", "medio"].includes(computeRiskFromPct(s.currentPerformancePct)));
+    }
+    if (advancedQuery.mode === "approved") {
+      return list.filter((s) => s.currentPerformancePct != null && s.currentPerformancePct >= 70);
+    }
+
+    // Normal filter path
+    if (onlyRisk) list = list.filter((s) => ["alto", "medio"].includes(computeRiskFromPct(s.currentPerformancePct)));
     const q = query.trim().toLowerCase();
     if (q) {
       list = list.filter(
@@ -2344,7 +3329,7 @@ const weakestAssignment = useMemo(() => {
       );
     }
     return list;
-  }, [studentRows, query, onlyRisk]);
+  }, [studentRows, query, onlyRisk, advancedQuery]);
 
 const contentKpis = useMemo(() => {
     const root = Array.isArray(contentRoot) ? contentRoot : [];
@@ -2596,6 +3581,40 @@ const contentKpis = useMemo(() => {
           </div>
         </div>
 
+        {/* ── Main tab bar ── */}
+        <div className="main-tabs">
+          <button
+            className={`main-tab${activeTab === "dashboard" ? " active" : ""}`}
+            onClick={() => setActiveTab("dashboard")}
+          >
+            <span className="tab-dot" />
+            📊 Dashboard
+          </button>
+          <button
+            className={`main-tab${activeTab === "assistant" ? " active" : ""}`}
+            onClick={() => setActiveTab("assistant")}
+          >
+            <span className="tab-dot" />
+            🤖 Asistente IA
+          </button>
+        </div>
+
+        {/* ── Assistant tab ── */}
+        {activeTab === "assistant" && (
+          <div className="fade-up">
+            <VoiceAssistant
+              studentRows={studentRows}
+              overview={overview}
+              raDashboard={raDashboard}
+              courseInfo={courseInfo}
+              thresholds={thresholds}
+            />
+          </div>
+        )}
+
+        {/* ── Dashboard tab ── */}
+        {activeTab === "dashboard" && <>
+
         <div className="fade-up fade-up-1" style={{ marginBottom: 12 }}>
           <AlertsPanel alerts={overview?.alerts} />
         </div>
@@ -2609,6 +3628,7 @@ const contentKpis = useMemo(() => {
             marginBottom: 12,
           }}
         >
+          <div ref={overviewRef}>
           <Card title="Gestión del curso" right={<StatusBadge status={courseStatus} />}>
             <div
               style={{
@@ -2792,6 +3812,7 @@ const contentKpis = useMemo(() => {
               )}
             </div>
           </Card>
+          </div>
 
           <Card title="Riesgo académico">
             <div style={{ width: "100%", height: 200 }}>
@@ -2857,6 +3878,7 @@ const contentKpis = useMemo(() => {
             </div>
           </Card>
 
+          <div ref={priorityRef}>
           <Card
             title="Estudiantes prioritarios"
             right={
@@ -2986,7 +4008,9 @@ const contentKpis = useMemo(() => {
               </div>
             )}
           </Card>
+          </div>
 
+          <div ref={learningOutcomesRef}>
           <Card title="Prioridad académica">
             <div
               style={{
@@ -3067,13 +4091,20 @@ const contentKpis = useMemo(() => {
                 <div className="empty-state">
                   <span className="empty-state-icon">🎯</span>
                   <span style={{ fontSize: 12 }}>Sin datos de RA</span>
+                  {Number(avgCov ?? 0) > 0 && (
+                    <span style={{ fontSize: 11, color: "var(--watch)", fontWeight: 700, textAlign: "center", padding: "4px 8px", borderRadius: 8, background: "var(--watch-bg)", marginTop: 4 }}>
+                      ⚠️ Hay evidencias calificadas pero sin rúbricas vinculadas a RA
+                    </span>
+                  )}
                 </div>
               )}
             </div>
           </Card>
         </div>
 
-        <div className="fade-up fade-up-3">
+        </div>
+
+        <div ref={studentsRef} className="fade-up fade-up-3">
           <Card
             title={
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -3135,10 +4166,40 @@ const contentKpis = useMemo(() => {
               </div>
             }
           >
+            {/* Voice feedback banner */}
+            {voiceFeedback && (
+              <div style={{
+                marginBottom: 12, padding: "10px 14px", borderRadius: 10,
+                border: `1px solid ${voiceListening ? "var(--critical)" : "var(--brand)"}`,
+                background: voiceListening ? "var(--critical-bg)" : "var(--brand-light)",
+                color: voiceListening ? "var(--critical)" : "var(--brand)",
+                fontSize: 12, fontWeight: 700,
+                display: "flex", alignItems: "center", gap: 8,
+              }}>
+                <span>{voiceListening ? "🎙️" : "🔍"}</span>
+                <span style={{ flex: 1 }}>{voiceFeedback}</span>
+                <button
+                  className="btn"
+                  style={{ padding: "3px 8px", fontSize: 11 }}
+                  onClick={() => { setVoiceFeedback(""); setAdvancedQuery({ mode: "text", target: null }); setOnlyRisk(false); setQuery(""); }}
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
+            {/* Voice hint */}
+            {voiceSupported && !voiceFeedback && (
+              <div className="voice-hint" style={{ marginBottom: 10 }}>
+                <span>🎙️</span>
+                Prueba: <em>"resultado más bajo"</em> · <em>"resultados de aprendizaje"</em> · <em>"estudiantes en riesgo"</em>
+              </div>
+            )}
+
             {useCards ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {sortedStudents.map((s) => (
-                  <StudentCard key={s.userId} s={s} onOpen={setSelectedStudent} />
+                  <StudentCard key={s.userId} s={s} onOpen={setSelectedStudent} weakestMacro={weakestMacro} />
                 ))}
                 {!sortedStudents.length && (
                   <div className="empty-state">
@@ -3258,25 +4319,27 @@ const contentKpis = useMemo(() => {
                         </td>
                         {!hideCriticalMacroCol && (
                           <td style={{ padding: "10px 10px", minWidth: 90 }}>
-                            {s.mostCriticalMacro ? (
-                              <div>
-                                <div
-                                  style={{
-                                    fontFamily: "var(--font-mono)",
-                                    fontSize: 12,
-                                    fontWeight: 800,
-                                    color: colorForPct(s.mostCriticalMacro.pct, thresholds),
-                                  }}
-                                >
-                                  {s.mostCriticalMacro.code}
+                            {(() => {
+                              // Student-level RA (from drawer/gemelo) takes priority.
+                              // Fallback: worst course-level RA as proxy.
+                              const ra = s.mostCriticalMacro || weakestMacro;
+                              if (!ra) return <span style={{ color: "var(--muted)" }}>—</span>;
+                              const isFallback = !s.mostCriticalMacro;
+                              return (
+                                <div title={isFallback ? "RA del curso (sin datos individuales)" : undefined}>
+                                  <div style={{
+                                    fontFamily: "var(--font-mono)", fontSize: 12, fontWeight: 800,
+                                    color: isFallback ? "var(--muted)" : colorForPct(ra.pct, thresholds),
+                                  }}>
+                                    {ra.code}
+                                    {isFallback && <span style={{ fontSize: 9, marginLeft: 3, opacity: 0.6 }}>~</span>}
+                                  </div>
+                                  <div style={{ fontSize: 11, color: "var(--muted)" }}>
+                                    {fmtPct(ra.pct ?? ra.avgPct)}
+                                  </div>
                                 </div>
-                                <div style={{ fontSize: 11, color: "var(--muted)" }}>
-                                  {fmtPct(s.mostCriticalMacro.pct)}
-                                </div>
-                              </div>
-                            ) : (
-                              "—"
-                            )}
+                              );
+                            })()}
                           </td>
                         )}
                         {!hideGlobalProgressCol && (
@@ -3347,6 +4410,9 @@ const contentKpis = useMemo(() => {
             )}
           </Card>
         </div>
+
+        </>}
+
       </div>
 
       {/* Course Panel overlay */}
@@ -3539,6 +4605,7 @@ const contentKpis = useMemo(() => {
                         </table>
                       </div>
                     </Card>
+                  <NoRaMappingNotice evidences={drawerEvidences} units={drawerUnits} />
                   </>
                 ) : (
                   <div className="empty-state">
