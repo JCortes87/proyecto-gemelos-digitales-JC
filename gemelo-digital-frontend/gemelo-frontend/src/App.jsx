@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import ReactDOM from "react-dom";
 import {
   ResponsiveContainer,
   BarChart,
@@ -42,44 +43,66 @@ const DEFAULT_ORG_UNIT_ID = 29120;
  * =========================
  */
 const GLOBAL_STYLES = `
-  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,700;0,9..40,900;1,9..40,400&family=DM+Mono:wght@400;500&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
   :root {
-    --bg: #F4F5F7;
+    /* ── Layout ── */
+    --sidebar-w: 220px;
+
+    /* ── Colors ── */
+    --bg: #F2F4F8;
+    --bg2: #FAFBFD;
     --card: #FFFFFF;
-    --border: #E2E5EA;
-    --text: #0D1117;
-    --muted: #6B7280;
+    --border: #E4E8EF;
+    --border2: #CDD3DE;
+    --text: #0F1827;
+    --muted: #5A6580;
     --brand: #0B5FFF;
-    --brand-light: #EEF3FF;
-    --shadow: 0 1px 4px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04);
-    --shadow-lg: 0 8px 32px rgba(0,0,0,0.10);
-    --radius: 14px;
-    --font: 'DM Sans', system-ui, sans-serif;
-    --font-mono: 'DM Mono', monospace;
+    --brand-2: #003EA6;
+    --brand-light: #EBF1FF;
+    --brand-light2: #D6E4FF;
+    --shadow: 0 1px 3px rgba(15,24,39,0.06), 0 4px 16px rgba(15,24,39,0.04);
+    --shadow-md: 0 4px 12px rgba(15,24,39,0.08), 0 8px 24px rgba(15,24,39,0.06);
+    --shadow-lg: 0 8px 32px rgba(15,24,39,0.12), 0 16px 48px rgba(15,24,39,0.08);
+    --radius: 16px;
+    --radius-lg: 24px;
+    --font: 'Manrope', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
     --ok: #12B76A;
     --ok-bg: #ECFDF3;
-    --watch: #F79009;
-    --watch-bg: #FFFAEB;
+    --ok-border: #A9EFC5;
+    --watch: #E8900A;
+    --watch-bg: #FFF8ED;
+    --watch-border: #FCD385;
     --critical: #D92D20;
     --critical-bg: #FEF3F2;
-    --pending: #98A2B3;
-    --pending-bg: #F2F4F7;
+    --critical-border: #FDA29B;
+    --pending: #8B96A8;
+    --pending-bg: #F1F3F7;
+    --pending-border: #D1D8E4;
   }
 
   .dark {
-    --bg: #0D1117;
-    --card: #161B22;
-    --border: #21262D;
-    --text: #E6EDF3;
-    --muted: #7D8590;
-    --brand-light: #1A2844;
-    --shadow: 0 1px 4px rgba(0,0,0,0.3), 0 4px 16px rgba(0,0,0,0.2);
-    --shadow-lg: 0 8px 32px rgba(0,0,0,0.4);
-    --ok-bg: #0D2818;
-    --watch-bg: #2A1F06;
-    --critical-bg: #2A0B09;
-    --pending-bg: #1C2128;
+    --bg: #080E1A;
+    --bg2: #0D1422;
+    --card: #111827;
+    --border: #1E2A3D;
+    --border2: #2A3A52;
+    --text: #EEF2FA;
+    --muted: #7A8EAD;
+    --brand-light: #0F2044;
+    --brand-light2: #0A1830;
+    --shadow: 0 1px 3px rgba(0,0,0,0.4), 0 4px 16px rgba(0,0,0,0.3);
+    --shadow-md: 0 4px 12px rgba(0,0,0,0.5), 0 8px 24px rgba(0,0,0,0.4);
+    --shadow-lg: 0 8px 32px rgba(0,0,0,0.6);
+    --ok-bg: #0A2018;
+    --ok-border: #1A4030;
+    --watch-bg: #1E1400;
+    --watch-border: #3D2800;
+    --critical-bg: #200A08;
+    --critical-border: #3D1010;
+    --pending-bg: #121A28;
+    --pending-border: #1E2A3D;
   }
 
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -91,7 +114,231 @@ const GLOBAL_STYLES = `
     font-size: 14px;
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
+    font-feature-settings: "cv11", "ss01";
   }
+
+  /* ── Sidebar Layout ── */
+  .app-sidebar {
+    position: fixed;
+    left: 0; top: 0; bottom: 0;
+    width: var(--sidebar-w);
+    background: var(--card);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    z-index: 100;
+    transition: transform 0.28s cubic-bezier(.4,0,.2,1);
+  }
+  .app-sidebar.collapsed { transform: translateX(calc(-1 * var(--sidebar-w))); }
+  .sidebar-logo {
+    padding: 22px 20px 18px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .sidebar-logo-icon {
+    width: 36px; height: 36px;
+    background: var(--brand);
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 16px; font-weight: 900;
+    letter-spacing: -0.05em; flex-shrink: 0;
+  }
+  .sidebar-logo-text { line-height: 1.2; }
+  .sidebar-logo-name { font-size: 12px; font-weight: 800; color: var(--text); letter-spacing: 0.02em; }
+  .sidebar-logo-sub { font-size: 10px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+  .sidebar-nav { padding: 12px 10px; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+  .sidebar-section-label {
+    font-size: 10px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.1em; color: var(--muted);
+    padding: 8px 10px 4px; margin-top: 8px;
+  }
+  .sidebar-nav-item {
+    display: flex; align-items: center; gap: 9px;
+    padding: 9px 12px; border-radius: 10px;
+    font-size: 13px; font-weight: 600; color: var(--muted);
+    cursor: pointer; transition: all 0.15s ease;
+    border: none; background: transparent; width: 100%; text-align: left;
+  }
+  .sidebar-nav-item:hover { background: var(--bg); color: var(--text); }
+  .sidebar-nav-item.active {
+    background: var(--brand-light);
+    color: var(--brand);
+  }
+  .sidebar-nav-item.active .snav-icon { color: var(--brand); }
+  .sidebar-nav-dot {
+    width: 5px; height: 5px; border-radius: 50%;
+    background: transparent; transition: background 0.15s; flex-shrink: 0;
+    margin-left: auto;
+  }
+  .sidebar-nav-item.active .sidebar-nav-dot { background: var(--brand); }
+  .snav-icon { font-size: 16px; flex-shrink: 0; }
+  .sidebar-footer {
+    padding: 12px 10px 16px;
+    border-top: 1px solid var(--border);
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .sidebar-course-pill {
+    padding: 10px 12px; border-radius: 10px;
+    background: var(--brand-light); margin-bottom: 8px;
+  }
+  .sidebar-course-label { font-size: 9px; font-weight: 800; color: var(--brand); text-transform: uppercase; letter-spacing: 0.1em; }
+  .sidebar-course-name { font-size: 11px; font-weight: 700; color: var(--text); margin-top: 2px; line-height: 1.3; }
+
+  /* ── Top Bar ── */
+  .app-topbar {
+    position: fixed;
+    left: var(--sidebar-w); right: 0; top: 0;
+    height: 56px;
+    background: rgba(255,255,255,0.9);
+    backdrop-filter: blur(16px) saturate(180%);
+    -webkit-backdrop-filter: blur(16px) saturate(180%);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 24px 0 20px;
+    z-index: 50;
+    transition: left 0.28s cubic-bezier(.4,0,.2,1);
+  }
+  .dark .app-topbar { background: rgba(17,24,39,0.9); }
+  .app-topbar.sidebar-collapsed { left: 0; }
+  .topbar-search {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 7px 12px;
+    width: 240px;
+    transition: all 0.15s;
+  }
+  .topbar-search:focus-within {
+    border-color: var(--brand);
+    box-shadow: 0 0 0 3px rgba(11,95,255,0.1);
+    width: 280px;
+  }
+  .topbar-search input {
+    border: none; background: transparent; outline: none;
+    font-size: 13px; font-weight: 500; color: var(--text);
+    font-family: var(--font); flex: 1;
+  }
+  .topbar-search input::placeholder { color: var(--muted); }
+  .topbar-icon-btn {
+    width: 36px; height: 36px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 9px; border: 1px solid var(--border);
+    background: transparent; cursor: pointer;
+    color: var(--muted); font-size: 15px;
+    transition: all 0.15s; flex-shrink: 0;
+  }
+  .topbar-icon-btn:hover { background: var(--bg); color: var(--text); }
+  .topbar-avatar {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: var(--brand); color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 800; flex-shrink: 0;
+    cursor: pointer;
+  }
+
+  /* ── Main content offset ── */
+  .app-main {
+    margin-left: var(--sidebar-w);
+    padding-top: 56px;
+    min-height: 100vh;
+    transition: margin-left 0.28s cubic-bezier(.4,0,.2,1);
+  }
+  .app-main.sidebar-collapsed { margin-left: 0; }
+  .app-content { padding: 24px 28px; max-width: 100%; }
+
+  @media (max-width: 1024px) {
+    .app-sidebar { transform: translateX(calc(-1 * var(--sidebar-w))); }
+    .app-sidebar.mobile-open { transform: translateX(0); }
+    .app-topbar { left: 0; }
+    .app-main { margin-left: 0; }
+    .sidebar-backdrop {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.45);
+      z-index: 90; backdrop-filter: blur(2px);
+    }
+  }
+
+  /* ── Floating AI button ── */
+  .ai-fab {
+    position: fixed; bottom: 28px; right: 28px;
+    z-index: 200;
+  }
+  .ai-fab-btn {
+    width: 56px; height: 56px;
+    background: var(--brand);
+    border-radius: 50%;
+    border: none; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px;
+    box-shadow: 0 4px 20px rgba(11,95,255,0.4), 0 2px 8px rgba(11,95,255,0.2);
+    transition: all 0.2s ease;
+    position: relative;
+  }
+  .ai-fab-btn:hover { transform: scale(1.08); box-shadow: 0 8px 28px rgba(11,95,255,0.5); }
+  .ai-fab-btn.active { background: var(--brand-2); }
+  .ai-fab-tooltip {
+    position: absolute; bottom: 68px; right: 0;
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 7px 12px;
+    font-size: 11px; font-weight: 700; color: var(--text);
+    white-space: nowrap; box-shadow: var(--shadow);
+    animation: fadeUp 0.2s ease both;
+  }
+  .ai-fab-panel {
+    position: absolute; bottom: 72px; right: 0;
+    width: 380px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    box-shadow: var(--shadow-lg);
+    overflow: hidden;
+    display: flex; flex-direction: column;
+    max-height: 520px;
+    animation: fadeUp 0.25s cubic-bezier(.4,0,.2,1) both;
+  }
+  @media (max-width: 480px) { .ai-fab-panel { width: calc(100vw - 48px); right: -4px; } }
+  .ai-fab-panel-header {
+    padding: 16px 18px;
+    background: var(--brand);
+    color: #fff;
+    display: flex; align-items: center; justify-content: space-between;
+    flex-shrink: 0;
+  }
+
+  /* ── Student detail upgrades ── */
+  .grade-ring-wrap {
+    position: relative;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .grade-ring-svg { transform: rotate(-90deg); }
+  .grade-ring-label {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+  }
+  .route-card {
+    background: linear-gradient(135deg, var(--brand) 0%, var(--brand-2) 100%);
+    border-radius: var(--radius);
+    padding: 20px;
+    color: #fff;
+    position: relative;
+    overflow: hidden;
+  }
+  .route-card::before {
+    content: ''; position: absolute;
+    top: -40px; right: -40px;
+    width: 120px; height: 120px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.06);
+  }
+  .route-step {
+    display: flex; gap: 12px; align-items: flex-start;
+    padding: 12px 14px; border-radius: 10px;
+    background: rgba(255,255,255,0.1);
+    margin-bottom: 8px;
+  }
+  .route-step.done { background: rgba(255,255,255,0.15); }
+  .route-step.pending { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.15); }
 
   .cesa-loader-wrap {
     position: fixed; inset: 0;
@@ -171,12 +418,41 @@ const GLOBAL_STYLES = `
 
   .drawer-enter { animation: drawerIn 0.28s cubic-bezier(.4,0,.2,1) both; }
   @keyframes drawerIn {
-    from { transform: translateX(40px); opacity: 0; }
+    from { transform: translateX(48px); opacity: 0; }
     to { transform: translateX(0); opacity: 1; }
   }
 
-  .tr-hover { transition: background 0.15s ease; }
-  .tr-hover:hover { background: rgba(11,95,255,0.04) !important; }
+  /* ── Page tab transitions ── */
+  @keyframes tabIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .tab-enter { animation: tabIn 0.3s cubic-bezier(.4,0,.2,1) both; }
+
+  /* ── Card hover lift ── */
+  .kpi-card { transition: box-shadow 0.18s ease, transform 0.18s ease; }
+  .kpi-card:hover { box-shadow: var(--shadow-md) !important; }
+
+  /* ── Sidebar nav hover slide ── */
+  .sidebar-nav-item { transition: all 0.15s ease; }
+  .sidebar-nav-item:not(.active):hover { transform: translateX(3px); }
+
+  .tr-hover { transition: all 0.15s ease; }
+  .tr-hover:hover { background: var(--brand-light) !important; }
+  .tr-hover:hover td { color: var(--text) !important; }
+
+  /* ── Responsive: narrow viewport improvements ── */
+  @media (max-width: 640px) {
+    .app-content { padding: 14px 12px; }
+    .kpi-card { padding: 14px; border-radius: 16px; }
+    .ai-fab { bottom: 16px; right: 16px; }
+    .ai-fab-panel { bottom: 68px; }
+    .sidebar-logo-name { font-size: 11px; }
+  }
+  @media (max-width: 480px) {
+    .ai-fab-panel { width: calc(100vw - 36px); right: -4px; }
+    .ai-fab-btn { width: 48px; height: 48px; font-size: 18px; }
+  }
 
   ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
@@ -184,27 +460,27 @@ const GLOBAL_STYLES = `
   ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
 
   .badge {
-    display: inline-flex; align-items: center; gap: 4px;
+    display: inline-flex; align-items: center; gap: 5px;
     padding: 4px 10px; border-radius: 999px;
-    font-size: 11px; font-weight: 700; white-space: nowrap;
-    letter-spacing: 0.01em;
+    font-size: 10px; font-weight: 800; white-space: nowrap;
+    letter-spacing: 0.04em; text-transform: uppercase;
   }
 
   .kpi-card {
     background: var(--card);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 16px;
+    border-radius: var(--radius-lg);
+    padding: 20px;
     box-shadow: var(--shadow);
-    transition: box-shadow 0.2s ease;
+    transition: box-shadow 0.2s ease, transform 0.2s ease;
   }
-  .kpi-card:hover { box-shadow: var(--shadow-lg); }
+  .kpi-card:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
 
   .tag {
     display: inline-flex; align-items: center;
-    padding: 3px 8px; border-radius: 6px;
-    font-size: 11px; font-weight: 700;
-    font-family: var(--font-mono);
+    padding: 3px 9px; border-radius: 6px;
+    font-size: 10px; font-weight: 800;
+    letter-spacing: 0.03em;
     background: var(--brand-light);
     color: var(--brand);
   }
@@ -235,12 +511,22 @@ const GLOBAL_STYLES = `
     font-family: var(--font);
     transition: all 0.15s ease;
     display: inline-flex; align-items: center; gap: 6px;
+    letter-spacing: -0.01em;
   }
-  .btn:hover { border-color: var(--brand); color: var(--brand); background: var(--brand-light); }
+  .btn:hover {
+    border-color: var(--brand); color: var(--brand);
+    background: var(--brand-light); transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(11,95,255,0.1);
+  }
+  .btn:active { transform: translateY(0); }
   .btn-primary {
     background: var(--brand); color: #fff; border-color: var(--brand);
+    box-shadow: 0 2px 8px rgba(11,95,255,0.3);
   }
-  .btn-primary:hover { background: #0A52E0; color: #fff; border-color: #0A52E0; }
+  .btn-primary:hover {
+    background: var(--brand-2); color: #fff; border-color: var(--brand-2);
+    box-shadow: 0 4px 14px rgba(11,95,255,0.4);
+  }
 
   .scenario-card {
     border: 1px solid var(--border);
@@ -295,7 +581,8 @@ const GLOBAL_STYLES = `
     border-radius: var(--radius);
     background: var(--card);
   }
-  .empty-state-icon { font-size: 32px; opacity: 0.4; }
+  .empty-state-icon { font-size: 36px; opacity: 0.35; }
+  .empty-state > span:nth-child(2) { font-size: 14px; font-weight: 700; color: var(--muted); }
 
   /* ── Course Panel ── */
   .course-panel-overlay {
@@ -468,15 +755,16 @@ const GLOBAL_STYLES = `
     50%       { transform: scaleY(1); }
   }
   .ai-chat {
-    background: var(--bg);
+    background: var(--bg2, var(--bg));
     border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 14px;
-    max-height: 340px;
+    border-radius: 12px;
+    padding: 12px 10px;
+    max-height: 300px;
+    min-height: 120px;
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 10px;
     scrollbar-width: thin;
   }
   .ai-bubble-wrap { display: flex; flex-direction: column; }
@@ -492,12 +780,13 @@ const GLOBAL_STYLES = `
   .ai-bubble.bot {
     background: var(--card);
     border: 1px solid var(--border);
-    border-radius: 0 8px 8px 8px;
+    border-radius: 2px 12px 12px 12px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
   }
   .ai-bubble.user {
-    background: var(--brand-light);
+    background: var(--brand-light2, var(--brand-light));
     border: 1px solid rgba(11,95,255,0.25);
-    border-radius: 8px 0 8px 8px;
+    border-radius: 12px 2px 12px 12px;
     color: var(--text);
   }
   .ai-meta {
@@ -927,30 +1216,88 @@ function StatusBadge({ status }) {
     label: status || "—",
   };
   return (
-    <span className="badge" style={{ background: cfg.bg, color: cfg.fg }}>
-      <span className="pulse-dot" style={{ background: cfg.dot, width: 6, height: 6 }} />
+    <span
+      className="badge"
+      style={{
+        background: cfg.bg, color: cfg.fg,
+        border: `1px solid ${cfg.dot}22`,
+        fontWeight: 700, letterSpacing: "0.03em",
+        padding: "4px 10px", fontSize: 11,
+        borderRadius: 999,
+      }}
+    >
+      <span
+        className="pulse-dot"
+        style={{ background: cfg.dot, width: 5, height: 5, borderRadius: "50%", display: "inline-block", flexShrink: 0 }}
+      />
       {cfg.label}
     </span>
   );
 }
 
-function Card({ title, right, children, className = "", style = {} }) {
+
+// ─────────────────────────────────────────────
+// CircularRing — SVG progress ring (CESA Curator style)
+// ─────────────────────────────────────────────
+function CircularRing({ pct, size = 80, stroke = 8, color, label, sublabel, fontSize }) {
+  const r = (size - stroke) / 2;
+  const circ = 2 * Math.PI * r;
+  const pctClamped = Math.max(0, Math.min(100, Number(pct) || 0));
+  const offset = circ - (circ * pctClamped) / 100;
+  const ringColor = color || "var(--brand)";
+  const textSize = fontSize || Math.round(size * 0.22);
   return (
-    <div className={`kpi-card ${className}`} style={style}>
+    <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
+      <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
+        <circle
+          cx={size / 2} cy={size / 2} r={r}
+          fill="none" stroke="var(--border)" strokeWidth={stroke}
+        />
+        <circle
+          cx={size / 2} cy={size / 2} r={r}
+          fill="none" stroke={ringColor} strokeWidth={stroke}
+          strokeLinecap="round"
+          strokeDasharray={circ}
+          strokeDashoffset={offset}
+          style={{ transition: "stroke-dashoffset 0.7s cubic-bezier(.4,0,.2,1)" }}
+        />
+      </svg>
+      <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+        <span style={{ fontSize: textSize, fontWeight: 900, fontFamily: "var(--font-mono)", color: ringColor, lineHeight: 1 }}>{label ?? `${Math.round(pctClamped)}%`}</span>
+        {sublabel && <span style={{ fontSize: Math.round(textSize * 0.55), fontWeight: 700, color: "var(--muted)", marginTop: 1 }}>{sublabel}</span>}
+      </div>
+    </div>
+  );
+}
+
+function Card({ title, right, children, className = "", style = {}, accent }) {
+  return (
+    <div
+      className={`kpi-card ${className}`}
+      style={{
+        ...style,
+        borderRadius: "var(--radius-lg)",
+        boxShadow: "var(--shadow)",
+        border: `1px solid var(--border)`,
+        position: "relative",
+        overflow: "hidden",
+      }}
+    >
+      {accent && (
+        <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: `var(--${accent})`, borderRadius: "var(--radius-lg) var(--radius-lg) 0 0" }} />
+      )}
       {(title || right) && (
         <div
           style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            marginBottom: 14,
-            gap: 12,
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            marginBottom: 16, gap: 12,
+            paddingTop: accent ? 4 : 0,
           }}
         >
-          <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)", letterSpacing: "-0.01em" }}>
+          <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text)", letterSpacing: "-0.02em", lineHeight: 1.3 }}>
             {title}
           </div>
-          <div>{right}</div>
+          <div style={{ flexShrink: 0 }}>{right}</div>
         </div>
       )}
       {children}
@@ -962,23 +1309,20 @@ function Stat({ label, value, sub, valueColor }) {
   return (
     <div>
       {label ? (
-        <div
-          style={{
-            fontSize: 11,
-            color: "var(--muted)",
-            fontWeight: 700,
-            textTransform: "uppercase",
-            letterSpacing: "0.05em",
-            marginBottom: 2,
-          }}
-        >
+        <div style={{
+          fontSize: 10, color: "var(--muted)", fontWeight: 800,
+          textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 4,
+        }}>
           {label}
         </div>
       ) : null}
-      <div style={{ fontSize: 26, color: valueColor || "var(--text)", fontWeight: 900, lineHeight: 1.1, letterSpacing: "-0.02em" }}>
+      <div style={{
+        fontSize: 30, color: valueColor || "var(--text)", fontWeight: 900,
+        lineHeight: 1, letterSpacing: "-0.04em", fontFamily: "var(--font)",
+      }}>
         {value}
       </div>
-      {sub ? <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 3, fontWeight: 500 }}>{sub}</div> : null}
+      {sub ? <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 5, fontWeight: 500, lineHeight: 1.4 }}>{sub}</div> : null}
     </div>
   );
 }
@@ -1025,124 +1369,124 @@ function ProgressBar({ value, color, showLabel = false, animate = true }) {
   );
 }
 
+// Tooltip portal container — renders outside any overflow/transform ancestor
+const _tooltipRoot = (() => {
+  if (typeof document === "undefined") return null;
+  let el = document.getElementById("cesa-tooltip-portal");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "cesa-tooltip-portal";
+    el.style.cssText = "position:fixed;top:0;left:0;width:0;height:0;overflow:visible;z-index:999999;pointer-events:none;";
+    document.body.appendChild(el);
+  }
+  return el;
+})();
+
 function InfoTooltip({ text }) {
   const [open, setOpen] = React.useState(false);
-  const ref = React.useRef(null);
-  const [pos, setPos] = React.useState({ top: 0, left: 0 });
+  const triggerRef = React.useRef(null);
+  const tooltipRef = React.useRef(null);
+  const [pos, setPos] = React.useState({ top: -9999, left: -9999 });
 
   if (!String(text || "").trim()) return null;
 
-  const updatePos = () => {
-    if (!ref.current) return;
-    const rect = ref.current.getBoundingClientRect();
+  const TW = 260; // tooltip width
+  const GAP = 7;
 
-    const tooltipWidth = Math.min(280, Math.floor(window.innerWidth * 0.65));
-    // Prefer left-aligned to avoid overflow on rightmost columns
-    const spaceRight = window.innerWidth - rect.right;
-    const spaceLeft  = rect.left;
-    let left;
-    if (spaceRight >= tooltipWidth + 12) {
-      // enough room to the right
-      left = Math.min(rect.left, window.innerWidth - tooltipWidth - 12);
-    } else if (spaceLeft >= tooltipWidth + 12) {
-      // align to left edge of button
-      left = Math.max(12, rect.right - tooltipWidth);
+  const calcPos = React.useCallback(() => {
+    if (!triggerRef.current) return;
+    const r = triggerRef.current.getBoundingClientRect();
+    // center horizontally over the ? button
+    let left = r.left + r.width / 2 - TW / 2;
+    left = Math.max(10, Math.min(left, window.innerWidth - TW - 10));
+
+    // measure real height after render, default 72px estimate
+    const h = (tooltipRef.current?.offsetHeight) || 72;
+    const spaceAbove = r.top;
+    const spaceBelow = window.innerHeight - r.bottom;
+    let top;
+    if (spaceAbove >= h + GAP + 10 || spaceAbove >= spaceBelow) {
+      top = r.top - h - GAP;
     } else {
-      // center and clamp
-      left = Math.max(12, Math.min(
-        rect.left + rect.width / 2 - tooltipWidth / 2,
-        window.innerWidth - tooltipWidth - 12
-      ));
+      top = r.bottom + GAP;
     }
-
-    const tooltipHeightGuess = 100;
-    const top =
-      rect.top > tooltipHeightGuess + 16
-        ? rect.top - tooltipHeightGuess - 10
-        : rect.bottom + 10;
-
     setPos({ top, left });
-  };
+  }, []);
 
   React.useEffect(() => {
     if (!open) return;
-    updatePos();
-    window.addEventListener("scroll", updatePos, true);
-    window.addEventListener("resize", updatePos);
+    calcPos();
+    // re-measure after paint (tooltip may have rendered with wrong height)
+    const raf = requestAnimationFrame(calcPos);
+    window.addEventListener("scroll", calcPos, true);
+    window.addEventListener("resize", calcPos);
     return () => {
-      window.removeEventListener("scroll", updatePos, true);
-      window.removeEventListener("resize", updatePos);
+      cancelAnimationFrame(raf);
+      window.removeEventListener("scroll", calcPos, true);
+      window.removeEventListener("resize", calcPos);
     };
-  }, [open]);
+  }, [open, calcPos]);
+
+  // Portal content
+  const tooltipNode = open && _tooltipRoot
+    ? ReactDOM.createPortal(
+        <div
+          ref={tooltipRef}
+          role="tooltip"
+          style={{
+            position: "fixed",
+            top: pos.top,
+            left: pos.left,
+            width: TW,
+            background: "var(--card)",
+            border: "1px solid var(--border)",
+            boxShadow: "0 8px 32px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.10)",
+            borderRadius: 10,
+            padding: "9px 12px",
+            color: "var(--text)",
+            fontSize: 12,
+            fontWeight: 500,
+            lineHeight: 1.5,
+            pointerEvents: "none",
+            animation: "fadeUp 0.15s ease both",
+          }}
+        >
+          {text}
+        </div>,
+        _tooltipRoot
+      )
+    : null;
 
   return (
     <>
       <span
-        ref={ref}
-        style={{ position: "relative", display: "inline-flex", flex: "0 0 auto" }}
-        onMouseEnter={() => {
-          updatePos();
-          setOpen(true);
-        }}
+        ref={triggerRef}
+        style={{ display: "inline-flex", flex: "0 0 auto", verticalAlign: "middle" }}
+        onMouseEnter={() => { setOpen(true); }}
         onMouseLeave={() => setOpen(false)}
-        onFocus={() => {
-          updatePos();
-          setOpen(true);
-        }}
+        onFocus={() => setOpen(true)}
         onBlur={() => setOpen(false)}
-        onClick={(e) => {
-          e.stopPropagation();
-          updatePos();
-          setOpen((v) => !v);
-        }}
+        onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }}
       >
         <span
           role="button"
           tabIndex={0}
           aria-label="Ver descripción"
           style={{
-            display: "inline-flex",
-            width: 16,
-            height: 16,
-            borderRadius: 999,
-            alignItems: "center",
-            justifyContent: "center",
-            border: "1px solid var(--border)",
-            color: "var(--muted)",
-            fontSize: 10,
-            fontWeight: 900,
-            cursor: "help",
-            background: "var(--card)",
-            lineHeight: 1,
+            display: "inline-flex", width: 16, height: 16, borderRadius: 999,
+            alignItems: "center", justifyContent: "center",
+            border: "1px solid var(--border2)", color: "var(--muted)",
+            fontSize: 10, fontWeight: 900, cursor: "help",
+            background: "var(--card)", lineHeight: 1,
+            transition: "border-color 0.15s, color 0.15s",
           }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = "var(--brand)"; e.currentTarget.style.color = "var(--brand)"; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--border2)"; e.currentTarget.style.color = "var(--muted)"; }}
         >
           ?
         </span>
       </span>
-
-      {open && (
-        <div
-          role="tooltip"
-          style={{
-            position: "fixed",
-            top: pos.top,
-            left: pos.left,
-            width: "min(320px, 75vw)",
-            zIndex: 99999,
-            background: "var(--card)",
-            border: "1px solid var(--border)",
-            boxShadow: "var(--shadow-lg)",
-            borderRadius: 12,
-            padding: 10,
-            color: "var(--text)",
-            fontSize: 12,
-            fontWeight: 600,
-            lineHeight: 1.4,
-          }}
-        >
-          {text}
-        </div>
-      )}
+      {tooltipNode}
     </>
   );
 }
@@ -1153,18 +1497,19 @@ function SortTh({ label, active, dir, onClick, title }) {
       onClick={onClick}
       title={title}
       style={{
-        padding: "10px 10px",
+        padding: "10px 12px",
         cursor: "pointer",
         userSelect: "none",
         whiteSpace: "nowrap",
-        fontSize: 11,
-        fontWeight: 700,
+        fontSize: 10,
+        fontWeight: 800,
         textTransform: "uppercase",
-        letterSpacing: "0.05em",
+        letterSpacing: "0.1em",
         color: active ? "var(--brand)" : "var(--muted)",
+        transition: "color 0.15s",
       }}
     >
-      {label} {active ? (dir === "asc" ? " ↑" : " ↓") : ""}
+      {label} {active ? (dir === "asc" ? "↑" : "↓") : ""}
     </th>
   );
 }
@@ -1220,7 +1565,7 @@ function CoverageBars({ donePct, pendingPct, overduePct, openPct }) {
   );
 }
 
-function CesaLoader({ title = "Gemelo V. 1.0", subtitle = "Cargando tablero..." }) {
+function CesaLoader({ title = "CESA · Gemelo Digital v2.0", subtitle = "Cargando tablero..." }) {
   React.useEffect(() => {
     injectStyles();
   }, []);
@@ -1418,11 +1763,9 @@ function AlertsPanel({ alerts }) {
   );
 }
 
-function Drawer({ open, onClose, title, children }) {
+function Drawer({ open, onClose, title, subtitle, children }) {
   React.useEffect(() => {
-    const handler = (e) => {
-      if (e.key === "Escape") onClose();
-    };
+    const handler = (e) => { if (e.key === "Escape") onClose(); };
     if (open) document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
   }, [open, onClose]);
@@ -1431,53 +1774,37 @@ function Drawer({ open, onClose, title, children }) {
 
   return (
     <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(13,17,23,0.45)",
-        display: "flex",
-        justifyContent: "flex-end",
-        zIndex: 50,
-        backdropFilter: "blur(2px)",
-      }}
+      style={{ position: "fixed", inset: 0, background: "rgba(13,17,23,0.5)", display: "flex", justifyContent: "flex-end", zIndex: 200, backdropFilter: "blur(3px)" }}
       onClick={onClose}
     >
       <div
         className="drawer-enter"
-        style={{
-          width: "min(680px, 96vw)",
-          height: "100%",
-          background: "var(--card)",
-          padding: 20,
-          overflow: "auto",
-          borderLeft: "1px solid var(--border)",
-          color: "var(--text)",
-          display: "flex",
-          flexDirection: "column",
-          gap: 0,
-        }}
+        style={{ width: "min(700px, 97vw)", height: "100%", background: "var(--card)", overflow: "auto", borderLeft: "1px solid var(--border)", color: "var(--text)", display: "flex", flexDirection: "column", gap: 0 }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 12,
-            marginBottom: 16,
-            paddingBottom: 14,
-            borderBottom: "1px solid var(--border)",
-          }}
-        >
-          <div>
-            <div style={{ fontSize: 15, fontWeight: 800, color: "var(--text)", letterSpacing: "-0.01em" }}>{title}</div>
-            <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>Detalle del gemelo digital · Vista docente</div>
+        {/* Sticky header */}
+        <div style={{ position: "sticky", top: 0, zIndex: 10, background: "var(--card)", borderBottom: "1px solid var(--border)", padding: "0 20px" }}>
+          {/* Breadcrumb */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6, paddingTop: 14, paddingBottom: 6 }}>
+            <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, fontWeight: 700, color: "var(--muted)", padding: 0, display: "flex", alignItems: "center", gap: 4 }}>
+              ← Estudiantes
+            </button>
+            <span style={{ color: "var(--border2)", fontSize: 11 }}>›</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--brand)" }}>Expediente académico</span>
           </div>
-          <button className="btn" onClick={onClose}>
-            ✕ Cerrar
-          </button>
+          {/* Title row */}
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, paddingBottom: 14 }}>
+            <div>
+              <div style={{ fontSize: 18, fontWeight: 900, color: "var(--text)", letterSpacing: "-0.02em", lineHeight: 1.15 }}>{title}</div>
+              {subtitle && <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 3, fontWeight: 500 }}>{subtitle}</div>}
+            </div>
+            <button className="btn" onClick={onClose} style={{ flexShrink: 0, marginTop: 2 }}>✕ Cerrar</button>
+          </div>
         </div>
-        {children}
+        {/* Content */}
+        <div style={{ padding: "16px 20px 28px", flex: 1 }}>
+          {children}
+        </div>
       </div>
     </div>
   );
@@ -1787,7 +2114,7 @@ function VoiceAssistant({ studentRows, overview, raDashboard, courseInfo, thresh
   const [input, setInput] = React.useState("");
   const [aiStatus, setAiStatus] = React.useState("idle");
   const [voiceOut, setVoiceOut] = React.useState(true);
-  const [speed, setSpeed]   = React.useState(1.0);
+  const [speed, setSpeed]   = React.useState(1.2);
   const [activeSpeakId, setActiveSpeakId] = React.useState(null);
   const [liveText, setLiveText] = React.useState("");
   const chatRef  = React.useRef(null);
@@ -1810,95 +2137,179 @@ function VoiceAssistant({ studentRows, overview, raDashboard, courseInfo, thresh
   const top    = withGrades.filter((s) => s.currentPerformancePct / 10 >= 8);
   const courseName = courseInfo?.Name || "el curso";
 
-  // ── Quick chips ──
-  const CHIPS = [
-    { icon: "📊", label: "estudiantes en riesgo" },
-    { icon: "⚠️", label: "alertas críticas" },
-    { icon: "🏆", label: "top estudiantes" },
-    { icon: "📋", label: "resumen del curso" },
-    { icon: "📉", label: "sin nota registrada" },
-    { icon: "🎯", label: "logro por RA" },
+  // ── Banco de sugerencias (rotación aleatoria cada apertura) ──
+  const SUGGESTION_BANK = [
+    { icon: "🔴", label: "¿Quiénes están en riesgo alto?" },
+    { icon: "📊", label: "¿Cuál es la nota promedio?" },
+    { icon: "📉", label: "¿Quién tiene la nota más baja?" },
+    { icon: "⚠️", label: "¿Hay estudiantes sin nota?" },
+    { icon: "🏆", label: "¿Cuáles son los top 3?" },
+    { icon: "🎯", label: "¿Qué RA está más crítico?" },
+    { icon: "📋", label: "Dame un resumen del curso" },
+    { icon: "🟡", label: "¿Quiénes están en riesgo medio?" },
+    { icon: "📦", label: "¿Cuántos aprobaron (≥7.0)?" },
+    { icon: "🔍", label: "¿Cuál es la cobertura promedio?" },
+    { icon: "⏳", label: "¿Cuántos tienen pendientes sin calificar?" },
+    { icon: "🛤️", label: "¿Qué rutas de intervención hay?" },
+    { icon: "📅", label: "¿Cómo va el ritmo de contenidos?" },
+    { icon: "🧮", label: "¿Cuántos están por debajo de 5.0?" },
+    { icon: "🚀", label: "¿Quiénes mejoraron su desempeño?" },
+    { icon: "🎓", label: "¿Hay estudiantes sin actividad reciente?" },
   ];
+  // Seleccionar 4 aleatorias estables por montaje
+  const [visibleChips, setVisibleChipsState] = React.useState(() => {
+    const shuffled = [...SUGGESTION_BANK].sort(() => Math.random() - 0.5);
+    return shuffled.slice(0, 6);
+  });
+  const CHIPS = visibleChips;
 
-  // ── Command processor (returns plain text for TTS + HTML for display) ──
+  // ── Command processor — respuestas cortas y precisas ──
+  // Regla de orden: más específico SIEMPRE antes que más genérico
   function processCmd(cmd) {
     const c = cmd.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+    const n = studentRows.length;
 
+    // ── Ritmo de contenidos (antes de "contenido" genérico)
+    if (c.includes("ritmo") || c.includes("ritmo de contenido")) {
+      const kpis = overview?.contentKpis;
+      if (!kpis) return "Sin datos de ritmo de contenidos disponibles.";
+      return `Contenidos creados: <strong>${kpis.createdCount ?? "—"}</strong> · Mínimo esperado: <strong>${kpis.minExpected ?? "—"}</strong> · Cumplimiento: <strong>${kpis.progressRatio != null ? Math.round(kpis.progressRatio*100)+"%" : "—"}</strong>.`;
+    }
+
+    // ── Actividad reciente (antes de cualquier otra rama)
+    if (c.includes("actividad reciente") || c.includes("sin actividad") || c.includes("inactiv")) {
+      if (!zeros.length) return "Todos los estudiantes han tenido actividad registrada.";
+      return `Sin actividad registrada: <strong>${zeros.length}</strong>:<br>${zeros.slice(0,5).map(s => `‣ ${s.displayName.split(",")[0]}`).join("<br>")}${zeros.length > 5 ? `<br>… y ${zeros.length - 5} más` : ""}`;
+    }
+
+    // ── RA / Resultados de aprendizaje (ANTES de "critico" genérico y "menor")
+    if (c.includes("que ra") || c.includes("cual ra") || c.includes("ra critico") || c.includes("ra mas") ||
+        c.includes("resultado de aprendizaje") || c.includes("resultados de aprendizaje") ||
+        c.includes("competencia") || (c.includes("ra") && (c.includes("critico") || c.includes("bajo") || c.includes("peor")))) {
+      const ras = Array.isArray(raDashboard?.ras) ? raDashboard.ras.filter(r => r.studentsWithData > 0) : [];
+      if (!ras.length) return "Sin datos de RA aún. Se requieren evaluaciones con rúbricas calificadas.";
+      const sorted = [...ras].sort((a,b) => a.avgPct - b.avgPct);
+      return `${sorted.map(r => `${r.avgPct < 50 ? "[Crítico]" : r.avgPct < 70 ? "[Observación]" : "[OK]"} <strong>${r.code}:</strong> ${fmtPct(r.avgPct)}`).join("<br>")}.<br>Foco: <strong>${sorted[0].code}</strong> (menor desempeño).`;
+    }
+
+    // ── Por debajo de 5 (ANTES de "menor" o "bajo" genérico que también captura "nota más baja")
+    if (c.includes("debajo de 5") || c.includes("menor a 5") || c.includes("menor de 5") ||
+        c.includes("5.0") || c.includes("reprobado") || c.includes("cuantos") && c.includes("5")) {
+      const rep = withGrades.filter(s => s.currentPerformancePct / 10 < 5);
+      return `Con nota menor a 5.0: <strong>${rep.length} de ${n}</strong>.${rep.length ? "<br>" + rep.slice(0,4).map(s=>`‣ ${s.displayName.split(",")[0]} (${fmtGrade10FromPct(s.currentPerformancePct)})`).join("<br>") : ""}`;
+    }
+
+    // ── Nota más baja / quién tiene la peor nota
+    if ((c.includes("nota") && (c.includes("mas baja") || c.includes("baja") || c.includes("peor") || c.includes("menor nota"))) ||
+        c.includes("nota minima") || (c.includes("quien") && c.includes("baj"))) {
+      const worst = [...withGrades].sort((a, b) => a.currentPerformancePct - b.currentPerformancePct)[0];
+      if (!worst) return "Sin calificaciones registradas aún.";
+      return `Nota más baja: <strong>${worst.displayName}</strong> con <strong>${fmtGrade10FromPct(worst.currentPerformancePct)}</strong>.`;
+    }
+
+    // ── Riesgo alto (ANTES de riesgo genérico)
+    if (c.includes("riesgo alto") || c.includes("alto riesgo") ||
+        (c.includes("riesgo") && (c.includes("quienes") || c.includes("quién") || c.includes("quienes estan"))) ) {
+      if (!altos.length) return "Ningún estudiante en riesgo alto actualmente.";
+      return `Riesgo alto (${altos.length}):<br>${altos.slice(0, 6).map(s => `‣ ${s.displayName.split(",")[0]} — ${fmtGrade10FromPct(s.currentPerformancePct)}`).join("<br>")}${altos.length > 6 ? `<br>… y ${altos.length - 6} más` : ""}`;
+    }
+
+    // ── Riesgo medio
+    if (c.includes("riesgo medio") || c.includes("medio riesgo")) {
+      if (!medios.length) return "Ningún estudiante en riesgo medio actualmente.";
+      return `Riesgo medio (${medios.length}):<br>${medios.slice(0, 5).map(s => `‣ ${s.displayName.split(",")[0]} — ${fmtGrade10FromPct(s.currentPerformancePct)}`).join("<br>")}${medios.length > 5 ? `<br>… y ${medios.length - 5} más` : ""}`;
+    }
+
+    // ── Riesgo general
     if (c.includes("riesgo") || c.includes("risk")) {
-      const resp = `Riesgo académico actual en ${courseName}.<br><br>
-🔴 <strong>Alto (${altos.length}):</strong><br>
-${altos.slice(0, 6).map((s) => `‣ ${s.displayName} — ${fmtGrade10FromPct(s.currentPerformancePct)}`).join("<br>")}${altos.length > 6 ? `<br>… y ${altos.length - 6} más` : ""}<br><br>
-🟡 <strong>Medio (${medios.length}):</strong><br>
-${medios.slice(0, 4).map((s) => `‣ ${s.displayName} — ${fmtGrade10FromPct(s.currentPerformancePct)}`).join("<br>")}${medios.length > 4 ? `<br>… y ${medios.length - 4} más` : ""}`;
-      return resp;
+      const ok = n - altos.length - medios.length - zeros.length;
+      return `Riesgo en <strong>${courseName}</strong>:<br>Alto: ${altos.length} · Medio: ${medios.length} · OK: ${ok} · Sin nota: ${zeros.length}.<br>${altos.length > 0 ? `Prioridad: ${altos.slice(0,3).map(s => s.displayName.split(",")[0]).join(", ")}.` : ""}`;
     }
 
-    if (c.includes("alerta") || c.includes("critico")) {
-      const crit = altos.filter((s) => s.currentPerformancePct != null && s.currentPerformancePct < 50);
-      return `Alertas críticas del curso.<br><br>
-Sin nota registrada: ${zeros.length} estudiantes.<br>
-${zeros.slice(0, 4).map((s) => `‣ ${s.displayName}`).join("<br>")}<br><br>
-Nota crítica menor a 5.0: ${crit.length} estudiantes.<br>
-${crit.slice(0, 5).map((s) => `‣ ${s.displayName} — ${fmtGrade10FromPct(s.currentPerformancePct)}`).join("<br>")}<br><br>
-<strong>Acción recomendada:</strong> Contactar esta semana y verificar entregas.`;
+    // ── Alertas críticas
+    if (c.includes("alerta")) {
+      const crit = altos.filter(s => s.currentPerformancePct != null && s.currentPerformancePct < 50);
+      return `Sin nota: <strong>${zeros.length}</strong> · Nota menor a 5: <strong>${crit.length}</strong>.<br>${crit.length ? crit.slice(0,3).map(s => `‣ ${s.displayName.split(",")[0]} (${fmtGrade10FromPct(s.currentPerformancePct)})`).join("<br>") : ""}`;
     }
 
-    if (c.includes("top") || c.includes("mejor") || c.includes("destacado")) {
-      const sorted = [...withGrades].sort((a, b) => b.currentPerformancePct - a.currentPerformancePct).slice(0, 5);
-      return `Top 5 estudiantes de ${courseName}:<br><br>
-${sorted.map((s, i) => `<strong>${i + 1}.</strong> ${s.displayName}<br>&nbsp;&nbsp;Nota: ${fmtGrade10FromPct(s.currentPerformancePct)} · Cobertura: ${fmtPct(s.coveragePct)}`).join("<br><br>")}`;
+    // ── Top estudiantes
+    if (c.includes("top") || c.includes("mejor") || c.includes("destacado") || (c.includes("cuales") && c.includes("top"))) {
+      const sorted = [...withGrades].sort((a, b) => b.currentPerformancePct - a.currentPerformancePct).slice(0, 3);
+      if (!sorted.length) return "Sin calificaciones disponibles aún.";
+      return `Top 3:<br>${sorted.map((s, i) => `${i+1}. ${s.displayName.split(",")[0]} — ${fmtGrade10FromPct(s.currentPerformancePct)}`).join("<br>")}`;
     }
 
-    if (c.includes("resumen") || c.includes("informe") || c.includes("reporte")) {
-      return `Resumen de ${courseName}.<br><br>
-<strong>Estudiantes:</strong> ${studentRows.length} · ${withGrades.length} con nota<br>
-<strong>Promedio:</strong> ${avg ?? "—"}/10<br>
-<strong>Riesgo:</strong> Alto: ${altos.length} · Medio: ${medios.length} · OK: ${studentRows.length - altos.length - medios.length}<br>
-<strong>Sin nota:</strong> ${zeros.length} · <strong>Top ≥8:</strong> ${top.length}<br>
-<strong>Cobertura promedio:</strong> ${fmtPct(overview?.courseGradebook?.avgCoveragePct)}`;
+    // ── Resumen del curso
+    if (c.includes("resumen") || c.includes("informe") || c.includes("reporte") || c.includes("como va") || c.includes("dame un")) {
+      return `<strong>${courseName}</strong><br>Estudiantes: ${n} · Promedio: ${avg ?? "—"}/10<br>Alto: ${altos.length} · Medio: ${medios.length} · Sin nota: ${zeros.length}`;
     }
 
+    // ── Sin nota
     if (c.includes("sin nota") || c.includes("sin evidencia") || c.includes("ruta 0")) {
-      return `Estudiantes sin nota registrada (Ruta 0).<br><br>
-<strong>${zeros.length} requieren activación urgente:</strong><br><br>
-${zeros.map((s) => `‣ ${s.displayName} (ID: ${s.userId})`).join("<br>")}<br><br>
-<strong>Acción:</strong> Verificar acceso y contactar esta semana.`;
+      if (!zeros.length) return "Todos los estudiantes tienen nota registrada.";
+      return `Sin nota: <strong>${zeros.length}</strong>:<br>${zeros.slice(0,5).map(s => `‣ ${s.displayName.split(",")[0]}`).join("<br>")}${zeros.length > 5 ? `<br>… y ${zeros.length - 5} más` : ""}`;
     }
 
-    if (c.includes("ra") || c.includes("resultado") || c.includes("aprendizaje") || c.includes("competencia")) {
-      const ras = Array.isArray(raDashboard?.ras) ? raDashboard.ras.filter((r) => r.studentsWithData > 0) : [];
-      if (!ras.length) return "No hay datos de Resultados de Aprendizaje disponibles aún. Los RAs se calculan una vez que los estudiantes tienen evaluaciones con rúbricas calificadas.";
-      return `Logro por Resultado de Aprendizaje en ${courseName}:<br><br>
-${ras.sort((a, b) => a.avgPct - b.avgPct).map((r) => {
-  const ico = Number(r.avgPct) < 50 ? "🔴" : Number(r.avgPct) < 70 ? "🟡" : "🟢";
-  return `${ico} <strong>${r.code}:</strong> ${fmtPct(r.avgPct)} · ${r.studentsWithData}/${r.totalStudents} estudiantes`;
-}).join("<br>")}<br><br>
-<strong>Foco:</strong> ${ras[0]?.code ?? "—"} es el RA con menor desempeño.`;
+    // ── Aprobados
+    if (c.includes("aprobado") || c.includes("pasando") || c.includes("aprobaron") || c.includes("aprobaron")) {
+      const ap = withGrades.filter(s => s.currentPerformancePct / 10 >= 7);
+      return `Aprobados (nota mayor o igual a 7.0): <strong>${ap.length} de ${n}</strong> (${n ? Math.round(ap.length/n*100) : 0}%).`;
     }
 
-    if (c.includes("aprobado") || c.includes("pasando")) {
-      const ap = withGrades.filter((s) => s.currentPerformancePct / 10 >= 7);
-      return `Estudiantes aprobados (nota ≥ 7.0):<br><br>
-Total: <strong>${ap.length} de ${studentRows.length}</strong> (${Math.round(ap.length / studentRows.length * 100)}%)<br><br>
-${ap.sort((a, b) => b.currentPerformancePct - a.currentPerformancePct).slice(0, 8).map((s) => `‣ ${s.displayName} — ${fmtGrade10FromPct(s.currentPerformancePct)}`).join("<br>")}${ap.length > 8 ? `<br>… y ${ap.length - 8} más` : ""}`;
+    // ── Cobertura
+    if (c.includes("cobertura") || (c.includes("50") && c.includes("cobertura"))) {
+      const avgCov = overview?.courseGradebook?.avgCoveragePct;
+      const lowCov = (Array.isArray(studentRows) ? studentRows : []).filter(s => s.coveragePct != null && s.coveragePct < 50);
+      return `Cobertura promedio: <strong>${fmtPct(avgCov)}</strong>.${lowCov.length ? `<br>${lowCov.length} est. con cobertura menor al 50%.` : ""}`;
     }
 
-    return `Entendido. Puedo ayudarte con:<br><br>
-‣ "estudiantes en riesgo"<br>
-‣ "alertas críticas"<br>
-‣ "top estudiantes"<br>
-‣ "resumen del curso"<br>
-‣ "sin nota registrada"<br>
-‣ "logro por RA"<br>
-‣ "aprobados"<br><br>
-¿Qué necesitas analizar?`;
+    // ── Promedio (último catch-all de nota)
+    if (c.includes("promedio") || c.includes("nota promedio") || c.includes("cual es la nota")) {
+      return `Promedio del curso: <strong>${avg ?? "—"}/10</strong> (${withGrades.length} estudiantes con nota).`;
+    }
+
+    // ── RA general (logro por RA)
+    if (c.includes("ra") || c.includes("logro") || c.includes("aprendizaje")) {
+      const ras = Array.isArray(raDashboard?.ras) ? raDashboard.ras.filter(r => r.studentsWithData > 0) : [];
+      if (!ras.length) return "Sin datos de RA aún. Se requieren evaluaciones con rúbricas calificadas.";
+      const sorted = [...ras].sort((a,b) => a.avgPct - b.avgPct);
+      return `${sorted.map(r => `${r.avgPct < 50 ? "[Crítico]" : r.avgPct < 70 ? "[Obs]" : "[OK]"} <strong>${r.code}:</strong> ${fmtPct(r.avgPct)}`).join(" · ")}<br>Foco: <strong>${sorted[0].code}</strong>.`;
+    }
+
+    // ── Rutas de intervención
+    if (c.includes("ruta") || c.includes("intervencion") || c.includes("prescripcion") || c.includes("plan activo")) {
+      const routeCounts = { route_coverage: 0, route_high_risk: 0, route_watch: 0, route_ok: 0 };
+      (Array.isArray(studentRows) ? studentRows : []).forEach(s => {
+        const rid = s.route?.id || "";
+        if (routeCounts[rid] !== undefined) routeCounts[rid]++;
+      });
+      const total = Object.values(routeCounts).reduce((a,b) => a+b, 0);
+      if (!total) return "No hay datos de rutas disponibles aún.";
+      return `Rutas activas:<br>` +
+        `<strong>Ruta 0</strong> (Activar evidencia): ${routeCounts.route_coverage} est.<br>` +
+        `<strong>Ruta 1</strong> (Recuperación): ${routeCounts.route_high_risk} est.<br>` +
+        `<strong>Ruta 2</strong> (Ajuste dirigido): ${routeCounts.route_watch} est.<br>` +
+        `<strong>Ruta 3</strong> (Mantener desempeño): ${routeCounts.route_ok} est.`;
+    }
+
+    return `No encontré esa consulta. Prueba: riesgo alto, riesgo medio, promedio, sin nota, top estudiantes, resultados de aprendizaje, aprobados, cobertura, rutas.`;
   }
 
-  // ── TTS ──
+  // ── TTS — strips HTML, emojis y símbolos antes de leer en voz ──
   function speakText(html, msgId) {
     if (!("speechSynthesis" in window)) return;
     window.speechSynthesis.cancel();
-    const clean = html.replace(/<[^>]*>/g, "").replace(/[→↑↓★‣·]/g, " ").replace(/\s+/g, " ").trim();
+    let clean = html.replace(/<[^>]*>/g, " ");
+    // Strip emoji Unicode blocks
+    clean = clean.replace(/[\u{1F300}-\u{1FAFF}]/gu, "");
+    clean = clean.replace(/[\u2600-\u27BF]/g, "");
+    // Replace HTML entities with readable text
+    clean = clean.replace(/&lt;/g, "menor que").replace(/&gt;/g, "mayor que").replace(/&amp;/g, "y");
+    // Strip brackets like [Crítico] [OK] [Obs]
+    clean = clean.replace(/\[.*?\]/g, "");
+    // Strip symbols
+    clean = clean.replace(/[→↑↓★‣·•≥≤·]/g, " ");
+    clean = clean.replace(/\s+/g, " ").trim();
     const utt = new SpeechSynthesisUtterance(clean);
     utt.lang = "es-CO"; utt.rate = speed;
     synthRef.current = utt;
@@ -1977,7 +2388,7 @@ ${ap.sort((a, b) => b.currentPerformancePct - a.currentPerformancePct).slice(0, 
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{ width: 10, height: 10, borderRadius: "50%", background: "var(--brand)", boxShadow: "0 0 8px var(--brand)", animation: aiStatus !== "idle" ? "pulse 1.4s ease infinite" : "none" }} />
           <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text)" }}>Asistente IA Académica</div>
-          <span className="tag" style={{ background: "var(--brand-light)", color: "var(--brand)", fontSize: 10 }}>Gemelo Digital · v2</span>
+          <span className="tag" style={{ background: "var(--brand-light)", color: "var(--brand)", fontSize: 10 }}>v2.0325 · 25/03/2026</span>
         </div>
         <div style={{ fontSize: 12, color: "var(--muted)" }}>
           {studentRows.length} estudiantes · {courseInfo?.Name || "Curso activo"}
@@ -2002,13 +2413,31 @@ ${ap.sort((a, b) => b.currentPerformancePct - a.currentPerformancePct).slice(0, 
         )}
       </div>
 
-      {/* Chips */}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-        {CHIPS.map((c) => (
-          <button key={c.label} className="ai-chip-btn" onClick={() => sendMsg(c.icon + " " + c.label)}>
-            {c.icon} {c.label}
-          </button>
-        ))}
+      {/* Sugerencias rotativas */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 2 }}>
+          <span style={{ fontSize: 10, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>Sugerencias</span>
+          <button
+            onClick={() => {
+              const shuffled = [...SUGGESTION_BANK].sort(() => Math.random() - 0.5).slice(0, 6);
+              setVisibleChipsState(shuffled);
+            }}
+            style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, color: "var(--muted)", padding: "2px 4px", borderRadius: 4 }}
+            title="Nuevas sugerencias"
+          >↻ nuevas</button>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 5 }}>
+          {visibleChips.map((c) => (
+            <button
+              key={c.label}
+              className="ai-chip-btn"
+              onClick={() => sendMsg(c.label)}
+              style={{ textAlign: "left", fontSize: 11, padding: "6px 9px", borderRadius: 8, lineHeight: 1.35 }}
+            >
+              <span style={{ marginRight: 5 }}>{c.icon}</span>{c.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Chat */}
@@ -2043,26 +2472,25 @@ ${ap.sort((a, b) => b.currentPerformancePct - a.currentPerformancePct).slice(0, 
       </div>
 
       {/* Input row */}
-      <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
-        {voiceOk && (
-          <button
-            className={`voice-btn${aiStatus === "listening" ? " listening" : ""}`}
-            onClick={toggleMic}
-            title={aiStatus === "listening" ? "Detener" : "Hablar"}
-            style={{ height: 44, width: 44, fontSize: 18, flexShrink: 0 }}
-          >
-            {aiStatus === "listening" ? "⏹" : "🎙️"}
-          </button>
-        )}
+      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        <button
+          className={`voice-btn${aiStatus === "listening" ? " listening" : ""}`}
+          onClick={voiceOk ? toggleMic : undefined}
+          title={voiceOk ? (aiStatus === "listening" ? "Detener" : "Hablar por voz") : "Micrófono no disponible en este navegador"}
+          style={{ height: 40, width: 40, fontSize: 17, flexShrink: 0, opacity: voiceOk ? 1 : 0.4, cursor: voiceOk ? "pointer" : "not-allowed" }}
+        >
+          {aiStatus === "listening" ? "⏹" : "🎙️"}
+        </button>
         <input
           ref={inputRef}
           className="ai-input"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMsg(); } }}
-          placeholder={aiStatus === "listening" ? "🎙️ Escuchando…" : "Escribe una instrucción o usa el micrófono…"}
+          placeholder={aiStatus === "listening" ? "🎙️ Escuchando…" : "Pregunta sobre el curso…"}
+          style={{ height: 40 }}
         />
-        <button className="ai-send-btn" onClick={() => sendMsg()}>Enviar ↵</button>
+        <button className="ai-send-btn" onClick={() => sendMsg()} style={{ height: 40, padding: "0 14px", fontSize: 13 }}>↵</button>
       </div>
 
       {/* Controls row */}
@@ -2077,7 +2505,7 @@ ${ap.sort((a, b) => b.currentPerformancePct - a.currentPerformancePct).slice(0, 
           </span>
         </button>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700 }}>Velocidad:</span>
+          <span style={{ fontSize: 10, color: "var(--muted)", fontWeight: 700 }}>TTS:</span>
           <select
             value={speed}
             onChange={(e) => setSpeed(Number(e.target.value))}
@@ -2351,60 +2779,735 @@ function CourseItem({ course, isActive, isCurrent, onSelect }) {
 }
 
 function StudentCard({ s, onOpen, weakestMacro }) {
+  const gradeColor = colorForPct(s.currentPerformancePct, null);
+  const covColor   = colorForPct(s.coveragePct, null);
   return (
     <div
       role="button"
       tabIndex={0}
       onClick={() => onOpen(s)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") onOpen(s);
-      }}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onOpen(s); }}
       className="kpi-card fade-up"
-      style={{ cursor: "pointer" }}
+      style={{ cursor: "pointer", borderRadius: 16, padding: "14px 14px 12px" }}
     >
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
-        <div>
-          <div style={{ fontWeight: 800, color: "var(--text)", fontSize: 14 }}>{s.displayName}</div>
-          <div style={{ fontSize: 11, color: "var(--muted)", fontFamily: "var(--font-mono)", marginTop: 2 }}>ID {s.userId}</div>
+      {/* Header row */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+        {/* Avatar circle */}
+        <div style={{ width: 40, height: 40, borderRadius: "50%", background: "var(--brand-light)", border: "2px solid var(--brand-light2)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <span style={{ fontSize: 14, fontWeight: 900, color: "var(--brand)" }}>
+            {(s.displayName || "?").charAt(0).toUpperCase()}
+          </span>
         </div>
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 5 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 800, color: "var(--text)", fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.displayName}</div>
+          <div style={{ fontSize: 10, color: "var(--muted)", fontFamily: "var(--font-mono)", marginTop: 1 }}>ID {s.userId}</div>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
           <StatusBadge status={s.isLoading ? "cargando" : s.risk} />
-          {s.hasPrescription && <span className="tag" style={{ fontSize: 10 }}>📋 Prescripción</span>}
+          {s.hasPrescription && <span className="tag" style={{ fontSize: 9 }}>📋 Plan activo</span>}
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 10 }}>
-        <div style={{ textAlign: "center", padding: "8px 4px", background: "var(--bg)", borderRadius: 8 }}>
-          <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700, marginBottom: 2 }}>NOTA</div>
-          <div style={{ fontWeight: 900, color: colorForPct(s.currentPerformancePct, null), fontSize: 16, fontFamily: "var(--font-mono)" }}>
-            {fmtGrade10FromPct(s.currentPerformancePct)}
-          </div>
-        </div>
-        <div style={{ textAlign: "center", padding: "8px 4px", background: "var(--bg)", borderRadius: 8 }}>
-          <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700, marginBottom: 2 }}>COBERTURA</div>
-          <div style={{ fontWeight: 800, fontSize: 13, fontFamily: "var(--font-mono)" }}>{fmtPct(s.coveragePct)}</div>
-          <div style={{ fontSize: 10, color: "var(--muted)" }}>{s.coverageCountText || "—"}</div>
-        </div>
-        <div style={{ textAlign: "center", padding: "8px 4px", background: "var(--bg)", borderRadius: 8 }}>
-          <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700, marginBottom: 2 }}>RA CRÍTICO</div>
-          <div style={{ fontWeight: 800, fontSize: 12, fontFamily: "var(--font-mono)", color: s.mostCriticalMacro ? "var(--text)" : "var(--muted)" }}>
-            {s.mostCriticalMacro?.code ?? weakestMacro?.code ?? "—"}
-            {!s.mostCriticalMacro && weakestMacro && <span style={{ fontSize: 9, opacity: 0.6 }}>~</span>}
-          </div>
+      {/* Rings + stats row */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+        <CircularRing pct={s.currentPerformancePct ?? 0} size={56} stroke={5} color={gradeColor} label={fmtGrade10FromPct(s.currentPerformancePct)} fontSize={11} />
+        <CircularRing pct={s.coveragePct ?? 0} size={56} stroke={5} color={covColor} label={fmtPct(s.coveragePct)} fontSize={10} />
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
+          <div style={{ fontSize: 10, color: "var(--muted)", fontWeight: 700 }}>NOTA · COBERTURA</div>
+          {(s.mostCriticalMacro || weakestMacro) && (
+            <div style={{ fontSize: 11, color: "var(--muted)" }}>
+              RA crítico: <span style={{ fontWeight: 800, fontFamily: "var(--font-mono)", color: "var(--text)" }}>
+                {s.mostCriticalMacro?.code ?? weakestMacro?.code}{!s.mostCriticalMacro && <span style={{ fontSize: 9, opacity: 0.5 }}>~</span>}
+              </span>
+            </div>
+          )}
+          {s.route?.title && (
+            <div style={{ fontSize: 10, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.route.title}</div>
+          )}
         </div>
       </div>
 
-      {s.coveragePct != null && <ProgressBar value={s.coveragePct} color={colorForPct(s.coveragePct, null)} />}
+      <button
+        className="btn"
+        style={{ width: "100%", fontSize: 12, padding: "7px 0", borderRadius: 10, textAlign: "center" }}
+        onClick={(e) => { e.stopPropagation(); onOpen(s); }}
+      >
+        Ver gemelo digital →
+      </button>
+    </div>
+  );
+}
 
-      <div style={{ marginTop: 10, borderTop: "1px solid var(--border)", paddingTop: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div>
-          <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700 }}>{s.route?.title || "—"}</div>
-          <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 500, marginTop: 1 }}>{s.route?.summary}</div>
+// ──────────────────────────────────────────────
+
+// CoursePanorama removed — cards moved inline
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GradeDistributionCard — Barra de distribución de notas (inline en dashboard)
+// ─────────────────────────────────────────────────────────────────────────────
+function GradeDistributionCard({ studentRows, thresholds }) {
+  const rows = Array.isArray(studentRows) ? studentRows : [];
+  const withGrades = rows.filter(s => s.currentPerformancePct != null);
+  const bands = [
+    { label: "9–10", color: "#12B76A", min: 9,   max: 10 },
+    { label: "8–9",  color: "#32D583", min: 8,   max: 9  },
+    { label: "7–8",  color: "#6CE9A6", min: 7,   max: 8  },
+    { label: "6–7",  color: "#FCD385", min: 6,   max: 7  },
+    { label: "5–6",  color: "#F79009", min: 5,   max: 6  },
+    { label: "<5",   color: "#D92D20", min: 0,   max: 5  },
+  ].map(b => ({
+    ...b,
+    count: withGrades.filter(s => {
+      const g = s.currentPerformancePct / 10;
+      return b.min === 0 ? g < 5 : g >= b.min && g < b.max;
+    }).length,
+  }));
+  const maxBand = Math.max(...bands.map(b => b.count), 1);
+  const bajos  = rows.filter(s => computeRiskFromPct(s.currentPerformancePct) === "bajo");
+  const medios = rows.filter(s => computeRiskFromPct(s.currentPerformancePct) === "medio");
+  const altos  = rows.filter(s => computeRiskFromPct(s.currentPerformancePct) === "alto");
+  const zeros  = rows.filter(s => s.currentPerformancePct == null);
+
+  return (
+    <Card title="Distribución de notas" accent="brand">
+      <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+        {bands.map(b => (
+          <div key={b.label} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 10, fontWeight: 800, fontFamily: "var(--font-mono)", color: "var(--muted)", width: 30, flexShrink: 0 }}>{b.label}</span>
+            <div style={{ flex: 1, height: 10, borderRadius: 5, background: "var(--bg)", overflow: "hidden" }}>
+              <div style={{ height: "100%", width: `${b.count ? Math.max(8, Math.round((b.count / maxBand) * 100)) : 0}%`, background: b.color, borderRadius: 5, transition: "width 0.7s cubic-bezier(.4,0,.2,1)" }} />
+            </div>
+            <span style={{ fontSize: 11, fontWeight: 900, fontFamily: "var(--font-mono)", color: b.count ? b.color : "var(--muted)", width: 20, textAlign: "right", flexShrink: 0 }}>{b.count}</span>
+          </div>
+        ))}
+      </div>
+      <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--border)", display: "flex", justifyContent: "space-around" }}>
+        {[
+          { label: "OK",       count: bajos.length,  color: "var(--ok)"       },
+          { label: "Medio",    count: medios.length,  color: "var(--watch)"    },
+          { label: "Alto",     count: altos.length,   color: "var(--critical)" },
+          { label: "Sin nota", count: zeros.length,   color: "var(--muted)"    },
+        ].map(r => (
+          <div key={r.label} style={{ textAlign: "center" }}>
+            <div style={{ fontWeight: 900, fontFamily: "var(--font-mono)", color: r.color, fontSize: 20, lineHeight: 1 }}>{r.count}</div>
+            <div style={{ fontSize: 10, color: "var(--muted)", fontWeight: 700, marginTop: 3 }}>{r.label}</div>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RoutesView — Vista completa de rutas de intervención
+// ─────────────────────────────────────────────────────────────────────────────
+const ROUTE_DEFS = {
+  route_coverage: {
+    id: "route_coverage",
+    num: 0,
+    title: "Ruta 0 — Activar evidencia",
+    color: "var(--critical)",
+    bg: "var(--critical-bg)",
+    border: "var(--critical-border)",
+    icon: "📋",
+    description: "El estudiante tiene muy poca cobertura de evaluación. La prioridad es identificar evidencias sin calificar y activarlas antes de que el semestre avance.",
+    objective: "Subir cobertura por encima del 40% en los próximos 7 días.",
+    actions: [
+      "Identificar 1 evidencia crítica sin nota y publicarla esta semana",
+      "Acordar fecha concreta de entrega con el estudiante",
+      "Verificar que el estudiante tenga acceso al material del curso",
+    ],
+    success: "Cobertura superior al 40% confirmada en gradebook.",
+  },
+  route_high_risk: {
+    id: "route_high_risk",
+    num: 1,
+    title: "Ruta 1 — Recuperación",
+    color: "var(--watch)",
+    bg: "var(--watch-bg)",
+    border: "var(--watch-border)",
+    icon: "🚨",
+    description: "El estudiante está en riesgo alto. Su nota actual está por debajo del umbral crítico. Se requiere intervención inmediata con plan estructurado de corto plazo.",
+    objective: "Subir nota por encima del umbral crítico en 2 semanas.",
+    actions: [
+      "Reunión 1:1 de 15 minutos para acordar objetivo semanal",
+      "Actividad de refuerzo o re-entrega enfocada en el error principal",
+      "Retroalimentación concreta + checklist de mejora",
+    ],
+    success: "Nota supera el umbral crítico en la siguiente evidencia.",
+  },
+  route_watch: {
+    id: "route_watch",
+    num: 2,
+    title: "Ruta 2 — Ajuste dirigido",
+    color: "var(--brand)",
+    bg: "var(--brand-light)",
+    border: "var(--brand-light2, #D6E4FF)",
+    icon: "🎯",
+    description: "El estudiante está en riesgo medio. Su desempeño es insuficiente en algún resultado de aprendizaje específico. El ajuste debe ser puntual y enfocado.",
+    objective: "Subir el RA crítico por encima del umbral de observación.",
+    actions: [
+      "Microtarea guiada (30–45 min) sobre el punto débil identificado",
+      "Ejemplo resuelto + plantilla de entrega para orientar al estudiante",
+      "Seguimiento en la próxima evidencia del RA crítico",
+    ],
+    success: "RA crítico supera el 70% en la siguiente evaluación.",
+  },
+  route_ok: {
+    id: "route_ok",
+    num: 3,
+    title: "Ruta 3 — Mantener desempeño",
+    color: "var(--ok)",
+    bg: "var(--ok-bg)",
+    border: "var(--ok-border)",
+    icon: "✅",
+    description: "El estudiante tiene buen desempeño. La gestión aquí es de sostenimiento y motivación para que mantenga el ritmo hasta el cierre del semestre.",
+    objective: "Sostener nota por encima del umbral de observación.",
+    actions: [
+      "Reconocer el logro con retroalimentación positiva específica",
+      "Mantener entregas a tiempo para no perder cobertura",
+      "Extensión opcional: reto avanzado para profundizar competencias",
+    ],
+    success: "Nota se mantiene por encima del umbral de observación al cierre.",
+  },
+};
+
+function RoutesView({ studentRows, overview, courseInfo, thresholds, onSelectStudent, isMobile }) {
+  const [selectedRoute, setSelectedRoute] = React.useState(null);
+  const rows = Array.isArray(studentRows) ? studentRows : [];
+
+  const byRoute = {};
+  Object.keys(ROUTE_DEFS).forEach(id => { byRoute[id] = []; });
+  rows.forEach(s => {
+    const rid = s.route?.id;
+    if (rid && byRoute[rid]) byRoute[rid].push(s);
+  });
+
+  const totalAssigned = Object.values(byRoute).reduce((a, arr) => a + arr.length, 0);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      {/* Page header */}
+      <div>
+        <div style={{ fontSize: 10, fontWeight: 800, color: "var(--brand)", textTransform: "uppercase", letterSpacing: "0.12em", marginBottom: 4 }}>
+          Gemelo Digital · Rutas de atención
         </div>
-        <button className="btn" style={{ fontSize: 11, padding: "5px 10px" }} onClick={(e) => { e.stopPropagation(); onOpen(s); }}>
-          Ver gemelo →
+        <h1 style={{ fontSize: isMobile ? 20 : 26, fontWeight: 900, color: "var(--text)", letterSpacing: "-0.02em", lineHeight: 1.1 }}>
+          {courseInfo?.Name || "Curso activo"}
+        </h1>
+        <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 4, fontWeight: 500 }}>
+          {totalAssigned} estudiantes asignados · {Object.values(byRoute).filter(arr => arr.length > 0).length} rutas activas
+        </div>
+      </div>
+
+      {/* Route cards grid */}
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 14 }}>
+        {Object.values(ROUTE_DEFS).map(route => {
+          const students = byRoute[route.id] || [];
+          const isSelected = selectedRoute === route.id;
+          return (
+            <div key={route.id}
+              onClick={() => setSelectedRoute(isSelected ? null : route.id)}
+              style={{
+                border: `1.5px solid ${isSelected ? route.color : "var(--border)"}`,
+                borderRadius: 16,
+                background: isSelected ? route.bg : "var(--card)",
+                cursor: "pointer",
+                transition: "all 0.18s ease",
+                overflow: "hidden",
+              }}
+              onMouseEnter={e => { if (!isSelected) { e.currentTarget.style.borderColor = route.color; e.currentTarget.style.background = route.bg; }}}
+              onMouseLeave={e => { if (!isSelected) { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.background = "var(--card)"; }}}
+            >
+              {/* Route header */}
+              <div style={{ padding: "14px 16px 12px", borderBottom: "1px solid var(--border)" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ width: 36, height: 36, borderRadius: 10, background: route.color + "22", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>
+                      {route.icon}
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 800, color: route.color }}>{route.title}</div>
+                      <div style={{ fontSize: 10, color: "var(--muted)", fontWeight: 600, marginTop: 1 }}>{route.objective}</div>
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "center", flexShrink: 0 }}>
+                    <div style={{ fontSize: 28, fontWeight: 900, fontFamily: "var(--font-mono)", color: route.color, lineHeight: 1 }}>{students.length}</div>
+                    <div style={{ fontSize: 9, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>est.</div>
+                  </div>
+                </div>
+                <p style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.5, margin: 0 }}>{route.description}</p>
+              </div>
+
+              {/* Actions */}
+              <div style={{ padding: "10px 16px" }}>
+                <div style={{ fontSize: 10, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 7 }}>Acciones docentes</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                  {route.actions.map((a, i) => (
+                    <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                      <span style={{ fontSize: 11, fontWeight: 900, color: route.color, flexShrink: 0, marginTop: 1 }}>{i + 1}.</span>
+                      <span style={{ fontSize: 12, color: "var(--text)", lineHeight: 1.45 }}>{a}</span>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ marginTop: 10, padding: "6px 10px", borderRadius: 8, background: route.color + "14", fontSize: 11, color: route.color, fontWeight: 700 }}>
+                  Criterio de éxito: {route.success}
+                </div>
+              </div>
+
+              {/* Student list (when selected) */}
+              {isSelected && students.length > 0 && (
+                <div style={{ padding: "0 16px 14px" }}>
+                  <div style={{ height: 1, background: "var(--border)", marginBottom: 10 }} />
+                  <div style={{ fontSize: 10, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 7 }}>
+                    Estudiantes en esta ruta ({students.length})
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                    {students.map(s => (
+                      <div key={s.userId}
+                        onClick={e => { e.stopPropagation(); onSelectStudent?.(s); }}
+                        style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 10px", borderRadius: 9, background: "var(--card)", border: "1px solid var(--border)", cursor: "pointer" }}
+                        onMouseEnter={e => e.currentTarget.style.borderColor = route.color}
+                        onMouseLeave={e => e.currentTarget.style.borderColor = "var(--border)"}
+                      >
+                        <div style={{ width: 28, height: 28, borderRadius: "50%", background: route.color + "22", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 900, color: route.color, flexShrink: 0 }}>
+                          {(s.displayName || "?").charAt(0)}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.displayName}</div>
+                          {s.route?.summary && <div style={{ fontSize: 10, color: "var(--muted)" }}>{s.route.summary}</div>}
+                        </div>
+                        <div style={{ flexShrink: 0, textAlign: "right" }}>
+                          <div style={{ fontSize: 13, fontWeight: 900, fontFamily: "var(--font-mono)", color: colorForPct(s.currentPerformancePct, thresholds) }}>{fmtGrade10FromPct(s.currentPerformancePct)}</div>
+                          <div style={{ fontSize: 9, color: "var(--muted)" }}>{fmtPct(s.coveragePct)}</div>
+                        </div>
+                        <span style={{ color: "var(--muted)", fontSize: 12 }}>→</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {isSelected && students.length === 0 && (
+                <div style={{ padding: "10px 16px 14px", fontSize: 12, color: "var(--muted)", fontStyle: "italic" }}>
+                  Ningún estudiante asignado a esta ruta actualmente.
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// AppSidebar — Fixed left navigation
+// ──────────────────────────────────────────────
+function AppSidebar({ activeTab, setActiveTab, currentCourseName, mobileOpen, onClose }) {
+  const NAV = [
+    { id: "dashboard",  icon: "📊", label: "Dashboard" },
+    { id: "routes",     icon: "🛤️", label: "Rutas de atención" },
+    { id: "assistant",  icon: "🤖", label: "Asistente IA" },
+  ];
+  const NAV_BOTTOM = [
+    { id: "help", icon: "💬", label: "Soporte" },
+  ];
+
+  return (
+    <>
+      {mobileOpen && (
+        <div className="sidebar-backdrop" onClick={onClose} />
+      )}
+      <aside className={`app-sidebar${mobileOpen ? " mobile-open" : ""}`}>
+        {/* Logo */}
+        <div className="sidebar-logo">
+          <div className="sidebar-logo-icon" style={{ fontSize: 12, letterSpacing: "0.01em" }}>CESA</div>
+          <div className="sidebar-logo-text">
+            <div className="sidebar-logo-name">CESA · Gemelo</div>
+            <div className="sidebar-logo-sub">Vista Docente</div>
+          </div>
+        </div>
+
+        {/* Nav */}
+        <nav className="sidebar-nav">
+          <div className="sidebar-section-label">Vistas</div>
+          {NAV.map((item) => (
+            <button
+              key={item.id}
+              className={`sidebar-nav-item${activeTab === item.id ? " active" : ""}`}
+              onClick={() => { setActiveTab(item.id); onClose?.(); }}
+            >
+              <span className="snav-icon">{item.icon}</span>
+              <span>{item.label}</span>
+              <span className="sidebar-nav-dot" />
+            </button>
+          ))}
+        </nav>
+
+        {/* Footer — current course */}
+        <div className="sidebar-footer">
+          {currentCourseName && (
+            <div className="sidebar-course-pill">
+              <div className="sidebar-course-label">Curso activo</div>
+              <div className="sidebar-course-name" style={{ maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {currentCourseName}
+              </div>
+            </div>
+          )}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 2px" }}>
+            <span style={{ fontSize: 9, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Gemelo Digital</span>
+            <span style={{ fontSize: 9, fontWeight: 700, color: "var(--muted)", background: "var(--bg)", padding: "2px 7px", borderRadius: 99, border: "1px solid var(--border)" }}>v2.0325</span>
+          </div>
+        </div>
+      </aside>
+    </>
+  );
+}
+
+// ──────────────────────────────────────────────
+// AppTopbar — Fixed top bar
+// ──────────────────────────────────────────────
+function AppTopbar({
+  isMobile, onOpenSidebar, darkMode, setDarkMode,
+  orgUnitInput, setOrgUnitInput, setOrgUnitId,
+  handleOpenCoursePanel,
+}) {
+  return (
+    <header className="app-topbar">
+      {/* Left */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        {isMobile && (
+          <button
+            className="topbar-icon-btn"
+            onClick={onOpenSidebar}
+            title="Menú"
+            style={{ fontSize: 18 }}
+          >
+            ☰
+          </button>
+        )}
+
+        {/* Course search */}
+        <div className="topbar-search">
+          <span style={{ color: "var(--muted)", fontSize: 14 }}>🔍</span>
+          <input
+            value={orgUnitInput}
+            onChange={(e) => setOrgUnitInput(e.target.value)}
+            placeholder="ID de curso…"
+            type="number"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                const v = Number(orgUnitInput);
+                if (v > 0) setOrgUnitId(v);
+              }
+            }}
+          />
+        </div>
+      </div>
+
+      {/* Right */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <button
+          className="btn btn-primary"
+          onClick={handleOpenCoursePanel}
+          style={{ padding: "7px 14px", fontSize: 12, borderRadius: 10 }}
+        >
+          📚 {isMobile ? "" : "Mis cursos"}
         </button>
+
+        <button
+          className="topbar-icon-btn"
+          onClick={() => setDarkMode((v) => !v)}
+          title="Cambiar tema"
+        >
+          {darkMode ? "☀️" : "🌙"}
+        </button>
+
+        <div className="topbar-avatar" title="Docente">D</div>
       </div>
+    </header>
+  );
+}
+
+// ──────────────────────────────────────────────
+// FloatingAI — Floating button for AI assistant
+// ──────────────────────────────────────────────
+function FloatingAI({ studentRows, overview, raDashboard, courseInfo, thresholds, onOpenAssistant }) {
+  const [open, setOpen] = React.useState(false);
+  const [activeInsight, setActiveInsight] = React.useState(null);
+  const [chatInput, setChatInput] = React.useState("");
+  const [chatMsg, setChatMsg] = React.useState(null);
+  const [fabListening, setFabListening] = React.useState(false);
+  const fabRecRef = React.useRef(null);
+  const fabVoiceOk = typeof window !== "undefined" && !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+
+  // Mini voice for FAB panel
+  const fabToggleMic = () => {
+    if (!fabVoiceOk) return;
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (fabListening) { fabRecRef.current?.stop(); setFabListening(false); return; }
+    const rec = new SR(); rec.lang = "es-CO"; rec.continuous = false; rec.interimResults = false;
+    rec.onstart = () => setFabListening(true);
+    rec.onend   = () => setFabListening(false);
+    rec.onerror = () => setFabListening(false);
+    rec.onresult = (e) => {
+      const t = Array.from(e.results).map(r => r[0].transcript).join(" ").trim();
+      if (t) { setChatInput(t); setTimeout(() => handleChatWithText(t), 100); }
+    };
+    fabRecRef.current = rec; rec.start();
+  };
+
+  // FAB mini suggestions (5 random, rotated on open)
+  const FAB_BANK = [
+    "¿Quiénes están en riesgo alto?",
+    "¿Cuál es el promedio del curso?",
+    "¿Hay estudiantes sin nota?",
+    "¿Qué RA está más crítico?",
+    "¿Quiénes son el top 3?",
+    "Dame un resumen del curso",
+    "¿Cuántos aprobaron?",
+    "¿Cuántos tienen nota menor a 5?",
+    "¿Cómo va la cobertura?",
+    "¿Quién tiene la nota más baja?",
+  ];
+  const [fabChips] = React.useState(() => FAB_BANK.sort(() => Math.random() - 0.5).slice(0, 4));
+
+  const rows = Array.isArray(studentRows) ? studentRows : [];
+  const withGrades = rows.filter(s => s.currentPerformancePct != null);
+  const altos  = rows.filter(s => computeRiskFromPct(s.currentPerformancePct) === "alto");
+  const medios = rows.filter(s => computeRiskFromPct(s.currentPerformancePct) === "medio");
+  const zeros  = rows.filter(s => s.currentPerformancePct == null);
+  const avg    = withGrades.length
+    ? (withGrades.reduce((a, s) => a + Number(s.currentPerformancePct) / 10, 0) / withGrades.length).toFixed(1)
+    : null;
+
+  const CHIPS = [
+    {
+      id: "riesgo", icon: "🔴", label: "Riesgo",
+      badge: (altos.length + medios.length) || null,
+      badgeColor: altos.length > 0 ? "var(--critical)" : "var(--watch)",
+      body: () => altos.length + medios.length === 0
+        ? "Todos dentro del rango esperado."
+        : `${altos.length} alto · ${medios.length} medio. ${altos.length > 0 ? altos.slice(0,2).map(s => s.displayName.split(",")[0]).join(", ") + (altos.length > 2 ? " +" + (altos.length-2) + " más." : ".") : ""}`,
+    },
+    {
+      id: "promedio", icon: "📊", label: "Promedio",
+      badge: avg || "—",
+      badgeColor: avg ? colorForPct(Number(avg) * 10, thresholds) : "var(--muted)",
+      body: () => avg == null ? "Sin calificaciones aún."
+        : Number(avg) >= 7 ? `${avg}/10 — buen desempeño grupal.`
+        : `${avg}/10 — por debajo de 7.0.`,
+    },
+    {
+      id: "sinnota", icon: "⚠️", label: "Sin nota",
+      badge: zeros.length || null,
+      badgeColor: "var(--watch)",
+      body: () => zeros.length === 0 ? "Todos tienen nota registrada."
+        : `${zeros.length}: ${zeros.slice(0,2).map(s => s.displayName.split(",")[0]).join(", ")}${zeros.length > 2 ? " +" + (zeros.length-2) : ""}.`,
+    },
+    {
+      id: "ra", icon: "🎯", label: "RA crítico",
+      badge: null,
+      badgeColor: "var(--muted)",
+      body: () => {
+        const ras = Array.isArray(raDashboard?.ras) ? raDashboard.ras.filter(r => r.studentsWithData > 0) : [];
+        if (!ras.length) return "Sin datos de RA con rúbricas aún.";
+        const w = [...ras].sort((a,b) => a.avgPct - b.avgPct)[0];
+        return `${w.code}: ${fmtPct(w.avgPct)} · ${w.studentsWithData} est.`;
+      },
+    },
+  ];
+
+  // Quick chat responder — orden: específico antes que genérico
+  const quickAnswer = (q) => {
+    const c = q.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const n = rows.length;
+    // RA crítico (ANTES de "menor" y "critico" genérico)
+    if (c.includes("que ra") || c.includes("ra critico") || c.includes("ra mas") ||
+        c.includes("resultado de aprendizaje") || c.includes("resultados de aprendizaje") ||
+        (c.includes("ra") && (c.includes("critico") || c.includes("bajo") || c.includes("peor")))) {
+      const ras = Array.isArray(raDashboard?.ras) ? raDashboard.ras.filter(r => r.studentsWithData > 0) : [];
+      if (!ras.length) return "Sin datos de RA disponibles aún.";
+      const w = [...ras].sort((a,b) => a.avgPct - b.avgPct)[0];
+      return `RA con menor desempeño: ${w.code} con ${fmtPct(w.avgPct)} promedio.`;
+    }
+    // Por debajo de 5 (ANTES de "menor" genérico)
+    if (c.includes("debajo de 5") || c.includes("menor a 5") || c.includes("menor de 5") || c.includes("5.0") || c.includes("reprobado") || (c.includes("cuantos") && c.includes("5"))) {
+      const rep = withGrades.filter(s => s.currentPerformancePct / 10 < 5);
+      return `Con nota menor a 5.0: ${rep.length} de ${n}.${rep.length ? " " + rep.slice(0,2).map(s=>s.displayName.split(",")[0]).join(", ") + (rep.length > 2 ? " y " + (rep.length-2) + " más." : ".") : ""}`;
+    }
+    // Nota más baja (ANTES de "nota" genérico)
+    if ((c.includes("nota") && (c.includes("mas baja") || c.includes("baja") || c.includes("menor nota") || c.includes("peor"))) ||
+        (c.includes("quien") && c.includes("baj"))) {
+      const worst = [...withGrades].sort((a,b) => a.currentPerformancePct - b.currentPerformancePct)[0];
+      if (!worst) return "Sin calificaciones registradas.";
+      return `Nota más baja: ${worst.displayName.split(",")[0]} con ${fmtGrade10FromPct(worst.currentPerformancePct)}.`;
+    }
+    // Riesgo alto (ANTES de riesgo genérico)
+    if (c.includes("riesgo alto") || (c.includes("riesgo") && c.includes("quienes"))) {
+      if (!altos.length) return "Ningún estudiante en riesgo alto.";
+      return `Riesgo alto: ${altos.length} estudiantes. ${altos.slice(0,2).map(s=>s.displayName.split(",")[0]).join(", ")}${altos.length > 2 ? " y " + (altos.length-2) + " más." : "."}`;
+    }
+    // Riesgo medio
+    if (c.includes("riesgo medio")) {
+      if (!medios.length) return "Ningún estudiante en riesgo medio.";
+      return `Riesgo medio: ${medios.length} estudiantes. ${medios.slice(0,2).map(s=>s.displayName.split(",")[0]).join(", ")}${medios.length > 2 ? " y " + (medios.length-2) + " más." : "."}`;
+    }
+    // Riesgo general
+    if (c.includes("riesgo") || c.includes("risk"))
+      return `Riesgo: ${altos.length} alto, ${medios.length} medio, ${zeros.length} sin nota de ${n} estudiantes.`;
+    // Resumen
+    if (c.includes("resumen") || c.includes("dame un") || c.includes("como va"))
+      return `${n} estudiantes - Promedio ${avg ?? "sin datos"}/10 - Alto: ${altos.length} - Medio: ${medios.length} - Sin nota: ${zeros.length}.`;
+    // Sin nota / actividad
+    if (c.includes("sin nota") || c.includes("sin evidencia") || c.includes("actividad reciente") || c.includes("sin actividad"))
+      return zeros.length ? `${zeros.length} sin nota: ${zeros.slice(0,3).map(s=>s.displayName.split(",")[0]).join(", ")}${zeros.length > 3 ? " y " + (zeros.length-3) + " mas." : "."}` : "Todos tienen nota registrada.";
+    // Aprobados
+    if (c.includes("aprobado") || c.includes("aprobaron")) {
+      const ap = withGrades.filter(s => s.currentPerformancePct / 10 >= 7);
+      return `Aprobados con nota mayor o igual a 7: ${ap.length} de ${n} (${n ? Math.round(ap.length/n*100) : 0} por ciento).`;
+    }
+    // Top
+    if (c.includes("top") || c.includes("mejor")) {
+      const topS = [...withGrades].sort((a,b) => b.currentPerformancePct - a.currentPerformancePct).slice(0,3);
+      if (!topS.length) return "Sin calificaciones disponibles.";
+      return `Top 3: ${topS.map((s,i) => (i+1)+". "+s.displayName.split(",")[0]+" ("+fmtGrade10FromPct(s.currentPerformancePct)+")").join(", ")}.`;
+    }
+    // Promedio (DESPUÉS de nota más baja)
+    if (c.includes("promedio") || c.includes("cual es la nota") || c.includes("nota promedio"))
+      return `Promedio del curso: ${avg ?? "sin datos"}/10 (${withGrades.length} con nota).`;
+    // Nota genérico (last resort para "nota")
+    if (c.includes("nota"))
+      return `Promedio del curso: ${avg ?? "sin datos"}/10.`;
+    // RA general
+    if (c.includes("ra") || c.includes("aprendizaje") || c.includes("logro")) {
+      const ras = Array.isArray(raDashboard?.ras) ? raDashboard.ras.filter(r => r.studentsWithData > 0) : [];
+      if (!ras.length) return "Sin datos de RA disponibles aún.";
+      const w = [...ras].sort((a,b) => a.avgPct - b.avgPct)[0];
+      return `RA con menor desempeño: ${w.code} con ${fmtPct(w.avgPct)} promedio.`;
+    }
+    if (c.includes("ruta") || c.includes("intervencion") || c.includes("prescripcion")) {
+      const routeCounts = { route_coverage: 0, route_high_risk: 0, route_watch: 0, route_ok: 0 };
+      rows.forEach(s => { const rid = s.route?.id || ""; if (routeCounts[rid] !== undefined) routeCounts[rid]++; });
+      return `Rutas: R0=${routeCounts.route_coverage}, R1=${routeCounts.route_high_risk}, R2=${routeCounts.route_watch}, R3=${routeCounts.route_ok}.`;
+    }
+    return "No reconoci esa consulta. Prueba: riesgo, promedio, sin nota, resumen, aprobados, RA critico, rutas.";
+  };
+
+  const handleChatWithText = (text) => {
+    const q = (text || chatInput).trim();
+    if (!q) return;
+    setChatMsg({ q, a: quickAnswer(q) });
+    setChatInput("");
+    setActiveInsight(null);
+  };
+  const handleChat = () => handleChatWithText(chatInput);
+
+  const insight = activeInsight ? CHIPS.find(c => c.id === activeInsight) : null;
+
+  return (
+    <div className="ai-fab">
+      {open && (
+        <div className="ai-fab-panel" style={{ width: 290, maxHeight: "none" }}>
+          {/* Header */}
+          <div className="ai-fab-panel-header" style={{ padding: "10px 13px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+              <span style={{ fontSize: 14 }}>⚡</span>
+              <span style={{ fontSize: 12, fontWeight: 800 }}>Análisis rápido</span>
+            </div>
+            <button onClick={() => { setOpen(false); setActiveInsight(null); setChatMsg(null); setFabListening(false); fabRecRef.current?.stop(); }}
+              style={{ background: "rgba(255,255,255,0.2)", border: "none", color: "#fff", borderRadius: 6, width: 24, height: 24, cursor: "pointer", fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              ✕
+            </button>
+          </div>
+
+          {/* 2×2 stat chips */}
+          <div style={{ padding: "9px 9px 0", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+            {CHIPS.map(c => (
+              <button key={c.id}
+                onClick={() => { setActiveInsight(prev => prev === c.id ? null : c.id); setChatMsg(null); }}
+                style={{
+                  display: "flex", alignItems: "center", gap: 6,
+                  padding: "6px 9px", borderRadius: 8, cursor: "pointer",
+                  border: "1.5px solid " + (activeInsight === c.id ? "var(--brand)" : "var(--border)"),
+                  background: activeInsight === c.id ? "var(--brand-light)" : "var(--bg)",
+                  transition: "all 0.13s",
+                }}
+              >
+                <span style={{ fontSize: 13, flexShrink: 0 }}>{c.icon}</span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: activeInsight === c.id ? "var(--brand)" : "var(--text)", flex: 1, textAlign: "left" }}>{c.label}</span>
+                {c.badge != null && (
+                  <span style={{ fontSize: 10, fontWeight: 900, fontFamily: "var(--font-mono)", color: c.badgeColor, flexShrink: 0 }}>{c.badge}</span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          {/* Mini suggestion chips */}
+          <div style={{ padding: "8px 9px 0" }}>
+            <div style={{ fontSize: 9, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>Pregunta rápida</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+              {fabChips.map(q => (
+                <button key={q} onClick={() => handleChatWithText(q)}
+                  style={{ fontSize: 10, fontWeight: 600, padding: "4px 9px", borderRadius: 999, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--muted)", cursor: "pointer", transition: "all 0.12s", whiteSpace: "nowrap" }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor="var(--brand)"; e.currentTarget.style.color="var(--brand)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor="var(--border)"; e.currentTarget.style.color="var(--muted)"; }}
+                >{q}</button>
+              ))}
+            </div>
+          </div>
+
+          {/* Insight or chat answer */}
+          {(insight || chatMsg) && (
+            <div style={{ margin: "7px 9px 0", padding: "9px 11px", borderRadius: 9, background: "var(--brand-light)", border: "1px solid var(--brand-light2)", animation: "fadeUp 0.16s ease both" }}>
+              {insight && <>
+                <div style={{ fontSize: 10, fontWeight: 800, color: "var(--brand)", marginBottom: 2, textTransform: "uppercase", letterSpacing: "0.06em" }}>{insight.label}</div>
+                <div style={{ fontSize: 11, color: "var(--text)", lineHeight: 1.5 }} dangerouslySetInnerHTML={{ __html: insight.body() }} />
+              </>}
+              {chatMsg && !insight && <>
+                <div style={{ fontSize: 9, color: "var(--muted)", marginBottom: 3, fontStyle: "italic" }}>"{chatMsg.q}"</div>
+                <div style={{ fontSize: 11, color: "var(--text)", lineHeight: 1.5 }} dangerouslySetInnerHTML={{ __html: chatMsg.a }} />
+              </>}
+            </div>
+          )}
+
+          {/* Input + voice */}
+          <div style={{ padding: "7px 9px 0", display: "flex", gap: 5, alignItems: "center" }}>
+            <button onClick={fabToggleMic}
+              title={fabVoiceOk ? (fabListening ? "Detener voz" : "Hablar") : "Micrófono no disponible"}
+              style={{ width: 34, height: 34, borderRadius: 8, border: "1.5px solid " + (fabListening ? "var(--critical)" : "var(--border)"), background: fabListening ? "var(--critical-bg)" : "var(--bg)", color: fabListening ? "var(--critical)" : "var(--muted)", fontSize: 14, cursor: fabVoiceOk ? "pointer" : "not-allowed", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", opacity: fabVoiceOk ? 1 : 0.4, transition: "all 0.15s" }}
+            >{fabListening ? "⏹" : "🎙️"}</button>
+            <input
+              value={chatInput}
+              onChange={e => setChatInput(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") handleChat(); }}
+              placeholder={fabListening ? "🎙️ Escuchando…" : "Escribe o usa el micrófono…"}
+              style={{ flex: 1, fontSize: 11, padding: "7px 9px", borderRadius: 8, border: "1px solid " + (fabListening ? "var(--critical)" : "var(--border)"), background: "var(--bg)", color: "var(--text)", fontFamily: "var(--font)", outline: "none", height: 34, transition: "border-color 0.15s" }}
+            />
+            <button onClick={handleChat}
+              style={{ width: 34, height: 34, borderRadius: 8, border: "none", background: "var(--brand)", color: "#fff", fontSize: 14, cursor: "pointer", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              ↵
+            </button>
+          </div>
+
+          {/* CTA */}
+          <div style={{ padding: "7px 9px 9px" }}>
+            <button
+              onClick={() => { setOpen(false); setActiveInsight(null); setChatMsg(null); onOpenAssistant?.(); }}
+              style={{ width: "100%", padding: "7px 0", borderRadius: 8, border: "none", background: "var(--text)", color: "var(--card)", fontWeight: 800, fontSize: 11, cursor: "pointer", fontFamily: "var(--font)", opacity: 0.85 }}
+            >
+              🤖 Asistente completo
+            </button>
+          </div>
+        </div>
+      )}
+
+      <button
+        className={`ai-fab-btn${open ? " active" : ""}`}
+        onClick={() => { setOpen(v => !v); setActiveInsight(null); setChatMsg(null); }}
+        title="Análisis rápido"
+      >
+        <span style={{ color: "#fff", fontSize: 20 }}>{open ? "✕" : "⚡"}</span>
+      </button>
     </div>
   );
 }
@@ -2481,6 +3584,7 @@ export default function App() {
 
   // ── Main navigation tabs ──────────────────────────────
   const [activeTab, setActiveTab] = useState("dashboard"); // "dashboard" | "assistant"
+  const [sidebarOpen, setSidebarOpen] = useState(false); // mobile sidebar
 
   // ── Course panel ───────────────────────────────────────
   const [showCoursePanel, setShowCoursePanel] = useState(false);
@@ -3033,9 +4137,9 @@ export default function App() {
   const ras = Array.isArray(raDashboard?.ras) ? raDashboard.ras : [];
   const descList = flattenOutcomeDescriptions(learningOutcomesPayload);
 
-  // Si los RAs existen pero TODOS tienen studentsWithData=0, no hay datos reales todavía
-  const rasWithData = ras.filter((r) => Number(r.studentsWithData ?? 0) > 0);
-  const effectiveRas = rasWithData.length > 0 ? ras : [];
+  // Mostrar TODOS los RAs, incluso los sin datos (studentsWithData=0)
+  // effectiveRas: si hay al menos 1 RA definido en el dashboard, mostrarlos todos
+  const effectiveRas = ras.length > 0 ? ras : [];
 
   if (effectiveRas.length) {
     const outcomeMap = {};
@@ -3497,111 +4601,48 @@ const contentKpis = useMemo(() => {
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--bg)", fontFamily: "var(--font)" }}>
-      <div style={{ maxWidth: 1200, margin: "0 auto", padding: isMobile ? "12px" : "20px" }}>
-        <div
-          className="fade-up"
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: isMobile ? "stretch" : "center",
-            gap: 12,
-            flexDirection: isMobile ? "column" : "row",
-            marginBottom: 20,
-          }}
-        >
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <div
-                style={{
-                  fontSize: isMobile ? 18 : 22,
-                  fontWeight: 900,
-                  color: "var(--text)",
-                  letterSpacing: "-0.02em",
-                }}
-              >
-                Gemelo Digital
-              </div>
-              <span className="tag">Vista Docente</span>
-            </div>
-            <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 3 }}>
-              Curso{" "}
-              <strong style={{ fontFamily: "var(--font-mono)" }}>
-                {courseInfo?.Name || orgUnitId}
-              </strong>
-            </div>
+      {/* ── Sidebar ── */}
+      <AppSidebar
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        currentCourseName={courseInfo?.Name || (orgUnitId ? `Curso ${orgUnitId}` : null)}
+        mobileOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+      />
+
+      {/* ── Topbar ── */}
+      <AppTopbar
+        isMobile={isMobile}
+        onOpenSidebar={() => setSidebarOpen(true)}
+        darkMode={darkMode}
+        setDarkMode={setDarkMode}
+        orgUnitInput={orgUnitInput}
+        setOrgUnitInput={setOrgUnitInput}
+        setOrgUnitId={setOrgUnitId}
+        handleOpenCoursePanel={handleOpenCoursePanel}
+      />
+
+      {/* ── Main content ── */}
+      <main className="app-main">
+        <div className="app-content">
+
+        {/* ── Routes tab ── */}
+        {activeTab === "routes" && (
+          <div className="fade-up tab-enter">
+            <RoutesView
+              studentRows={studentRows}
+              overview={overview}
+              courseInfo={courseInfo}
+              thresholds={thresholds}
+              onSelectStudent={setSelectedStudent}
+              isMobile={isMobile}
+            />
           </div>
-
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            {/* Mis cursos — abre el panel lateral */}
-            <button
-              className="btn btn-primary"
-              onClick={handleOpenCoursePanel}
-              style={{ gap: 6 }}
-            >
-              <span>📚</span>
-              {isMobile ? "Cursos" : "Mis cursos"}
-            </button>
-
-            {/* Fallback: búsqueda directa por ID */}
-            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <input
-                value={orgUnitInput}
-                onChange={(e) => setOrgUnitInput(e.target.value)}
-                type="number"
-                style={{
-                  width: 110,
-                  border: "1px solid var(--border)",
-                  borderRadius: 10,
-                  padding: "8px 10px",
-                  fontWeight: 700,
-                  background: "var(--card)",
-                  color: "var(--text)",
-                  fontSize: 13,
-                }}
-                placeholder="ID curso"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    const v = Number(orgUnitInput);
-                    if (v > 0) { setOrgUnitId(v); }
-                  }
-                }}
-              />
-              <button
-                className="btn"
-                onClick={() => { const v = Number(orgUnitInput); if (v > 0) setOrgUnitId(v); }}
-                title="Ir a curso"
-              >
-                →
-              </button>
-            </div>
-
-            <button className="btn" onClick={() => setDarkMode((v) => !v)} title="Cambiar tema">
-              {darkMode ? "☀️" : "🌙"}
-            </button>
-          </div>
-        </div>
-
-        {/* ── Main tab bar ── */}
-        <div className="main-tabs">
-          <button
-            className={`main-tab${activeTab === "dashboard" ? " active" : ""}`}
-            onClick={() => setActiveTab("dashboard")}
-          >
-            <span className="tab-dot" />
-            📊 Dashboard
-          </button>
-          <button
-            className={`main-tab${activeTab === "assistant" ? " active" : ""}`}
-            onClick={() => setActiveTab("assistant")}
-          >
-            <span className="tab-dot" />
-            🤖 Asistente IA
-          </button>
-        </div>
+        )}
 
         {/* ── Assistant tab ── */}
         {activeTab === "assistant" && (
-          <div className="fade-up">
+          <div className="fade-up tab-enter">
             <VoiceAssistant
               studentRows={studentRows}
               overview={overview}
@@ -3615,6 +4656,28 @@ const contentKpis = useMemo(() => {
         {/* ── Dashboard tab ── */}
         {activeTab === "dashboard" && <>
 
+        {/* Page header */}
+        <div className="fade-up tab-enter" style={{ marginBottom: 20 }}>
+          <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+            <div>
+              <div style={{ fontSize: 10, fontWeight: 800, color: "var(--brand)", textTransform: "uppercase", letterSpacing: "0.12em", marginBottom: 4 }}>
+                Gemelo Digital · Vista Docente
+              </div>
+              <h1 style={{ fontSize: isMobile ? 22 : 28, fontWeight: 900, color: "var(--text)", letterSpacing: "-0.03em", lineHeight: 1.1 }}>
+                {courseInfo?.Name || `Curso ${orgUnitId}`}
+              </h1>
+              <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 4, fontWeight: 500 }}>
+                {studentsCount} estudiantes
+                {avgPerfPct != null && avgPerfPct > 0 ? ` · Promedio ${fmtGrade10FromPct(avgPerfPct)}/10` : ""}
+                {courseInfo?.StartDate ? ` · ${new Date(courseInfo.StartDate).getFullYear()}` : ""}
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <StatusBadge status={courseStatus} />
+            </div>
+          </div>
+        </div>
+
         <div className="fade-up fade-up-1" style={{ marginBottom: 12 }}>
           <AlertsPanel alerts={overview?.alerts} />
         </div>
@@ -3623,13 +4686,14 @@ const contentKpis = useMemo(() => {
           className="fade-up fade-up-2"
           style={{
             display: "grid",
-            gridTemplateColumns: isMobile ? "1fr" : isNarrow ? "1fr 1fr" : "2fr 1fr 1fr 1fr",
-            gap: 12,
-            marginBottom: 12,
+            gridTemplateColumns: isMobile ? "1fr" : isNarrow ? "1fr 1fr" : "minmax(260px,2fr) minmax(180px,1fr) minmax(200px,1.4fr) minmax(180px,1.2fr)",
+            gap: 16,
+            marginBottom: 16,
+            alignItems: "start",
           }}
         >
           <div ref={overviewRef}>
-          <Card title="Gestión del curso" right={<StatusBadge status={courseStatus} />}>
+          <Card title="Gestión del curso" right={<StatusBadge status={courseStatus} />} accent="brand">
             <div
               style={{
                 display: "grid",
@@ -3814,73 +4878,78 @@ const contentKpis = useMemo(() => {
           </Card>
           </div>
 
-          <Card title="Riesgo académico">
-            <div style={{ width: "100%", height: 200 }}>
-              <ResponsiveContainer>
-                <PieChart>
-                  <Pie
-                    data={riskData}
-                    dataKey="value"
-                    nameKey="name"
-                    innerRadius={55}
-                    outerRadius={82}
-                    paddingAngle={3}
-                  >
-                    {riskData.map((entry) => (
-                      <Cell key={entry.key} fill={colorForRisk(entry.key)} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    formatter={(value) => {
-                      const v = Number(value || 0);
-                      const pct = totalStudents > 0 ? (v / totalStudents) * 100 : 0;
-                      return [`${v} (${pct.toFixed(1)}%)`, "Estudiantes"];
-                    }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-              {riskData.map((r) => {
-                const count = Number(r.value || 0);
-                const pct = totalStudents > 0 ? (count / totalStudents) * 100 : 0;
-                return (
-                  <div key={r.key} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <div
-                      style={{
-                        width: 8,
-                        height: 8,
-                        borderRadius: "50%",
-                        background: colorForRisk(r.key),
-                        flexShrink: 0,
+          {/* ── Riesgo académico + Distribución apilados en 1 columna ── */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <Card title="Riesgo académico" accent="pending">
+              <div style={{ width: "100%", height: 200 }}>
+                <ResponsiveContainer>
+                  <PieChart>
+                    <Pie
+                      data={riskData}
+                      dataKey="value"
+                      nameKey="name"
+                      innerRadius={55}
+                      outerRadius={82}
+                      paddingAngle={3}
+                    >
+                      {riskData.map((entry) => (
+                        <Cell key={entry.key} fill={colorForRisk(entry.key)} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      formatter={(value) => {
+                        const v = Number(value || 0);
+                        const pct = totalStudents > 0 ? (v / totalStudents) * 100 : 0;
+                        return [`${v} (${pct.toFixed(1)}%)`, "Estudiantes"];
                       }}
                     />
-                    <div style={{ flex: 1, fontSize: 12, color: "var(--text)", fontWeight: 600 }}>
-                      {r.name}
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                {riskData.map((r) => {
+                  const count = Number(r.value || 0);
+                  const pct = totalStudents > 0 ? (count / totalStudents) * 100 : 0;
+                  return (
+                    <div key={r.key} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <div
+                        style={{
+                          width: 8,
+                          height: 8,
+                          borderRadius: "50%",
+                          background: colorForRisk(r.key),
+                          flexShrink: 0,
+                        }}
+                      />
+                      <div style={{ flex: 1, fontSize: 12, color: "var(--text)", fontWeight: 600 }}>
+                        {r.name}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 12,
+                          fontWeight: 800,
+                          fontFamily: "var(--font-mono)",
+                          color: colorForRisk(r.key),
+                        }}
+                      >
+                        {count}
+                      </div>
+                      <div style={{ fontSize: 11, color: "var(--muted)", width: 44, textAlign: "right" }}>
+                        {pct.toFixed(1)}%
+                      </div>
                     </div>
-                    <div
-                      style={{
-                        fontSize: 12,
-                        fontWeight: 800,
-                        fontFamily: "var(--font-mono)",
-                        color: colorForRisk(r.key),
-                      }}
-                    >
-                      {count}
-                    </div>
-                    <div style={{ fontSize: 11, color: "var(--muted)", width: 44, textAlign: "right" }}>
-                      {pct.toFixed(1)}%
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </Card>
+                  );
+                })}
+              </div>
+            </Card>
+
+            <GradeDistributionCard studentRows={studentRows} thresholds={thresholds} />
+          </div>
 
           <div ref={priorityRef}>
           <Card
-            title="Estudiantes prioritarios"
+            title="Estudiantes prioritarios" accent="critical"
             right={
               assignmentRiskData.length > 0
                 ? <span className="tag" style={{ background: "var(--critical-bg)", color: "#B42318" }}>Requieren atención</span>
@@ -4011,15 +5080,12 @@ const contentKpis = useMemo(() => {
           </div>
 
           <div ref={learningOutcomesRef}>
-          <Card title="Prioridad académica">
+          <Card title="Prioridad académica" accent="brand">
             <div
               style={{
                 display: "flex",
                 flexDirection: "column",
                 gap: 8,
-                maxHeight: 540,
-                overflowY: "auto",
-                paddingRight: 4,
               }}
             >
               {learningOutcomesData
@@ -4033,56 +5099,59 @@ const contentKpis = useMemo(() => {
                       : m.avgPct < thresholds.watch
                       ? "observacion"
                       : "solido");
+                  const ringColor = colorForPct(m.avgPct, thresholds);
 
                   return (
                     <div
                       key={m.code}
                       style={{
                         border: "1px solid var(--border)",
-                        borderRadius: 10,
-                        padding: 10,
+                        borderRadius: 12,
+                        padding: "10px 12px",
                         background: "var(--card)",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 12,
+                        transition: "box-shadow 0.15s",
                       }}
+                      onMouseEnter={e => e.currentTarget.style.boxShadow = "var(--shadow-md)"}
+                      onMouseLeave={e => e.currentTarget.style.boxShadow = "none"}
                     >
-                      <div
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                          marginBottom: 4,
-                        }}
-                      >
-                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <CircularRing
+                        pct={m.studentsWithData > 0 ? m.avgPct : 0}
+                        size={64}
+                        stroke={6}
+                        color={m.studentsWithData > 0 ? ringColor : "var(--border)"}
+                        label={m.studentsWithData > 0 ? fmtPct(m.avgPct) : "—"}
+                        fontSize={11}
+                      />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
                           <span className="tag">{m.code}</span>
                           <InfoTooltip text={(m.description || m.name || "Sin descripción disponible.").trim()} />
-                        </div>
-                        <StatusBadge status={computedStatus} />
-                      </div>
-
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <span
-                          style={{
-                            fontWeight: 900,
-                            fontSize: 18,
-                            fontFamily: "var(--font-mono)",
-                            color: colorForPct(m.avgPct, thresholds),
-                          }}
-                        >
-                          {fmtPct(m.avgPct)}
-                        </span>
-                        <span style={{ fontSize: 11, color: "var(--muted)" }}>
-                          Peso {m.weightPct ? `${Number(m.weightPct).toFixed(0)}%` : "—"}
-                        </span>
-                      </div>
-
-                      {m.coveragePct != null && (
-                        <div style={{ marginTop: 4 }}>
-                          <ProgressBar value={m.coveragePct} color={colorForPct(m.coveragePct, thresholds)} />
-                          <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 3, textAlign: "right" }}>
-                            {fmtPct(m.coveragePct)} · {m.studentsWithData}/{m.totalStudents} estudiantes
+                          <div style={{ marginLeft: "auto" }}>
+                            {m.studentsWithData > 0
+                              ? <StatusBadge status={computedStatus} />
+                              : <span style={{ fontSize: 9, fontWeight: 800, color: "var(--muted)", background: "var(--bg)", padding: "2px 7px", borderRadius: 99, border: "1px solid var(--border)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Sin uso</span>
+                            }
                           </div>
                         </div>
-                      )}
+                        <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 4 }}>
+                          Peso {m.weightPct ? `${Number(m.weightPct).toFixed(0)}%` : "—"}
+                        </div>
+                        {m.studentsWithData > 0 && m.coveragePct != null ? (
+                          <div>
+                            <ProgressBar value={m.coveragePct} color={colorForPct(m.coveragePct, thresholds)} />
+                            <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2, textAlign: "right" }}>
+                              {fmtPct(m.coveragePct)} · {m.studentsWithData}/{m.totalStudents} est.
+                            </div>
+                          </div>
+                        ) : m.studentsWithData === 0 ? (
+                          <div style={{ fontSize: 10, color: "var(--muted)", fontStyle: "italic", lineHeight: 1.4 }}>
+                            Sin evaluaciones vinculadas a rúbricas aún.
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
                   );
                 })}
@@ -4104,7 +5173,7 @@ const contentKpis = useMemo(() => {
 
         </div>
 
-        <div ref={studentsRef} className="fade-up fade-up-3">
+        <div ref={studentsRef} className="fade-up fade-up-3" style={{ marginTop: 4 }}>
           <Card
             title={
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -4212,7 +5281,7 @@ const contentKpis = useMemo(() => {
               <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
                   <thead>
-                    <tr style={{ background: "var(--bg)", borderBottom: "2px solid var(--border)" }}>
+                    <tr style={{ background: "var(--bg)", borderBottom: "1px solid var(--border)" }}>
                       <SortTh label="ID" {...makeSort("userId")} />
                       <SortTh label="Nombre" {...makeSort("name")} />
                       <SortTh label="Riesgo" {...makeSort("risk")} />
@@ -4411,9 +5480,24 @@ const contentKpis = useMemo(() => {
           </Card>
         </div>
 
+
+
         </>}
 
-      </div>
+        </div>
+      </main>
+
+      {/* ── Floating AI button ── */}
+      {overview && (
+        <FloatingAI
+          studentRows={studentRows}
+          overview={overview}
+          raDashboard={raDashboard}
+          courseInfo={courseInfo}
+          thresholds={thresholds}
+          onOpenAssistant={() => setActiveTab("assistant")}
+        />
+      )}
 
       {/* Course Panel overlay */}
       {showCoursePanel && (
@@ -4435,6 +5519,7 @@ const contentKpis = useMemo(() => {
           setStudentLoading(false);
         }}
         title={selectedStudent ? `${selectedStudent.displayName}` : "Estudiante"}
+        subtitle={`ID ${selectedStudent?.userId ?? "—"} · Gemelo Digital · Vista docente`}
       >
         {studentLoading ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 12, alignItems: "center", justifyContent: "center", paddingTop: 40 }}>
@@ -4455,38 +5540,65 @@ const contentKpis = useMemo(() => {
           </Card>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
-              <div style={{ textAlign: "center", padding: "12px 8px", background: "var(--bg)", borderRadius: 10, border: "1px solid var(--border)" }}>
-                <div style={{ fontSize: 10, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}>Nota</div>
-                <div style={{ fontSize: 28, fontWeight: 900, letterSpacing: "-0.03em", fontFamily: "var(--font-mono)", color: colorForPct(drawerSummary?.currentPerformancePct, thresholds) }}>
-                  {fmtGrade10FromPct(drawerSummary?.currentPerformancePct)}
-                </div>
+            {/* ── Hero KPI row with circular rings ── */}
+            <div style={{ display: "flex", gap: 12, alignItems: "stretch", flexWrap: "wrap" }}>
+              {/* Nota ring */}
+              <div style={{ flex: "1 1 140px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "16px 10px", background: "var(--bg)", borderRadius: 16, border: "1px solid var(--border)", gap: 6 }}>
+                <CircularRing
+                  pct={drawerSummary?.currentPerformancePct ?? 0}
+                  size={88}
+                  stroke={8}
+                  color={colorForPct(drawerSummary?.currentPerformancePct, thresholds)}
+                  label={fmtGrade10FromPct(drawerSummary?.currentPerformancePct)}
+                  sublabel="/10"
+                  fontSize={20}
+                />
+                <div style={{ fontSize: 10, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.08em", textAlign: "center" }}>Nota actual</div>
               </div>
-              <div style={{ textAlign: "center", padding: "12px 8px", background: "var(--bg)", borderRadius: 10, border: "1px solid var(--border)" }}>
-                <div style={{ fontSize: 10, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}>Cobertura</div>
-                <div style={{ fontSize: 22, fontWeight: 900, fontFamily: "var(--font-mono)", color: colorForPct(drawerSummary?.coveragePct, thresholds) }}>
-                  {fmtPct(drawerSummary?.coveragePct)}
-                </div>
-                <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
-                  {covText || "—"} · faltan {covMissing}
-                </div>
+              {/* Cobertura ring */}
+              <div style={{ flex: "1 1 140px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "16px 10px", background: "var(--bg)", borderRadius: 16, border: "1px solid var(--border)", gap: 6 }}>
+                <CircularRing
+                  pct={drawerSummary?.coveragePct ?? 0}
+                  size={88}
+                  stroke={8}
+                  color={colorForPct(drawerSummary?.coveragePct, thresholds)}
+                  label={fmtPct(drawerSummary?.coveragePct)}
+                  fontSize={14}
+                />
+                <div style={{ fontSize: 10, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.08em", textAlign: "center" }}>Cobertura</div>
+                <div style={{ fontSize: 10, color: "var(--muted)", textAlign: "center" }}>{covText || "—"} ítems</div>
               </div>
-              <div style={{ textAlign: "center", padding: "12px 8px", background: "var(--bg)", borderRadius: 10, border: "1px solid var(--border)" }}>
-                <div style={{ fontSize: 10, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}>Riesgo</div>
-                <div style={{ marginTop: 4, display: "flex", justifyContent: "center" }}>
-                  <StatusBadge status={drawerSummary?.risk || "pending"} />
+              {/* Riesgo + stats */}
+              <div style={{ flex: "2 1 180px", display: "flex", flexDirection: "column", justifyContent: "center", padding: "16px 14px", background: "var(--bg)", borderRadius: 16, border: "1px solid var(--border)", gap: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <span style={{ fontSize: 10, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Estado de riesgo</span>
+                  <StatusBadge status={drawerSummary?.risk || selectedStudent?.risk || "pending"} />
                 </div>
+                {drawerPendingUngradedPct > 0 && (
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 10px", borderRadius: 8, background: "var(--watch-bg)", border: "1px solid var(--watch-border)" }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "var(--watch)" }}>⏳ Pendiente calificación</span>
+                    <span style={{ fontSize: 12, fontWeight: 900, fontFamily: "var(--font-mono)", color: "var(--watch)" }}>{fmtPct(drawerPendingUngradedPct)}</span>
+                  </div>
+                )}
+                {drawerOverdueUnscoredPct > 0 && (
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 10px", borderRadius: 8, background: "var(--critical-bg)", border: "1px solid var(--critical-border)" }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "var(--critical)" }}>🔴 Vencido sin entrega</span>
+                    <span style={{ fontSize: 12, fontWeight: 900, fontFamily: "var(--font-mono)", color: "var(--critical)" }}>{fmtPct(drawerOverdueUnscoredPct)}</span>
+                  </div>
+                )}
+                {drawerPendingUngradedPct === 0 && drawerOverdueUnscoredPct === 0 && (
+                  <div style={{ fontSize: 12, color: "var(--ok)", fontWeight: 700 }}>✅ Sin entregas pendientes</div>
+                )}
               </div>
             </div>
 
+            {/* ── Tabs ── */}
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", borderBottom: "1px solid var(--border)", paddingBottom: 10 }}>
               {drawerTabs.map((tab) => (
                 <button key={tab.id} className={`chip ${drawerTab === tab.id ? "active" : ""}`} onClick={() => setDrawerTab(tab.id)} style={{ fontSize: 12 }}>
                   {tab.icon} {tab.label}{" "}
                   {tab.count != null ? (
-                    <span className="tag" style={{ fontSize: 10, padding: "1px 6px" }}>
-                      {tab.count}
-                    </span>
+                    <span className="tag" style={{ fontSize: 10, padding: "1px 6px" }}>{tab.count}</span>
                   ) : null}
                 </button>
               ))}
@@ -4508,22 +5620,53 @@ const contentKpis = useMemo(() => {
 
                 {drawerMacro.length > 0 ? (
                   <Card title="Resultados de aprendizaje del estudiante">
-                    <div style={{ width: "100%", height: 220 }}>
-                      <ResponsiveContainer>
-                        <BarChart data={drawerMacro} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                          <XAxis dataKey="code" tick={{ fontSize: 11, fill: "var(--muted)" }} />
-                          <YAxis domain={[0, 100]} tickFormatter={(v) => `${v}%`} tick={{ fontSize: 10, fill: "var(--muted)" }} />
-                          <Tooltip formatter={(value) => [`${Number(value).toFixed(1)}%`, "Desempeño"]} />
-                          <ReferenceLine y={Number(thresholds?.watch || 70)} stroke={COLORS.watch} strokeDasharray="4 4" />
-                          <ReferenceLine y={Number(thresholds?.critical || 50)} stroke={COLORS.critical} strokeDasharray="4 4" />
-                          <Bar dataKey="pct" radius={[6, 6, 0, 0]}>
-                            {drawerMacro.map((item) => (
-                              <Cell key={item.code} fill={colorForPct(item.pct, thresholds)} />
-                            ))}
-                          </Bar>
-                        </BarChart>
-                      </ResponsiveContainer>
+                    {/* Ring grid */}
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 10, justifyContent: "center", marginBottom: 14 }}>
+                      {drawerMacro.map((item) => {
+                        const ringColor = colorForPct(item.pct, thresholds);
+                        const isCrit = item.pct < (thresholds?.critical ?? 50);
+                        const isWatch = !isCrit && item.pct < (thresholds?.watch ?? 70);
+                        const statusLabel = isCrit ? "Crítico" : isWatch ? "Observación" : "Óptimo";
+                        const statusColor = isCrit ? COLORS.critical : isWatch ? COLORS.watch : COLORS.ok;
+                        return (
+                          <div key={item.code} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 5, padding: "12px 10px 10px", borderRadius: 12, border: "1px solid var(--border)", background: "var(--bg)", flex: "1 1 90px", maxWidth: 130 }}>
+                            <CircularRing pct={item.pct} size={68} stroke={7} color={ringColor} label={fmtPct(item.pct)} fontSize={11} />
+                            <div style={{ fontSize: 12, fontWeight: 800, color: "var(--text)", textAlign: "center" }}>{item.code}</div>
+                            <span style={{ fontSize: 9, fontWeight: 800, color: statusColor, background: statusColor + "1A", padding: "2px 7px", borderRadius: 99, textTransform: "uppercase", letterSpacing: "0.05em" }}>{statusLabel}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {/* Description list — one row per RA */}
+                    {drawerMacro.some(item => {
+                      const ri = learningOutcomesData.find(r => r.code === item.code);
+                      return ri?.description || ri?.name;
+                    }) && (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
+                        {drawerMacro.map((item) => {
+                          const ri = learningOutcomesData.find(r => r.code === item.code);
+                          const rawDesc = ri?.description || ri?.name || "";
+                          // Strip leading "CODE - " prefix if present
+                          const desc = rawDesc.replace(/^[A-Za-z0-9_.-]+\s*[-–]\s*/, "").trim();
+                          if (!desc || desc === item.code) return null;
+                          const ringColor = colorForPct(item.pct, thresholds);
+                          return (
+                            <div key={item.code + "_d"} style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "7px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--card)" }}>
+                              <span style={{ flexShrink: 0, fontFamily: "var(--font-mono)", fontSize: 11, fontWeight: 900, color: ringColor, minWidth: 26, paddingTop: 1 }}>{item.code}</span>
+                              <span style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.5, fontWeight: 500 }}>{desc}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {/* Legend */}
+                    <div style={{ display: "flex", gap: 14, fontSize: 10, color: "var(--muted)", justifyContent: "center" }}>
+                      <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                        <span style={{ width: 10, height: 2, background: COLORS.critical, display: "inline-block", borderRadius: 1 }} /> Crítico ({thresholds?.critical ?? 50}%)
+                      </span>
+                      <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                        <span style={{ width: 10, height: 2, background: COLORS.watch, display: "inline-block", borderRadius: 1 }} /> Observación ({thresholds?.watch ?? 70}%)
+                      </span>
                     </div>
                   </Card>
                 ) : learningOutcomesData.length > 0 ? (
