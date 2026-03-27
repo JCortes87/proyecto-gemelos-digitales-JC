@@ -5,10 +5,13 @@ from typing import Any, Dict, List, Optional
 import asyncio
 from collections import defaultdict
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.config_loader import load_course_bundle
 from app.services.brightspace_client import get_brightspace_client
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from app.services.brightspace_client import BrightspaceClient
 from app.services.gemelo_service import GemeloService
 
 logger = logging.getLogger("uvicorn.error")
@@ -22,7 +25,10 @@ _RA_DASHBOARD_TTL = 300  # 5 minutos
 
 
 
-def get_service(bs=Depends(get_brightspace_client)) -> GemeloService:
+def get_service(
+    request: Request,
+    bs: "BrightspaceClient" = Depends(get_brightspace_client),
+) -> GemeloService:
     return GemeloService(bs)
 
 
