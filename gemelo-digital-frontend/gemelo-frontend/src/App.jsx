@@ -35,7 +35,7 @@ function apiUrl(path) {
   return API_BASE_URL ? `${API_BASE_URL}${path}` : path;
 }
 
-const DEFAULT_ORG_UNIT_ID = 29120;
+const DEFAULT_ORG_UNIT_ID = 0; // Se sobreescribe con el curso del LTI o selección del docente
 
 /**
  * =========================
@@ -1080,10 +1080,13 @@ function safeAvg(list) {
 }
 
 async function apiGet(path, opts = {}) {
+  // Incluir session_id como Bearer token (cross-domain — cookies bloqueadas por el browser)
+  const _sid = localStorage.getItem("gemelo_sid");
+  const _authHeader = _sid ? { "Authorization": `Bearer ${_sid}` } : {};
   const res = await fetch(apiUrl(path), {
     method: "GET",
     credentials: "include",
-    headers: { Accept: "application/json", ...(opts.headers || {}) },
+    headers: { Accept: "application/json", ..._authHeader, ...(opts.headers || {}) },
     signal: opts.signal,
   });
 
@@ -1233,6 +1236,82 @@ function StatusBadge({ status }) {
       {cfg.label}
     </span>
   );
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ElevenLabs TTS/STT — alta calidad con fallback a Web Speech API
+// ─────────────────────────────────────────────────────────────────────────────
+let _elCurrentAudio = null;
+function elStop() {
+  if (_elCurrentAudio) { _elCurrentAudio.pause(); _elCurrentAudio = null; }
+  if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+}
+
+async function elSpeak(rawText, onStart, onEnd) {
+  if (!rawText || !rawText.trim()) return;
+  elStop();
+  // Limpiar HTML, emojis y entidades
+  const clean = rawText
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&lt;/g, "menor que").replace(/&gt;/g, "mayor que").replace(/&amp;/g, "y")
+    .replace(/[^\u0000-\u007F\u00C0-\u024F\u0400-\u04FF\s]/g, "")
+    .replace(/\[.*?\]/g, "").replace(/\s+/g, " ").trim().slice(0, 2000);
+
+  onStart && onStart();
+  try {
+    const sid = localStorage.getItem("gemelo_sid");
+    const hdrs = { "Content-Type": "application/json" };
+    if (sid) hdrs["Authorization"] = "Bearer " + sid;
+    const res = await fetch(apiUrl("/speech/tts"), {
+      method: "POST", credentials: "include", headers: hdrs,
+      body: JSON.stringify({ text: clean }),
+    });
+    if (!res.ok) throw new Error("TTS " + res.status);
+    const blob = await res.blob();
+    const url  = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    _elCurrentAudio = audio;
+    audio.onended = audio.onerror = () => { onEnd && onEnd(); URL.revokeObjectURL(url); _elCurrentAudio = null; };
+    audio.play();
+    return audio;
+  } catch (e) {
+    console.warn("ElevenLabs TTS fallback:", e.message);
+    if ("speechSynthesis" in window) {
+      const utt = new SpeechSynthesisUtterance(clean);
+      utt.lang = "es-CO"; utt.rate = 0.92;
+      const esV = window.speechSynthesis.getVoices().find(v => v.lang.startsWith("es"));
+      if (esV) utt.voice = esV;
+      utt.onend = utt.onerror = () => onEnd && onEnd();
+      window.speechSynthesis.speak(utt);
+    } else { onEnd && onEnd(); }
+  }
+}
+
+async function elListen(onResult, onError) {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+    const chunks = [];
+    recorder.ondataavailable = e => chunks.push(e.data);
+    recorder.onstop = async () => {
+      stream.getTracks().forEach(t => t.stop());
+      const blob = new Blob(chunks, { type: "audio/webm" });
+      const form = new FormData();
+      form.append("audio", blob, "audio.webm");
+      try {
+        const sid = localStorage.getItem("gemelo_sid");
+        const hdrs = sid ? { "Authorization": "Bearer " + sid } : {};
+        const res = await fetch(apiUrl("/speech/stt"), { method: "POST", credentials: "include", headers: hdrs, body: form });
+        if (!res.ok) throw new Error("STT " + res.status);
+        const data = await res.json();
+        onResult && onResult(data.text || "");
+      } catch (e) { onError && onError(e); }
+    };
+    recorder.start();
+    setTimeout(() => { if (recorder.state === "recording") recorder.stop(); }, 10000);
+    return recorder;
+  } catch (e) { onError && onError(e); }
 }
 
 
@@ -1561,6 +1640,289 @@ function CoverageBars({ donePct, pendingPct, overduePct, openPct }) {
         color={ov > 0 ? COLORS.critical : "rgba(148,163,184,0.4)"}
         tooltip="Sin nota, sin entrega registrada, y la fecha de vencimiento ya pasó. Requiere acción docente."
       />
+    </div>
+  );
+}
+
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OnboardingTutorial — Tutorial de primera vez para el docente
+// Aparece solo una vez (controlado por localStorage "gemelo_onboarded")
+// ─────────────────────────────────────────────────────────────────────────────
+const ONBOARDING_STEPS = [
+  {
+    id: "welcome",
+    title: "Bienvenido a Gemelo Digital",
+    icon: "🎓",
+    desc: "Tu asistente académico inteligente. Aquí puedes monitorear el desempeño de tus estudiantes en tiempo real, identificar riesgos y tomar decisiones de acompañamiento.",
+    highlight: null,
+    voice: (name) => `Bienvenido a Gemelo Digital${name ? ", " + name : ""}. Tu asistente académico inteligente para el seguimiento de tus estudiantes.`,
+  },
+  {
+    id: "dashboard",
+    title: "Dashboard del curso",
+    icon: "📊",
+    desc: "Ve el panorama completo de tu curso: nota promedio, estudiantes en riesgo, distribución de calificaciones y cumplimiento evaluativo.",
+    highlight: "dashboard",
+    voice: () => "El Dashboard te da el panorama completo de tu curso. Aquí ves el promedio, los estudiantes en riesgo y el cumplimiento evaluativo.",
+  },
+  {
+    id: "priority",
+    title: "Estudiantes prioritarios",
+    icon: "🔴",
+    desc: "Identifica automáticamente quiénes necesitan atención urgente: nota crítica, baja cobertura o ítems vencidos sin calificar.",
+    highlight: "priority",
+    voice: () => "La sección de estudiantes prioritarios te muestra quiénes necesitan atención urgente, con nota crítica o pendientes sin calificar.",
+  },
+  {
+    id: "routes",
+    title: "Rutas de atención",
+    icon: "🛤️",
+    desc: "Cada estudiante tiene una ruta de intervención asignada automáticamente: activar evidencia, recuperación, ajuste dirigido o mantener desempeño.",
+    highlight: "routes",
+    voice: () => "Las Rutas de atención te indican qué acción tomar con cada estudiante, desde activar evidencias hasta planes de recuperación.",
+  },
+  {
+    id: "ai",
+    title: "Asistente IA con voz",
+    icon: "🤖",
+    desc: "Puedes hacer preguntas en lenguaje natural: '¿Quiénes están en riesgo alto?', '¿Cuál es el promedio?'. También puedes hablar con el micrófono.",
+    highlight: "assistant",
+    voice: () => "El Asistente de Inteligencia Artificial responde tus preguntas en lenguaje natural. Puedes escribir o usar el micrófono para consultar el estado de tu curso.",
+  },
+  {
+    id: "courses",
+    title: "Cambiar de curso",
+    icon: "📚",
+    desc: "Usa el botón 'Mis cursos' en la barra superior para cambiar entre tus cursos activos en cualquier momento.",
+    highlight: null,
+    voice: () => "Puedes cambiar entre tus cursos en cualquier momento usando el botón Mis cursos en la barra superior. ¡Listo para comenzar!",
+  },
+];
+
+function OnboardingTutorial({ userName, onFinish }) {
+  const [step, setStep] = React.useState(0);
+  const [speaking, setSpeaking] = React.useState(false);
+  const current = ONBOARDING_STEPS[step];
+  const isLast = step === ONBOARDING_STEPS.length - 1;
+
+  const speak = React.useCallback((text) => {
+    elSpeak(
+      text,
+      () => setSpeaking(true),
+      () => setSpeaking(false),
+    );
+  }, []);
+
+  // Auto-speak on step change
+  React.useEffect(() => {
+    const text = current.voice(userName);
+    // Small delay for better UX
+    const t = setTimeout(() => speak(text), 300);
+    return () => { clearTimeout(t); window.speechSynthesis?.cancel(); };
+  }, [step]);
+
+  const handleNext = () => {
+    if (isLast) {
+      window.speechSynthesis?.cancel();
+      localStorage.setItem("gemelo_onboarded", "1");
+      onFinish();
+    } else {
+      setStep(s => s + 1);
+    }
+  };
+
+  const handleSkip = () => {
+    window.speechSynthesis?.cancel();
+    localStorage.setItem("gemelo_onboarded", "1");
+    onFinish();
+  };
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 9999,
+      background: "rgba(0,0,0,0.72)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      fontFamily: "var(--font)", padding: 20,
+      backdropFilter: "blur(4px)",
+    }}>
+      <div style={{
+        background: "var(--card)", borderRadius: 20,
+        padding: "36px 40px", maxWidth: 520, width: "100%",
+        boxShadow: "0 24px 80px rgba(0,0,0,0.3)",
+        position: "relative",
+      }}>
+        {/* Progress dots */}
+        <div style={{ display: "flex", gap: 6, marginBottom: 24, justifyContent: "center" }}>
+          {ONBOARDING_STEPS.map((_, i) => (
+            <div key={i} style={{
+              width: i === step ? 22 : 8, height: 8, borderRadius: 99,
+              background: i === step ? "var(--brand)" : i < step ? "var(--ok)" : "var(--border)",
+              transition: "all 0.3s ease",
+            }} />
+          ))}
+        </div>
+
+        {/* Icon */}
+        <div style={{ textAlign: "center", fontSize: 48, marginBottom: 16, lineHeight: 1 }}>
+          {current.icon}
+        </div>
+
+        {/* Title */}
+        <h2 style={{ fontSize: 22, fontWeight: 900, color: "var(--text)", textAlign: "center", margin: "0 0 12px", letterSpacing: "-0.02em" }}>
+          {current.title}
+        </h2>
+
+        {/* Description */}
+        <p style={{ fontSize: 14, color: "var(--muted)", lineHeight: 1.65, textAlign: "center", margin: "0 0 28px" }}>
+          {current.desc}
+        </p>
+
+        {/* Voice indicator */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginBottom: 24, height: 24 }}>
+          {speaking ? (
+            <>
+              {[1,2,3,4,5].map(n => (
+                <div key={n} style={{
+                  width: 4, borderRadius: 2,
+                  background: "var(--brand)",
+                  animation: "waveAI 1.1s ease-in-out infinite",
+                  animationDelay: `${n * 0.1}s`,
+                  height: `${8 + n * 4}px`,
+                }} />
+              ))}
+              <span style={{ fontSize: 11, color: "var(--brand)", fontWeight: 700, marginLeft: 6 }}>Hablando…</span>
+            </>
+          ) : (
+            <button
+              onClick={() => speak(current.voice(userName))}
+              style={{ background: "none", border: "1px solid var(--border)", borderRadius: 99, padding: "4px 14px", fontSize: 11, fontWeight: 700, color: "var(--muted)", cursor: "pointer" }}
+            >
+              🔊 Repetir
+            </button>
+          )}
+        </div>
+
+        {/* Step counter */}
+        <div style={{ fontSize: 11, color: "var(--muted)", textAlign: "center", marginBottom: 16, fontWeight: 600 }}>
+          {step + 1} de {ONBOARDING_STEPS.length}
+        </div>
+
+        {/* Buttons */}
+        <div style={{ display: "flex", gap: 10 }}>
+          <button
+            onClick={handleSkip}
+            style={{ flex: 1, padding: "11px 0", borderRadius: 10, border: "1px solid var(--border)", background: "transparent", fontSize: 13, fontWeight: 700, color: "var(--muted)", cursor: "pointer" }}
+          >
+            Saltar tutorial
+          </button>
+          <button
+            onClick={handleNext}
+            style={{ flex: 2, padding: "11px 0", borderRadius: 10, border: "none", background: "var(--brand)", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer", boxShadow: "0 4px 14px rgba(11,95,255,0.3)" }}
+          >
+            {isLast ? "¡Comenzar! 🚀" : "Siguiente →"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LoginScreen — Pantalla de acceso cuando el usuario no está autenticado
+// ─────────────────────────────────────────────────────────────────────────────
+function LoginScreen({ orgUnitId }) {
+  const loginUrl = apiUrl(
+    orgUnitId && orgUnitId > 0
+      ? `/auth/brightspace/login?org_unit_id=${orgUnitId}`
+      : "/auth/brightspace/login"
+  );
+
+  return (
+    <div style={{
+      minHeight: "100vh", background: "var(--bg)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      fontFamily: "var(--font)", padding: 20,
+    }}>
+      <div style={{
+        background: "var(--card)", border: "1px solid var(--border)",
+        borderRadius: "var(--radius-lg)", padding: "40px 48px",
+        textAlign: "center", maxWidth: 440, width: "100%",
+        boxShadow: "var(--shadow-lg)",
+      }}>
+        {/* Logo */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 28 }}>
+          <div style={{
+            width: 48, height: 48, borderRadius: 13,
+            background: "var(--brand)", display: "flex",
+            alignItems: "center", justifyContent: "center",
+            color: "#fff", fontSize: 15, fontWeight: 900, letterSpacing: "-0.03em",
+          }}>CESA</div>
+          <div style={{ textAlign: "left" }}>
+            <div style={{ fontSize: 16, fontWeight: 900, color: "var(--text)", letterSpacing: "-0.02em" }}>
+              Gemelo Digital
+            </div>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+              Vista Docente · v2.0325
+            </div>
+          </div>
+        </div>
+
+        {/* Divider */}
+        <div style={{ height: 1, background: "var(--border)", margin: "0 0 28px" }} />
+
+        {/* Heading */}
+        <h2 style={{ fontSize: 22, fontWeight: 900, color: "var(--text)", letterSpacing: "-0.02em", margin: "0 0 8px" }}>
+          Bienvenido
+        </h2>
+        <p style={{ fontSize: 14, color: "var(--muted)", lineHeight: 1.6, margin: "0 0 28px" }}>
+          Para acceder a tu tablero, inicia sesión con tu cuenta CESA de Brightspace.
+          Serás redirigido a Microsoft para autenticarte.
+        </p>
+
+        {/* CTA Button */}
+        <a
+          href={loginUrl}
+          style={{
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+            width: "100%", padding: "13px 20px",
+            background: "var(--brand)", color: "#fff",
+            borderRadius: 12, textDecoration: "none",
+            fontSize: 14, fontWeight: 800,
+            boxShadow: "0 4px 16px rgba(11,95,255,0.3)",
+            transition: "opacity 0.15s",
+          }}
+          onMouseEnter={e => e.currentTarget.style.opacity = "0.88"}
+          onMouseLeave={e => e.currentTarget.style.opacity = "1"}
+        >
+          {/* Microsoft logo simplified */}
+          <svg width="18" height="18" viewBox="0 0 21 21" fill="none">
+            <rect x="0"  y="0"  width="10" height="10" fill="#F25022"/>
+            <rect x="11" y="0"  width="10" height="10" fill="#7FBA00"/>
+            <rect x="0"  y="11" width="10" height="10" fill="#00A4EF"/>
+            <rect x="11" y="11" width="10" height="10" fill="#FFB900"/>
+          </svg>
+          Iniciar sesión con Microsoft
+        </a>
+
+        {/* Info */}
+        <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 18, lineHeight: 1.5 }}>
+          Solo los instructores con cursos activos en Brightspace pueden acceder.
+          Si tienes problemas, contacta a soporte CESA.
+        </p>
+
+        {/* From LTI note */}
+        <div style={{
+          marginTop: 20, padding: "10px 14px", borderRadius: 10,
+          background: "var(--brand-light)", border: "1px solid var(--brand-light2)",
+        }}>
+          <p style={{ fontSize: 11, color: "var(--brand)", fontWeight: 700, margin: 0 }}>
+            💡 También puedes acceder directamente desde tu curso en Brightspace
+            usando el enlace de la herramienta Gemelo Digital.
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
@@ -2295,35 +2657,18 @@ function VoiceAssistant({ studentRows, overview, raDashboard, courseInfo, thresh
     return `No encontré esa consulta. Prueba: riesgo alto, riesgo medio, promedio, sin nota, top estudiantes, resultados de aprendizaje, aprobados, cobertura, rutas.`;
   }
 
-  // ── TTS — strips HTML, emojis y símbolos antes de leer en voz ──
+  // ── TTS — usa ElevenLabs (alta calidad) con fallback a Web Speech API ──
   function speakText(html, msgId) {
-    if (!("speechSynthesis" in window)) return;
-    window.speechSynthesis.cancel();
-    let clean = html.replace(/<[^>]*>/g, " ");
-    // Strip emoji Unicode blocks
-    clean = clean.replace(/[\u{1F300}-\u{1FAFF}]/gu, "");
-    clean = clean.replace(/[\u2600-\u27BF]/g, "");
-    // Replace HTML entities with readable text
-    clean = clean.replace(/&lt;/g, "menor que").replace(/&gt;/g, "mayor que").replace(/&amp;/g, "y");
-    // Strip brackets like [Crítico] [OK] [Obs]
-    clean = clean.replace(/\[.*?\]/g, "");
-    // Strip symbols
-    clean = clean.replace(/[→↑↓★‣·•≥≤·]/g, " ");
-    clean = clean.replace(/\s+/g, " ").trim();
-    const utt = new SpeechSynthesisUtterance(clean);
-    utt.lang = "es-CO"; utt.rate = speed;
-    synthRef.current = utt;
-    const voices = window.speechSynthesis.getVoices();
-    const esVoice = voices.find((v) => v.lang.startsWith("es"));
-    if (esVoice) utt.voice = esVoice;
-    utt.onstart = () => { setAiStatus("speaking"); setActiveSpeakId(msgId); };
-    utt.onend   = () => { setAiStatus("idle");     setActiveSpeakId(null); };
-    utt.onerror = () => { setAiStatus("idle");     setActiveSpeakId(null); };
-    window.speechSynthesis.speak(utt);
+    setAiStatus("speaking"); setActiveSpeakId(msgId);
+    elSpeak(
+      html,
+      () => { setAiStatus("speaking"); setActiveSpeakId(msgId); },
+      () => { setAiStatus("idle");     setActiveSpeakId(null); },
+    );
   }
 
   function stopSpeaking() {
-    window.speechSynthesis?.cancel();
+    elStop();
     setAiStatus("idle"); setActiveSpeakId(null);
   }
 
@@ -3170,6 +3515,7 @@ function AppTopbar({
   isMobile, onOpenSidebar, darkMode, setDarkMode,
   orgUnitInput, setOrgUnitInput, setOrgUnitId,
   handleOpenCoursePanel,
+  authUser,
 }) {
   return (
     <header className="app-topbar">
@@ -3222,7 +3568,37 @@ function AppTopbar({
           {darkMode ? "☀️" : "🌙"}
         </button>
 
-        <div className="topbar-avatar" title="Docente">D</div>
+        {/* User avatar with initials */}
+        <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 6 }}>
+          <div
+            className="topbar-avatar"
+            title={authUser?.user_name || "Docente"}
+            style={{ cursor: "default" }}
+          >
+            {authUser?.user_name ? authUser.user_name.trim().charAt(0).toUpperCase() : "D"}
+          </div>
+          {authUser?.user_name && (
+            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {authUser.user_name.split(" ").slice(0,2).join(" ")}
+            </span>
+          )}
+          <button
+            onClick={async () => {
+              try {
+                const _sid2 = localStorage.getItem("gemelo_sid");
+                const _lh = _sid2 ? { "Authorization": `Bearer ${_sid2}` } : {};
+                await fetch(apiUrl("/auth/logout"), { method: "POST", credentials: "include", headers: _lh });
+              } catch {}
+              localStorage.removeItem("gemelo_sid");
+              sessionStorage.clear();
+              window.location.reload();
+            }}
+            title="Cerrar sesión"
+            style={{ background: "none", border: "1px solid var(--border)", borderRadius: 7, padding: "4px 8px", fontSize: 10, fontWeight: 700, color: "var(--muted)", cursor: "pointer" }}
+          >
+            Salir
+          </button>
+        </div>
       </div>
     </header>
   );
@@ -3541,6 +3917,97 @@ export default function App() {
     document.documentElement.classList.toggle("dark", darkMode);
   }, [darkMode]);
 
+  // ── Auth state ────────────────────────────────────────────────────────────
+  const [authChecked, setAuthChecked] = useState(false);
+  const [authUser, setAuthUser] = useState(null); // { user_id, user_name, user_email }
+  const [showTutorial, setShowTutorial] = React.useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        // ── Leer hash fragment del callback OAuth ──
+        // Formato: #gemelo:SESSION_ID:orgUnitId:first_login
+        // El hash nunca va al servidor ni se cachea — es la fuente más confiable
+        let _sid = null;
+        let _hashOu = null;
+        const _hash = window.location.hash;
+        if (_hash.startsWith("#gemelo:")) {
+          const parts = _hash.slice(1).split(":");
+          // parts = ["gemelo", "SESSION_ID", "orgUnitId", "1"]
+          if (parts.length >= 2) {
+            _sid    = parts[1] || null;
+            _hashOu = parts[2] && Number(parts[2]) > 0 ? Number(parts[2]) : null;
+            const _fl = parts[3];
+            if (_fl === "1") sessionStorage.setItem("gemelo_first_login", "1");
+          }
+          // Limpiar el hash de la URL sin recargar
+          window.history.replaceState(null, "", window.location.pathname + window.location.search);
+        }
+
+        // Fallback: leer de localStorage (visitas posteriores sin hash)
+        if (!_sid) _sid = localStorage.getItem("gemelo_sid");
+
+        // Guardar session_id en localStorage para peticiones siguientes
+        if (_sid) localStorage.setItem("gemelo_sid", _sid);
+
+        // Aplicar orgUnitId del hash si vino en el fragmento
+        if (_hashOu) {
+          setOrgUnitId(_hashOu);
+          setOrgUnitInput(String(_hashOu));
+        }
+
+        // Llamar /auth/me con sid como query param (bypass cross-domain cookie)
+        const _meUrl = _sid
+          ? apiUrl(`/auth/me?sid=${encodeURIComponent(_sid)}`)
+          : apiUrl("/auth/me");
+        const res = await fetch(_meUrl, {
+          credentials: "include",
+          headers: _sid ? { "Authorization": `Bearer ${_sid}` } : {},
+        });
+        const data = await res.json();
+        if (data.authenticated) {
+          setAuthUser(data);
+          // Recuperar orgUnitId guardado en sessionStorage (viene del LTI)
+          const savedOu = sessionStorage.getItem("gemelo_pending_org");
+          if (savedOu && Number(savedOu) > 0) {
+            sessionStorage.removeItem("gemelo_pending_org");
+            setOrgUnitId(Number(savedOu));
+            setOrgUnitInput(savedOu);
+          }
+          // Detectar primera vez: viene del callback OAuth (first_login=1 en sessionStorage)
+          // O si nunca ha visto el tutorial (localStorage "gemelo_onboarded" no existe)
+          const isFirstLogin = sessionStorage.getItem("gemelo_first_login") === "1";
+          const alreadyOnboarded = localStorage.getItem("gemelo_onboarded") === "1";
+          if (isFirstLogin || !alreadyOnboarded) {
+            sessionStorage.removeItem("gemelo_first_login");
+            setShowTutorial(true);
+          } else {
+            // Saludo de voz si ya onboarded (solo dice bienvenido brevemente)
+            const name = (data.user_name || "").split(" ")[0];
+            if (name) {
+              setTimeout(() => elSpeak(`Bienvenido de nuevo, ${name}`), 800);
+            }
+          }
+        } else if (data.lti_detected) {
+          // LTI detectado sin token OAuth → guardar orgUnitId y redirigir a OAuth
+          const ou = data.org_unit_id || "";
+          if (ou) sessionStorage.setItem("gemelo_pending_org", ou);
+          const loginPath = ou
+            ? apiUrl(`/auth/brightspace/login?org_unit_id=${ou}`)
+            : apiUrl("/auth/brightspace/login");
+          window.location.href = loginPath;
+          return;
+        }
+      } catch {
+        // offline / error → mostrar login
+      } finally {
+        setAuthChecked(true);
+      }
+    })();
+  }, []);
+
+  // orgUnitId ya se inicializa desde la URL en el useState lazy initializer
+
   // Scroll to section when voice command navigates
   useEffect(() => {
     const map = {
@@ -3555,8 +4022,38 @@ export default function App() {
     }
   }, [activeSection]);
 
-  const [orgUnitId, setOrgUnitId] = useState(DEFAULT_ORG_UNIT_ID);
-  const [orgUnitInput, setOrgUnitInput] = useState(String(DEFAULT_ORG_UNIT_ID));
+  const [orgUnitId, setOrgUnitId] = useState(() => {
+    // Leer params de URL del OAuth callback
+    const params = new URLSearchParams(window.location.search);
+    const ou = params.get("orgUnitId");
+    const fl = params.get("first_login");
+    if (fl === "1") sessionStorage.setItem("gemelo_first_login", "1");
+    // El sid viene en el hash fragment (#gemelo:SID:ou:1) — se lee en useEffect, no aquí
+
+    if (ou && Number(ou) > 0) {
+      // Limpiar URL sin recargar
+      const cleanUrl = window.location.pathname;
+      window.history.replaceState(null, "", cleanUrl);
+      sessionStorage.setItem("gemelo_pending_org", ou);
+      return Number(ou);
+    }
+    // Limpiar URL si tiene params
+    if (params.toString()) {
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+    // Leer de sessionStorage si viene de redirect interno
+    const saved = sessionStorage.getItem("gemelo_pending_org");
+    if (saved && Number(saved) > 0) return Number(saved);
+    return DEFAULT_ORG_UNIT_ID;
+  });
+  const [orgUnitInput, setOrgUnitInput] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    const ou = params.get("orgUnitId");
+    if (ou && Number(ou) > 0) return ou;
+    const saved = sessionStorage.getItem("gemelo_pending_org");
+    if (saved && Number(saved) > 0) return saved;
+    return String(DEFAULT_ORG_UNIT_ID || "");
+  });
 
   const [outcomesMap, setOutcomesMap] = useState({});
   const [learningOutcomesPayload, setLearningOutcomesPayload] = useState(null);
@@ -3591,32 +4088,67 @@ export default function App() {
   const [courseList, setCourseList] = useState([]);
   const [loadingCourses, setLoadingCourses] = useState(false);
   const [courseListLoaded, setCourseListLoaded] = useState(false);
+  const [courseSearch, setCourseSearch] = useState("");
+
+  // Buscar cursos: intenta my-course-offerings (inscripciones propias),
+  // si no encuentra resultados o el usuario es admin, usa all-courses (orgstructure global)
+  const searchCourses = React.useCallback(async (term) => {
+    setLoadingCourses(true);
+    try {
+      const q = term && term.trim().length > 0 ? term.trim() : "";
+      const qs = q ? `?active_only=false&limit=50&search=${encodeURIComponent(q)}` : `?active_only=false&limit=50`;
+
+      // Llamar ambos endpoints en paralelo
+      const [myData, allData] = await Promise.allSettled([
+        apiGet(`/brightspace/my-course-offerings${qs}`),
+        apiGet(`/brightspace/all-courses${qs}`),
+      ]);
+
+      const myItems  = myData.status  === "fulfilled" ? (Array.isArray(myData.value?.items)  ? myData.value.items  : []) : [];
+      const allItems = allData.status === "fulfilled" ? (Array.isArray(allData.value?.items) ? allData.value.items : []) : [];
+
+      // Merge: usar all-courses como base, marcar los que ya están inscritos
+      const idSet = new Set(myItems.map(c => String(c.id)));
+      const merged = allItems.length > 0 ? allItems : myItems;
+
+      // Si all-courses devolvió algo, fusionar con los de my-courses
+      const final = allItems.length > 0
+        ? allItems.map(c => ({ ...c, enrolled: idSet.has(String(c.id)) }))
+        : myItems;
+
+      final.sort((a, b) => {
+        if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
+        return String(a.name || "").localeCompare(String(b.name || ""), "es", { sensitivity: "base" });
+      });
+
+      setCourseList(final.length > 0 ? final : myItems);
+      setCourseListLoaded(true);
+    } catch {
+      // no bloquear si falla
+    } finally {
+      setLoadingCourses(false);
+    }
+  }, []);
 
   // Cargar lista de cursos del docente (lazy — solo cuando abre el panel)
   const loadCourseList = React.useCallback(async () => {
     if (courseListLoaded || loadingCourses) return;
-    setLoadingCourses(true);
-    try {
-      const data = await apiGet("/brightspace/my-course-offerings?active_only=false&limit=500");
-      const items = Array.isArray(data?.items) ? data.items : [];
-      // Ordenar: activos primero, luego por nombre
-      items.sort((a, b) => {
-        if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
-        return String(a.name || "").localeCompare(String(b.name || ""), "es", { sensitivity: "base" });
-      });
-      setCourseList(items);
-      setCourseListLoaded(true);
-    } catch {
-      // no bloquear la app si falla
-    } finally {
-      setLoadingCourses(false);
-    }
-  }, [courseListLoaded, loadingCourses]);
+    await searchCourses("");
+  }, [courseListLoaded, loadingCourses, searchCourses]);
 
   const handleOpenCoursePanel = () => {
     setShowCoursePanel(true);
     loadCourseList();
   };
+
+  // Auto-cargar cursos solo cuando NO hay curso seleccionado (orgUnitId=0)
+  // Si orgUnitId > 0 (viene de LTI o selección previa) → ir directo al dashboard
+  React.useEffect(() => {
+    if (authUser && (!orgUnitId || orgUnitId === 0)) {
+      loadCourseList();
+    }
+    // Si viene con orgUnitId del LTI, no cargar lista — ir directo
+  }, [authUser, orgUnitId]);
 
   const handleSelectCourse = (id) => {
     const v = Number(id);
@@ -3790,6 +4322,13 @@ export default function App() {
    * Load course overview/student dashboard
    */
   useEffect(() => {
+    // No cargar si no hay curso seleccionado
+    if (!orgUnitId || orgUnitId === 0) {
+      setLoading(false);
+      setOverview(null);
+      return;
+    }
+
     let isMounted = true;
     const controller = new AbortController();
 
@@ -3812,8 +4351,8 @@ export default function App() {
         ]);
 
         if (!isMounted) return;
-        if (ovRes.status !== "fulfilled") throw ovRes.reason;
-        if (stRes.status !== "fulfilled") throw stRes.reason;
+        if (ovRes.status !== "fulfilled") { setLoading(false); throw ovRes.reason; }
+        if (stRes.status !== "fulfilled") { setLoading(false); throw stRes.reason; }
 
         const ov = ovRes.value;
         const st = stRes.value;
@@ -4582,17 +5121,188 @@ const contentKpis = useMemo(() => {
     },
   });
 
+  // ── Auth gate ─────────────────────────────────────────────────────────────
+  if (!authChecked) {
+    return (
+      <div style={{ minHeight: "100vh", background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <CesaLoader subtitle="Verificando sesión..." />
+      </div>
+    );
+  }
+  if (!authUser) return <LoginScreen orgUnitId={orgUnitId} />;
+
+  // Sin curso seleccionado → mostrar selector automáticamente
+  if (!orgUnitId || orgUnitId === 0) {
+    return (
+      <div style={{ minHeight: "100vh", background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "var(--font)", padding: 20 }}>
+        <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: "var(--radius-lg)", padding: "36px 40px", maxWidth: 480, width: "100%", boxShadow: "var(--shadow-lg)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
+            <div style={{ width: 40, height: 40, borderRadius: 10, background: "var(--brand)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 13, fontWeight: 900 }}>CESA</div>
+            <div>
+              <div style={{ fontSize: 15, fontWeight: 900, color: "var(--text)" }}>Gemelo Digital</div>
+              <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600 }}>
+                Hola, {authUser?.user_name?.split(" ")[0] || "docente"} — selecciona tu curso
+              </div>
+            </div>
+          </div>
+          <div style={{ height: 1, background: "var(--border)", marginBottom: 20 }} />
+          {/* Header con total */}
+          {!loadingCourses && courseList.length > 0 && (
+            <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 6, fontWeight: 600 }}>
+              {courseSearch
+                ? `${courseList.length} resultado${courseList.length !== 1 ? "s" : ""} para "${courseSearch}"`
+                : `${courseList.length} cursos recientes · ${courseList.filter(c => c.isActive).length} activos`
+              }
+            </div>
+          )}
+          {/* Buscador */}
+          {!loadingCourses && courseList.length > 0 && (
+            <div style={{ position: "relative", marginBottom: 10 }}>
+              <input
+                type="text"
+                placeholder="Buscar por nombre, código o ID…"
+                value={courseSearch}
+                onChange={e => {
+                  const val = e.target.value;
+                  setCourseSearch(val);
+                  // Debounce: esperar 400ms antes de buscar en backend
+                  clearTimeout(window._courseSearchTimer);
+                  window._courseSearchTimer = setTimeout(() => {
+                    setCourseListLoaded(false);
+                    searchCourses(val);
+                  }, 400);
+                }}
+                style={{ width: "100%", padding: "9px 12px 9px 34px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 12, fontFamily: "var(--font)", outline: "none", boxSizing: "border-box" }}
+                onFocus={e => e.target.style.borderColor = "var(--brand)"}
+                onBlur={e => e.target.style.borderColor = "var(--border)"}
+              />
+              <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", fontSize: 14, color: "var(--muted)" }}>🔍</span>
+            </div>
+          )}
+          {loadingCourses ? (
+            <div style={{ textAlign: "center", padding: "20px 0", color: "var(--muted)", fontSize: 13 }}>
+              Cargando tus cursos…
+            </div>
+          ) : courseList.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "24px 0" }}>
+              <div style={{ fontSize: 14, color: "var(--muted)", marginBottom: 10 }}>
+                {courseSearch ? `Sin resultados para "${courseSearch}"` : "No se encontraron cursos."}
+              </div>
+              {courseSearch && (
+                <button
+                  onClick={() => {
+                    setCourseSearch("");
+                    setCourseListLoaded(false);
+                    searchCourses("");
+                  }}
+                  style={{ background: "var(--brand)", color: "#fff", border: "none", borderRadius: 8, padding: "7px 16px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+                >
+                  Limpiar búsqueda
+                </button>
+              )}
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 360, overflowY: "auto" }}>
+              {courseList.map(c => (
+                <button key={c.id}
+                  onClick={() => { setOrgUnitId(Number(c.id)); setOrgUnitInput(String(c.id)); }}
+                  style={{
+                    display: "flex", alignItems: "center", justifyContent: "space-between",
+                    padding: "12px 14px", borderRadius: 10, border: "1.5px solid var(--border)",
+                    background: "var(--bg)", cursor: "pointer", textAlign: "left",
+                    transition: "all 0.15s", fontFamily: "var(--font)",
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = "var(--brand)"; e.currentTarget.style.background = "var(--brand-light)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.background = "var(--bg)"; }}
+                >
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", marginBottom: 2 }}>{c.name}</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ fontSize: 11, color: "var(--muted)" }}>ID {c.id}{c.code ? ` · ${c.code}` : ""}</span>
+                      {!c.isActive && <span style={{ fontSize: 9, fontWeight: 800, color: "var(--muted)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 99, padding: "1px 6px", textTransform: "uppercase" }}>Inactivo</span>}
+                    </div>
+                  </div>
+                  <span style={{ color: "var(--brand)", fontSize: 16, flexShrink: 0 }}>→</span>
+                </button>
+              ))}
+            </div>
+          )}
+          <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid var(--border)", display: "flex", justifyContent: "flex-end" }}>
+            <button
+              onClick={async () => {
+                try {
+                  const _sid2 = localStorage.getItem("gemelo_sid");
+                  const _lh = _sid2 ? { "Authorization": `Bearer ${_sid2}` } : {};
+                  await fetch(apiUrl("/auth/logout"), { method: "POST", credentials: "include", headers: _lh });
+                } catch {}
+                localStorage.removeItem("gemelo_sid");
+                sessionStorage.clear();
+                window.location.reload();
+              }}
+              style={{ background: "none", border: "1px solid var(--border)", borderRadius: 8, padding: "6px 14px", fontSize: 12, fontWeight: 700, color: "var(--muted)", cursor: "pointer" }}
+            >
+              Cerrar sesión
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (loading) return <CesaLoader subtitle="Cargando tablero..." />;
 
   if (err) {
+    // Detectar tipo de error para mostrar mensaje apropiado
+    const isNoAccess  = err.includes("401") || err.includes("403") || err.includes("autenticado") || err.includes("No tiene acceso");
+    const isNotFound  = err.includes("404") || err.includes("not found") || err.includes("no encontrado");
+
     return (
-      <div style={{ minHeight: "100vh", background: "var(--bg)", padding: 24 }}>
-        <Card title="Error al cargar el curso" right={<StatusBadge status="critico" />}>
-          <div style={{ color: "var(--critical)", fontWeight: 700, fontSize: 13, marginBottom: 8 }}>{err}</div>
-          <div style={{ fontSize: 12, color: "var(--muted)" }}>
-            Verifica: <code style={{ fontFamily: "var(--font-mono)" }}>/gemelo/course/{orgUnitId}/overview</code>
+      <div style={{ minHeight: "100vh", background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "var(--font)", padding: 20 }}>
+        <div style={{ background: "var(--card)", border: `1.5px solid ${isNoAccess ? "var(--watch)" : isNotFound ? "var(--muted)" : "var(--critical)"}`, borderRadius: 18, padding: "40px 44px", maxWidth: 460, width: "100%", boxShadow: "var(--shadow-lg)", textAlign: "center" }}>
+          {/* Icon */}
+          <div style={{ fontSize: 48, marginBottom: 16 }}>
+            {isNoAccess ? "🔒" : isNotFound ? "🔍" : "⚠️"}
           </div>
-        </Card>
+          {/* Title */}
+          <h2 style={{ fontSize: 20, fontWeight: 900, color: "var(--text)", margin: "0 0 10px", letterSpacing: "-0.02em" }}>
+            {isNoAccess
+              ? "Sin acceso a este curso"
+              : isNotFound
+              ? "Curso no encontrado"
+              : "Error al cargar el curso"
+            }
+          </h2>
+          {/* Description */}
+          <p style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.6, margin: "0 0 24px" }}>
+            {isNoAccess
+              ? `No tienes rol de instructor o coordinador en el curso ${orgUnitId}. Solo los docentes asignados pueden ver el Gemelo Digital de un curso.`
+              : isNotFound
+              ? `El curso con ID ${orgUnitId} no existe en Brightspace o fue eliminado.`
+              : err
+            }
+          </p>
+          {/* Actions */}
+          <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+            <button
+              onClick={() => { setOrgUnitId(0); setOrgUnitInput(""); setErr(""); setOverview(null); }}
+              style={{ padding: "10px 20px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--bg)", fontSize: 13, fontWeight: 700, color: "var(--muted)", cursor: "pointer" }}
+            >
+              ← Ver mis cursos
+            </button>
+            {!isNoAccess && !isNotFound && (
+              <button
+                onClick={() => { setErr(""); setOverview(null); }}
+                style={{ padding: "10px 20px", borderRadius: 10, border: "none", background: "var(--brand)", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
+              >
+                Reintentar
+              </button>
+            )}
+          </div>
+          {/* Course ID hint */}
+          <div style={{ marginTop: 16, fontSize: 11, color: "var(--muted)", fontFamily: "var(--font-mono)" }}>
+            Curso ID: {orgUnitId}
+          </div>
+        </div>
       </div>
     );
   }
@@ -4601,6 +5311,13 @@ const contentKpis = useMemo(() => {
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--bg)", fontFamily: "var(--font)" }}>
+      {/* ── Tutorial primera vez ── */}
+      {showTutorial && (
+        <OnboardingTutorial
+          userName={(authUser?.user_name || "").split(" ")[0]}
+          onFinish={() => setShowTutorial(false)}
+        />
+      )}
       {/* ── Sidebar ── */}
       <AppSidebar
         activeTab={activeTab}
@@ -4620,6 +5337,7 @@ const contentKpis = useMemo(() => {
         setOrgUnitInput={setOrgUnitInput}
         setOrgUnitId={setOrgUnitId}
         handleOpenCoursePanel={handleOpenCoursePanel}
+        authUser={authUser}
       />
 
       {/* ── Main content ── */}
@@ -4664,7 +5382,7 @@ const contentKpis = useMemo(() => {
                 Gemelo Digital · Vista Docente
               </div>
               <h1 style={{ fontSize: isMobile ? 22 : 28, fontWeight: 900, color: "var(--text)", letterSpacing: "-0.03em", lineHeight: 1.1 }}>
-                {courseInfo?.Name || `Curso ${orgUnitId}`}
+                {courseInfo?.Name || (orgUnitId ? `Curso ${orgUnitId}` : "Selecciona un curso")}
               </h1>
               <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 4, fontWeight: 500 }}>
                 {studentsCount} estudiantes

@@ -1,6 +1,3 @@
-
-Copiar
-
 # app/state.py
 """
 Store de sesiones por usuario.

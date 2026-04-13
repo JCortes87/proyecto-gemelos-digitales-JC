@@ -1,46 +1,56 @@
 # app/services/brightspace_client.py
 import os
 from typing import Any, Dict, Optional, List, Union
- 
+
 import httpx
 from fastapi import Request, HTTPException
- 
+
 from app.state import get_access_token
- 
+
 JsonType = Union[Dict[str, Any], List[Any]]
- 
+
 # Cookie name must match what main.py sets
 SESSION_COOKIE = "gemelo_session_id"
- 
- 
+
+
 def _extract_session_id(request: Optional[Request]) -> Optional[str]:
     """Extrae el session_id de la cookie de la request."""
     if request is None:
         return None
     return request.cookies.get(SESSION_COOKIE)
- 
- 
+
+
 def _resolve_token(request: Optional[Request], tokens: Optional[Dict[str, Any]]) -> str:
     """
     Resuelve el access_token con esta prioridad:
-    1. tokens dict explícito (compatibilidad con código legacy)
-    2. Cookie de sesión de la request actual
+    1. tokens dict explícito (legacy)
+    2. Authorization: Bearer <session_id> header (cross-domain)
+    3. Cookie gemelo_session_id
     Lanza 401 si no hay token.
     """
-    # 1. dict explícito (legacy / admin)
+    # 1. dict explícito (legacy)
     if tokens:
         t = tokens.get("access_token")
         if t:
             return t
- 
-    # 2. Cookie de sesión
+
     if request:
+        # 2. Authorization: Bearer <session_id> header
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            sid_from_header = auth_header[7:].strip()
+            if sid_from_header:
+                t = get_access_token(sid_from_header)
+                if t:
+                    return t
+
+        # 3. Cookie de sesión
         sid = _extract_session_id(request)
         if sid:
             t = get_access_token(sid)
             if t:
                 return t
- 
+
     raise HTTPException(
         status_code=401,
         detail=(
@@ -49,8 +59,8 @@ def _resolve_token(request: Optional[Request], tokens: Optional[Dict[str, Any]])
             "o accede desde Brightspace mediante LTI."
         ),
     )
- 
- 
+
+
 class BrightspaceClient:
     def __init__(
         self,
@@ -61,17 +71,17 @@ class BrightspaceClient:
         self.lp_version   = os.getenv("BRIGHTSPACE_LP_VERSION",    "1.50")
         self.grade_version = os.getenv("BRIGHTSPACE_GRADE_VERSION", "1.50")
         self.lo_version    = os.getenv("BRIGHTSPACE_LO_VERSION",    "1.92")
- 
+
         self._tokens  = tokens or {}
         self._request = request
- 
+
         if not self.base_url:
             raise RuntimeError("Falta BRIGHTSPACE_BASE_URL en variables de entorno")
- 
+
     def _auth_headers(self) -> Dict[str, str]:
         token = _resolve_token(self._request, self._tokens)
         return {"Authorization": f"Bearer {token}"}
- 
+
     @staticmethod
     def _ensure_json(r: httpx.Response, url: str) -> None:
         if r.status_code != 200:
@@ -83,7 +93,7 @@ class BrightspaceClient:
             raise RuntimeError(
                 f"Respuesta no JSON ({r.status_code}) en {url}: {r.text[:300]}"
             )
- 
+
     async def _request_json(
         self,
         method: str,
@@ -98,7 +108,7 @@ class BrightspaceClient:
             )
         self._ensure_json(r, url)
         return r.json()
- 
+
     @staticmethod
     def _as_list_of_dicts(data: JsonType) -> List[Dict[str, Any]]:
         if isinstance(data, list):
@@ -109,13 +119,13 @@ class BrightspaceClient:
                 if isinstance(v, list):
                     return [x for x in v if isinstance(x, dict)]
         return []
- 
+
     # ── Gradebook ─────────────────────────────────────────────────────────────
     async def list_grade_items(self, orgUnitId: int) -> List[Dict[str, Any]]:
         url = f"{self.base_url}/d2l/api/le/{self.grade_version}/{orgUnitId}/grades/"
         data = await self._request_json("GET", url)
         return self._as_list_of_dicts(data)
- 
+
     async def get_grade_value(
         self, orgUnitId: int, gradeObjectId: int, userId: int
     ) -> Dict[str, Any]:
@@ -125,7 +135,7 @@ class BrightspaceClient:
         )
         data = await self._request_json("GET", url)
         return data if isinstance(data, dict) else {"data": data}
- 
+
     async def list_grade_values_for_user(
         self, orgUnitId: int, userId: int
     ) -> List[Dict[str, Any]]:
@@ -135,7 +145,7 @@ class BrightspaceClient:
         )
         data = await self._request_json("GET", url)
         return self._as_list_of_dicts(data)
- 
+
     # ── Classlist / Dropbox ───────────────────────────────────────────────────
     async def list_classlist(self, orgUnitId: int) -> List[Dict[str, Any]]:
         url = (
@@ -143,14 +153,14 @@ class BrightspaceClient:
         )
         data = await self._request_json("GET", url)
         return self._as_list_of_dicts(data)
- 
+
     async def list_dropbox_folders(self, orgUnitId: int) -> JsonType:
         url = (
             f"{self.base_url}/d2l/api/le/{self.lp_version}/{orgUnitId}"
             f"/dropbox/folders/"
         )
         return await self._request_json("GET", url)
- 
+
     async def list_dropbox_submissions_for_user(
         self,
         orgUnitId: int,
@@ -172,7 +182,7 @@ class BrightspaceClient:
             except Exception:
                 continue
         return result
- 
+
     async def get_dropbox_rubric_assessment(
         self,
         orgUnitId: int,
@@ -190,7 +200,7 @@ class BrightspaceClient:
         }
         data = await self._request_json("GET", url, params=params)
         return data if isinstance(data, dict) else {"data": data}
- 
+
     # ── Learning Outcomes ─────────────────────────────────────────────────────
     async def list_outcome_sets(self, orgUnitId: int) -> JsonType:
         url = (
@@ -198,8 +208,8 @@ class BrightspaceClient:
             f"/lo/outcomeSets/"
         )
         return await self._request_json("GET", url)
- 
- 
+
+
 # ── Dependency FastAPI ────────────────────────────────────────────────────────
 def get_brightspace_client(request: Request) -> BrightspaceClient:
     """

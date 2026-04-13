@@ -2,10 +2,11 @@
   "family": "default-gemelo-digital-api",
   "executionRoleArn": "arn:aws:iam::718624265053:role/service-role/ecsTaskExecutionRole",
   "networkMode": "awsvpc",
+  
   "containerDefinitions": [
     {
       "name": "Main",
-      "image": "718624265053.dkr.ecr.us-east-1.amazonaws.com/gemelo-backend@sha256:f9daf4e830b1f29956782567716a02dc40e11de02fdeb9ba0044489a4474a72b",
+      "image": "718624265053.dkr.ecr.us-east-1.amazonaws.com/gemelo-backend:latest",
       "cpu": 1024,
       "memory": 2048,
       "memoryReservation": 2048,
@@ -20,6 +21,8 @@
       "essential": true,
       "command": [],
       "environment": [
+        { "name": "ELEVENLABS_API_KEY", "value": "sk_7844a11273a93403a35da574e314338d66e51417d79ed494" },
+        { "name": "ELEVENLABS_VOICE_ID", "value": "pFZP5JQG7iQjIQuC4Bku" },
         {
           "name": "BRIGHTSPACE_SCOPE",
           "value": "core:*:* Application:*:* Data:*:* grades:gradeobjects:read grades:grades:read outcomes:sets:read content:modules:read"

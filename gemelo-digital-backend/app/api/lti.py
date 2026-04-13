@@ -321,14 +321,24 @@ async def lti_launch(request: Request):
     cookie_val = _make_session_cookie(session)
 
     org = session.get("orgUnitId") or ""
-    redirect_to = f"{FRONTEND_BASE_URL}/?orgUnitId={org}"
 
-    resp = RedirectResponse(url=redirect_to, status_code=302)
+    # Redirigir al flujo OAuth con el orgUnitId del curso como parámetro de estado.
+    # OAuth obtendrá el access_token y redirigirá al frontend con ?orgUnitId={org}.
+    # Esto garantiza que el docente llegue directamente al curso correcto sin
+    # tener que seleccionarlo manualmente.
+    oauth_url = f"{TOOL_BASE_URL}/auth/brightspace/login"
+    if org:
+        oauth_url += f"?org_unit_id={org}"
+
+    resp = RedirectResponse(url=oauth_url, status_code=302)
+
+    # Guardamos la sesión LTI como referencia adicional (rol, nombre del contexto, etc.)
+    # aunque el token real de API viene del flujo OAuth.
     resp.set_cookie(
-        key="gemelo_session",
+        key="gemelo_lti_session",
         value=cookie_val,
         httponly=True,
-        secure=_tool_is_https(),  # True en trycloudflare
+        secure=_tool_is_https(),
         samesite="none",
         max_age=COOKIE_MAX_AGE,
         path="/",
