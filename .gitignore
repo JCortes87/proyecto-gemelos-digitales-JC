@@ -1,0 +1,40 @@
+# ── Secretos — NUNCA commitear ──────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+gemelo-digital-backend/certs/
+gemelo-digital-backend/keys/
+gemelo-digital-backend/app/keys/
+
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ── Alembic — solo ignorar cache, NO las migraciones ─────────────────────────
+# (las migraciones en alembic/versions/ SÍ se commitean)
+
+# ── OS ───────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── IDE ──────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── Logs / cobertura ─────────────────────────────────────────────────────────
+*.log
+.coverage
+htmlcov/
