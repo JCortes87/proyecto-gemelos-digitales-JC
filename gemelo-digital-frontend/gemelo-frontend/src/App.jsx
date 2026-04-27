@@ -1657,7 +1657,7 @@ const ONBOARDING_STEPS = [
     icon: "🎓",
     desc: "Tu asistente académico inteligente. Aquí puedes monitorear el desempeño de tus estudiantes en tiempo real, identificar riesgos y tomar decisiones de acompañamiento.",
     highlight: null,
-    voice: (name) => `Bienvenido a G.D${name ? ", " + name : ""}. Tu asistente académico inteligente para el seguimiento de tus estudiantes.`,
+    voice: (name) => `Bienvenido a ge de${name ? ", " + name : ""}. Tu asistente académico inteligente para el seguimiento de tus estudiantes.`,
   },
   {
     id: "dashboard",
