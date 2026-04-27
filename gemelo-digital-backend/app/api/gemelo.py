@@ -136,7 +136,7 @@ async def gemelo_course_overview(
     fresh_max_minutes: int = Query(
         30,
         ge=0,
-        le=1440,
+        le=525600,  # 1 ano — escape para forzar DB con data muy vieja en pruebas
         description="Edad maxima (minutos) para servir desde DB. 0 = forzar Brightspace.",
     ),
     svc: GemeloService = Depends(get_service),
@@ -178,6 +178,10 @@ async def gemelo_course_overview(
         if isinstance(bs_result, dict):
             bs_result.setdefault("source", "brightspace")
         return bs_result
+    except HTTPException:
+        # Propaga 401/403/etc. del fallback Brightspace tal cual,
+        # sin disfrazarlos como 500.
+        raise
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
