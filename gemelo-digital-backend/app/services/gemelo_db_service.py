@@ -45,6 +45,7 @@ async def build_course_overview_from_db(orgUnitId: int) -> dict:
                 "studentsCount": 0,
                 "hasData": False,
                 "source": "db",
+                "lastSyncAt": None,
                 "macroCompetencies": [],
                 "courseGradebook": {
                     "avgCurrentPerformancePct": None,
@@ -83,6 +84,10 @@ async def build_course_overview_from_db(orgUnitId: int) -> dict:
 
         avg_graded = round(sum(r.graded_items_count for r in rows) / students_count, 2)
         avg_total  = round(sum(r.total_items_count  for r in rows) / students_count, 2)
+
+        # Edad de los datos: max(updated_at) sobre los snapshots del curso.
+        last_sync_at = max((r.updated_at for r in rows if r.updated_at), default=None)
+        last_sync_at_iso = last_sync_at.isoformat() if last_sync_at else None
 
         risk_dist = {"alto": 0, "medio": 0, "bajo": 0, "pending": 0}
         students_at_risk = []
@@ -201,6 +206,7 @@ async def build_course_overview_from_db(orgUnitId: int) -> dict:
             "studentsCount": students_count,
             "hasData": True,
             "source": "db",
+            "lastSyncAt": last_sync_at_iso,
             "macroCompetencies": [],
             "courseGradebook": {
                 "avgCurrentPerformancePct": avg_perf,

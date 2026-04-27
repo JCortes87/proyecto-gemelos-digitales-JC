@@ -14,6 +14,10 @@ if TYPE_CHECKING:
     from app.services.brightspace_client import BrightspaceClient
 from app.services.gemelo_service import GemeloService
 
+# L2 read-path: lectura DB-first y chequeo de edad
+from app.services.gemelo_db_service import build_course_overview_from_db
+from app.services.db_freshness import is_fresh
+
 logger = logging.getLogger("uvicorn.error")
 
 router = APIRouter(prefix="/gemelo", tags=["gemelo"])
@@ -129,10 +133,51 @@ async def gemelo_course_student(
 @router.get("/course/{orgUnitId}/overview")
 async def gemelo_course_overview(
     orgUnitId: int,
+    fresh_max_minutes: int = Query(
+        30,
+        ge=0,
+        le=1440,
+        description="Edad maxima (minutos) para servir desde DB. 0 = forzar Brightspace.",
+    ),
     svc: GemeloService = Depends(get_service),
 ):
+    """
+    Estrategia DB-first con fallback a Brightspace (Fase 5 — L2 read-path):
+
+    1. Intenta leer desde Postgres (build_course_overview_from_db).
+       - Si tiene datos Y `lastSyncAt` esta dentro de fresh_max_minutes,
+         responde con `source="db"`. Tiempo: <50ms tipico.
+    2. Si la DB no tiene datos frescos (o el lookup falla), cae al path
+       original que llama Brightspace y responde con `source="brightspace"`.
+       Tiempo: 1-3s tipico.
+
+    El cliente puede forzar el bypass con `?fresh_max_minutes=0`.
+    """
+    # Intento 1: DB-first
     try:
-        return await svc.build_course_overview(orgUnitId)
+        db_result = await build_course_overview_from_db(orgUnitId)
+        if db_result.get("hasData") and is_fresh(
+            db_result.get("lastSyncAt"), fresh_max_minutes
+        ):
+            db_result["source"] = "db"
+            logger.info(
+                "overview ou=%s served from DB (lastSyncAt=%s)",
+                orgUnitId, db_result.get("lastSyncAt"),
+            )
+            return db_result
+    except Exception as e:
+        logger.warning(
+            "DB-first lookup failed for overview ou=%s: %s — falling back to Brightspace",
+            orgUnitId, e,
+        )
+
+    # Fallback: Brightspace (path original)
+    logger.info("overview ou=%s falling back to Brightspace", orgUnitId)
+    try:
+        bs_result = await svc.build_course_overview(orgUnitId)
+        if isinstance(bs_result, dict):
+            bs_result.setdefault("source", "brightspace")
+        return bs_result
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
