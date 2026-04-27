@@ -5,18 +5,63 @@ from typing import Any, Dict, List, Optional
 import asyncio
 from collections import defaultdict
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 
 from app.config_loader import load_course_bundle
-from app.services.brightspace_client import get_brightspace_client
-from typing import TYPE_CHECKING
-if TYPE_CHECKING:
-    from app.services.brightspace_client import BrightspaceClient
+from app.services.brightspace_client import BrightspaceClient, get_brightspace_client
 from app.services.gemelo_service import GemeloService
+from app.services.sync_service import SyncService
 
 # L2 read-path: lectura DB-first y chequeo de edad
 from app.services.gemelo_db_service import build_course_overview_from_db
 from app.services.db_freshness import is_fresh
+
+
+# B-1 (lazy write-through): tras un fallback Brightspace exitoso,
+# refresca los snapshots en DB en background para que la proxima
+# visita al endpoint caiga al path DB-first (rapido).
+async def _refresh_overview_db_bg(orgUnitId: int, access_token: str) -> None:
+    """
+    Tarea de background ejecutada DESPUES de devolver la respuesta al
+    cliente. Usa el access_token capturado en el momento del request
+    (no depende del Request original que ya cerro su scope).
+    """
+    try:
+        bs = BrightspaceClient(tokens={"access_token": access_token})
+        sync_svc = SyncService(bs)
+        result = await sync_svc.sync_student_metric_snapshots(orgUnitId)
+        logger.info(
+            "B-1 background refresh ou=%s OK: %s",
+            orgUnitId, str(result)[:200],
+        )
+    except Exception as e:
+        logger.warning(
+            "B-1 background refresh ou=%s FAILED: %s",
+            orgUnitId, e,
+        )
+
+
+def _extract_access_token_from_client(bs: BrightspaceClient) -> Optional[str]:
+    """
+    Obtiene el access_token resuelto de un BrightspaceClient activo,
+    para pasarselo a una background task. Devuelve None si no se puede
+    resolver (en cuyo caso no programamos el refresh).
+    """
+    # Path explicito: tokens dict pasado al constructor
+    if bs._tokens:
+        t = bs._tokens.get("access_token")
+        if t:
+            return t
+
+    # Path sesion: extraemos via _auth_headers que llama _resolve_token
+    try:
+        headers = bs._auth_headers()
+        auth = headers.get("Authorization", "")
+        if auth.startswith("Bearer "):
+            return auth[7:].strip() or None
+    except Exception:
+        return None
+    return None
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -133,6 +178,7 @@ async def gemelo_course_student(
 @router.get("/course/{orgUnitId}/overview")
 async def gemelo_course_overview(
     orgUnitId: int,
+    background_tasks: BackgroundTasks,
     fresh_max_minutes: int = Query(
         30,
         ge=0,
@@ -142,7 +188,8 @@ async def gemelo_course_overview(
     svc: GemeloService = Depends(get_service),
 ):
     """
-    Estrategia DB-first con fallback a Brightspace (Fase 5 — L2 read-path):
+    Estrategia DB-first con fallback a Brightspace y write-through lazy
+    (Fase 5 — L2 read-path + B-1):
 
     1. Intenta leer desde Postgres (build_course_overview_from_db).
        - Si tiene datos Y `lastSyncAt` esta dentro de fresh_max_minutes,
@@ -150,6 +197,10 @@ async def gemelo_course_overview(
     2. Si la DB no tiene datos frescos (o el lookup falla), cae al path
        original que llama Brightspace y responde con `source="brightspace"`.
        Tiempo: 1-3s tipico.
+    3. (B-1 lazy write-through) Tras un fallback exitoso, programa una
+       BackgroundTask que re-sincroniza los snapshots con la sesion del
+       usuario actual. La proxima visita encuentra DB fresca y va por el
+       path rapido. Self-healing sin scheduler.
 
     El cliente puede forzar el bypass con `?fresh_max_minutes=0`.
     """
@@ -177,6 +228,32 @@ async def gemelo_course_overview(
         bs_result = await svc.build_course_overview(orgUnitId)
         if isinstance(bs_result, dict):
             bs_result.setdefault("source", "brightspace")
+
+        # B-1 (lazy write-through): tras un fallback exitoso, programa
+        # un refresh de snapshots usando el token del usuario actual.
+        # La respuesta al cliente no se demora — la task corre despues.
+        try:
+            access_token = _extract_access_token_from_client(svc.bs)
+            if access_token:
+                background_tasks.add_task(
+                    _refresh_overview_db_bg, orgUnitId, access_token
+                )
+                logger.info(
+                    "B-1 scheduled background DB refresh for ou=%s",
+                    orgUnitId,
+                )
+            else:
+                logger.warning(
+                    "B-1 no access_token resoluble para ou=%s; skip refresh",
+                    orgUnitId,
+                )
+        except Exception as e:
+            # Errores aqui no deben afectar la respuesta al cliente
+            logger.warning(
+                "B-1 could not schedule background refresh ou=%s: %s",
+                orgUnitId, e,
+            )
+
         return bs_result
     except HTTPException:
         # Propaga 401/403/etc. del fallback Brightspace tal cual,
