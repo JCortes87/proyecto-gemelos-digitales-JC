@@ -28,6 +28,13 @@ from app.api.gemelo import router as gemelo_router
 from app.api.lti_keys import get_jwks
 from app.api import lti
 
+# ── Capa Postgres (Fase 3: integración manual, scheduler OFF) ─────────────────
+from sqlalchemy import text
+from app.db.session import engine
+from app.services.brightspace_client import BrightspaceClient, get_brightspace_client
+from app.services.sync_service import SyncService
+from app.services.gemelo_db_service import build_course_overview_from_db
+
 logger = logging.getLogger("uvicorn.error")
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -242,6 +249,53 @@ def debug_tokens(request: Request):
         "user_name": s.get("user_name")  if s else None,
         "scope":     s.get("scope")      if s else None,
     }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Postgres: conectividad, sync manual, read-path DB (Fase 3 — scheduler OFF)
+# ──────────────────────────────────────────────────────────────────────────────
+@app.get("/debug/db")
+def debug_db():
+    """Ping de conectividad a Postgres."""
+    with engine.connect() as conn:
+        result = conn.execute(text("SELECT 1")).scalar()
+    return {"db_ok": result == 1}
+
+
+@app.post("/debug/sync/classlist/{orgUnitId}")
+async def debug_sync_classlist(
+    orgUnitId: int,
+    bs: BrightspaceClient = Depends(get_brightspace_client),
+):
+    """Sync manual de classlist (estudiantes + enrollments). Requiere sesión activa."""
+    svc = SyncService(bs)
+    return await svc.sync_classlist(orgUnitId)
+
+
+@app.post("/debug/sync/master/{orgUnitId}")
+async def debug_sync_master(
+    orgUnitId: int,
+    bs: BrightspaceClient = Depends(get_brightspace_client),
+):
+    """Sync completo del curso. Requiere sesión activa."""
+    svc = SyncService(bs)
+    return await svc.sync_master(orgUnitId)
+
+
+@app.post("/debug/sync/student-metrics/{orgUnitId}")
+async def debug_sync_student_metrics(
+    orgUnitId: int,
+    bs: BrightspaceClient = Depends(get_brightspace_client),
+):
+    """Calcula y persiste snapshots de métricas por estudiante. Requiere sesión activa."""
+    svc = SyncService(bs)
+    return await svc.sync_student_metric_snapshots(orgUnitId)
+
+
+@app.get("/debug/course/{orgUnitId}/overview-db")
+async def debug_overview_db(orgUnitId: int):
+    """Overview del curso leído directamente de Postgres (L2 read-path DB-first)."""
+    return await build_course_overview_from_db(orgUnitId)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
