@@ -1653,11 +1653,11 @@ function CoverageBars({ donePct, pendingPct, overduePct, openPct }) {
 const ONBOARDING_STEPS = [
   {
     id: "welcome",
-    title: "Bienvenido a Gemelo Digital",
+    title: "Bienvenido a G.D",
     icon: "🎓",
     desc: "Tu asistente académico inteligente. Aquí puedes monitorear el desempeño de tus estudiantes en tiempo real, identificar riesgos y tomar decisiones de acompañamiento.",
     highlight: null,
-    voice: (name) => `Bienvenido a Gemelo Digital${name ? ", " + name : ""}. Tu asistente académico inteligente para el seguimiento de tus estudiantes.`,
+    voice: (name) => `Bienvenido a G.D${name ? ", " + name : ""}. Tu asistente académico inteligente para el seguimiento de tus estudiantes.`,
   },
   {
     id: "dashboard",
@@ -1861,7 +1861,7 @@ function LoginScreen({ orgUnitId }) {
           }}>CESA</div>
           <div style={{ textAlign: "left" }}>
             <div style={{ fontSize: 16, fontWeight: 900, color: "var(--text)", letterSpacing: "-0.02em" }}>
-              Gemelo Digital
+              G.D
             </div>
             <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
               Vista Docente · v2.0325
@@ -1919,7 +1919,7 @@ function LoginScreen({ orgUnitId }) {
         }}>
           <p style={{ fontSize: 11, color: "var(--brand)", fontWeight: 700, margin: 0 }}>
             💡 También puedes acceder directamente desde tu curso en Brightspace
-            usando el enlace de la herramienta Gemelo Digital.
+            usando el enlace de la herramienta G.D.
           </p>
         </div>
       </div>
@@ -1927,7 +1927,7 @@ function LoginScreen({ orgUnitId }) {
   );
 }
 
-function CesaLoader({ title = "CESA · Gemelo Digital v2.0", subtitle = "Cargando tablero..." }) {
+function CesaLoader({ title = "CESA · G.D v2.0", subtitle = "Cargando tablero..." }) {
   React.useEffect(() => {
     injectStyles();
   }, []);
@@ -3177,7 +3177,7 @@ function StudentCard({ s, onOpen, weakestMacro }) {
         style={{ width: "100%", fontSize: 12, padding: "7px 0", borderRadius: 10, textAlign: "center" }}
         onClick={(e) => { e.stopPropagation(); onOpen(s); }}
       >
-        Ver gemelo digital →
+        Ver G.D →
       </button>
     </div>
   );
@@ -3335,7 +3335,7 @@ function RoutesView({ studentRows, overview, courseInfo, thresholds, onSelectStu
       {/* Page header */}
       <div>
         <div style={{ fontSize: 10, fontWeight: 800, color: "var(--brand)", textTransform: "uppercase", letterSpacing: "0.12em", marginBottom: 4 }}>
-          Gemelo Digital · Rutas de atención
+          G.D · Rutas de atención
         </div>
         <h1 style={{ fontSize: isMobile ? 20 : 26, fontWeight: 900, color: "var(--text)", letterSpacing: "-0.02em", lineHeight: 1.1 }}>
           {courseInfo?.Name || "Curso activo"}
@@ -3467,7 +3467,7 @@ function AppSidebar({ activeTab, setActiveTab, currentCourseName, mobileOpen, on
         <div className="sidebar-logo">
           <div className="sidebar-logo-icon" style={{ fontSize: 12, letterSpacing: "0.01em" }}>CESA</div>
           <div className="sidebar-logo-text">
-            <div className="sidebar-logo-name">CESA · Gemelo</div>
+            <div className="sidebar-logo-name">CESA · G.D</div>
             <div className="sidebar-logo-sub">Vista Docente</div>
           </div>
         </div>
@@ -3499,7 +3499,7 @@ function AppSidebar({ activeTab, setActiveTab, currentCourseName, mobileOpen, on
             </div>
           )}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 2px" }}>
-            <span style={{ fontSize: 9, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Gemelo Digital</span>
+            <span style={{ fontSize: 9, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.08em" }}>G.D</span>
             <span style={{ fontSize: 9, fontWeight: 700, color: "var(--muted)", background: "var(--bg)", padding: "2px 7px", borderRadius: 99, border: "1px solid var(--border)" }}>v2.0325</span>
           </div>
         </div>
@@ -5139,7 +5139,7 @@ const contentKpis = useMemo(() => {
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
             <div style={{ width: 40, height: 40, borderRadius: 10, background: "var(--brand)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 13, fontWeight: 900 }}>CESA</div>
             <div>
-              <div style={{ fontSize: 15, fontWeight: 900, color: "var(--text)" }}>Gemelo Digital</div>
+              <div style={{ fontSize: 15, fontWeight: 900, color: "var(--text)" }}>G.D</div>
               <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600 }}>
                 Hola, {authUser?.user_name?.split(" ")[0] || "docente"} — selecciona tu curso
               </div>
@@ -5275,7 +5275,7 @@ const contentKpis = useMemo(() => {
           {/* Description */}
           <p style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.6, margin: "0 0 24px" }}>
             {isNoAccess
-              ? `No tienes rol de instructor o coordinador en el curso ${orgUnitId}. Solo los docentes asignados pueden ver el Gemelo Digital de un curso.`
+              ? `No tienes rol de instructor o coordinador en el curso ${orgUnitId}. Solo los docentes asignados pueden ver el G.D de un curso.`
               : isNotFound
               ? `El curso con ID ${orgUnitId} no existe en Brightspace o fue eliminado.`
               : err
@@ -5379,7 +5379,7 @@ const contentKpis = useMemo(() => {
           <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
             <div>
               <div style={{ fontSize: 10, fontWeight: 800, color: "var(--brand)", textTransform: "uppercase", letterSpacing: "0.12em", marginBottom: 4 }}>
-                Gemelo Digital · Vista Docente
+                G.D · Vista Docente
               </div>
               <h1 style={{ fontSize: isMobile ? 22 : 28, fontWeight: 900, color: "var(--text)", letterSpacing: "-0.03em", lineHeight: 1.1 }}>
                 {courseInfo?.Name || (orgUnitId ? `Curso ${orgUnitId}` : "Selecciona un curso")}
@@ -6237,7 +6237,7 @@ const contentKpis = useMemo(() => {
           setStudentLoading(false);
         }}
         title={selectedStudent ? `${selectedStudent.displayName}` : "Estudiante"}
-        subtitle={`ID ${selectedStudent?.userId ?? "—"} · Gemelo Digital · Vista docente`}
+        subtitle={`ID ${selectedStudent?.userId ?? "—"} · G.D · Vista docente`}
       >
         {studentLoading ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 12, alignItems: "center", justifyContent: "center", paddingTop: 40 }}>
@@ -6246,7 +6246,7 @@ const contentKpis = useMemo(() => {
               <span className="cesa-water-text__fill" aria-hidden="true" style={{ fontSize: 36 }}>CESA</span>
               <span className="cesa-water-text__wave" aria-hidden="true" />
             </div>
-            <div style={{ color: "var(--muted)", fontSize: 13 }}>Consolidando gemelo digital…</div>
+            <div style={{ color: "var(--muted)", fontSize: 13 }}>Consolidando G.D…</div>
           </div>
         ) : studentErr ? (
           <Card title="Error" right={<StatusBadge status="critico" />}>
