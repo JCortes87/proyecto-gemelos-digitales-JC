@@ -8,8 +8,6 @@ from app.db.session import SessionLocal
 
 class SyncTrackingService:
     def start_run(self, sync_type: str, org_unit_id: int | None = None) -> int:
-        if SessionLocal is None:
-            raise RuntimeError("DATABASE_URL no configurado")
         db = SessionLocal()
         try:
             run = SyncRun(
@@ -37,8 +35,6 @@ class SyncTrackingService:
         message: str | None = None,
         watermark: str | None = None,
     ) -> None:
-        if SessionLocal is None:
-            return
         db = SessionLocal()
         try:
             run = db.get(SyncRun, run_id)
@@ -84,8 +80,6 @@ class SyncTrackingService:
         entity_type: str | None = None,
         entity_id: str | None = None,
     ) -> None:
-        if SessionLocal is None:
-            return
         db = SessionLocal()
         try:
             err = SyncError(

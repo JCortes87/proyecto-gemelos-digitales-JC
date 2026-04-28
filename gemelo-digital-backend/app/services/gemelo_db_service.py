@@ -6,14 +6,17 @@ from app.db.session import SessionLocal
 
 async def build_course_overview_from_db(orgUnitId: int) -> dict:
     """
-    Lee el overview agregado del curso directamente de Postgres (L2 read-path).
+    Lee el overview agregado del curso directamente desde Postgres,
+    sin tocar la API de Brightspace.
 
-    Depende de snapshots previamente poblados por
-    SyncService.sync_student_metric_snapshots(orgUnitId).
+    Devuelve la misma forma que `GemeloService.build_course_overview`
+    (medias del gradebook, distribucion de riesgo, alertas, etc.) pero
+    armada a partir de los snapshots persistidos.
+
+    Depende de que `SyncService.sync_student_metric_snapshots(orgUnitId)`
+    haya corrido recientemente. Si no hay snapshots para ese curso,
+    retorna `hasData: False`.
     """
-    if SessionLocal is None:
-        raise RuntimeError("DATABASE_URL no configurado — DB-first path no disponible")
-
     db = SessionLocal()
     try:
         rows = db.execute(
@@ -79,15 +82,16 @@ async def build_course_overview_from_db(orgUnitId: int) -> dict:
                 return None
             return round(sum(nums) / len(nums), 2)
 
-        avg_perf    = _avg([r.current_performance_pct for r in rows])
-        avg_cov     = _avg([r.coverage_pct for r in rows])
-        avg_pending = _avg([r.pending_submitted_weight_pct for r in rows]) or 0.0
-        avg_not_sub = _avg([r.not_submitted_weight_pct for r in rows]) or 0.0
-        avg_open    = _avg([r.open_weight_pct for r in rows]) or 0.0
+        avg_perf     = _avg([r.current_performance_pct for r in rows])
+        avg_cov      = _avg([r.coverage_pct for r in rows])
+        avg_pending  = _avg([r.pending_submitted_weight_pct for r in rows]) or 0.0
+        avg_not_sub  = _avg([r.not_submitted_weight_pct for r in rows]) or 0.0
+        avg_open     = _avg([r.open_weight_pct for r in rows]) or 0.0
 
         avg_graded = round(sum(r.graded_items_count for r in rows) / students_count, 2)
         avg_total  = round(sum(r.total_items_count  for r in rows) / students_count, 2)
 
+        # Edad de los datos: max(updated_at) sobre los snapshots del curso.
         last_sync_at = max((r.updated_at for r in rows if r.updated_at), default=None)
         last_sync_at_iso = last_sync_at.isoformat() if last_sync_at else None
 
@@ -127,18 +131,18 @@ async def build_course_overview_from_db(orgUnitId: int) -> dict:
 
             if is_at_risk:
                 students_at_risk.append({
-                    "userId":                    r.brightspace_user_id,
-                    "displayName":               student_names.get(r.brightspace_user_id, str(r.brightspace_user_id)),
-                    "risk":                      risk,
-                    "currentPerformancePct":     r.current_performance_pct,
-                    "coveragePct":               r.coverage_pct,
-                    "notSubmittedWeightPct":     r.not_submitted_weight_pct,
-                    "pendingSubmittedWeightPct": r.pending_submitted_weight_pct,
-                    "pendingSubmittedCount":     r.pending_submitted_count,
-                    "overdueCount":              r.overdue_count,
-                    "openCount":                 r.open_count,
-                    "gradedItemsCount":          r.graded_items_count,
-                    "totalItemsCount":           r.total_items_count,
+                    "userId":                     r.brightspace_user_id,
+                    "displayName":                student_names.get(r.brightspace_user_id, str(r.brightspace_user_id)),
+                    "risk":                       risk,
+                    "currentPerformancePct":      r.current_performance_pct,
+                    "coveragePct":                r.coverage_pct,
+                    "notSubmittedWeightPct":      r.not_submitted_weight_pct,
+                    "pendingSubmittedWeightPct":  r.pending_submitted_weight_pct,
+                    "pendingSubmittedCount":      r.pending_submitted_count,
+                    "overdueCount":               r.overdue_count,
+                    "openCount":                  r.open_count,
+                    "gradedItemsCount":           r.graded_items_count,
+                    "totalItemsCount":            r.total_items_count,
                 })
 
         def _pct(count: int) -> float:

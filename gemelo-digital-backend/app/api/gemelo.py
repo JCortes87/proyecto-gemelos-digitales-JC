@@ -12,37 +12,55 @@ from app.services.brightspace_client import BrightspaceClient, get_brightspace_c
 from app.services.gemelo_service import GemeloService
 from app.services.sync_service import SyncService
 
-# L2 read-path: lectura DB-first y chequeo de edad
+#|---------- Lectura desde Postgres con chequeo de frescura de los datos ----------|
 from app.services.gemelo_db_service import build_course_overview_from_db
 from app.services.db_freshness import is_fresh
 
 
+#|---------- Persistir snapshots tras fallback a Brightspace (background task) ----------|
 async def _refresh_overview_db_bg(orgUnitId: int, access_token: str) -> None:
     """
-    Tarea de background ejecutada DESPUÉS de devolver la respuesta al cliente.
-    Usa el access_token capturado en el momento del request.
+    Tarea de background que se ejecuta DESPUES de devolver la respuesta
+    al cliente. Re-sincroniza los snapshots de metricas del curso usando
+    el access_token capturado en el momento del request.
+
+    Se dispara cuando el endpoint /overview tuvo que llamar a Brightspace
+    porque los datos en Postgres estaban viejos. Tras la respuesta al
+    cliente, esta tarea actualiza la DB para que la proxima peticion al
+    mismo curso encuentre datos frescos y se sirva rapido sin volver a
+    Brightspace.
+
+    Recibe el token como string (no el Request original) para no depender
+    del scope de la request, que ya termino al ejecutarse esta tarea.
     """
     try:
         bs = BrightspaceClient(tokens={"access_token": access_token})
         sync_svc = SyncService(bs)
-        # sync_classlist primero para que la tabla students tenga display_name
-        # (de lo contrario studentsAtRisk muestra el userId en vez del nombre)
-        try:
-            await sync_svc.sync_classlist(orgUnitId)
-        except Exception as e:
-            logger.warning("B-1 sync_classlist ou=%s FAILED: %s", orgUnitId, e)
         result = await sync_svc.sync_student_metric_snapshots(orgUnitId)
-        logger.info("B-1 background refresh ou=%s OK: %s", orgUnitId, str(result)[:200])
+        logger.info(
+            "Refresh DB en background completado ou=%s: %s",
+            orgUnitId, str(result)[:200],
+        )
     except Exception as e:
-        logger.warning("B-1 background refresh ou=%s FAILED: %s", orgUnitId, e)
+        logger.warning(
+            "Refresh DB en background fallo ou=%s: %s",
+            orgUnitId, e,
+        )
 
 
 def _extract_access_token_from_client(bs: BrightspaceClient) -> Optional[str]:
-    """Obtiene el access_token del BrightspaceClient activo para pasarlo a background tasks."""
+    """
+    Obtiene el access_token resuelto de un BrightspaceClient activo,
+    para pasarselo a una background task. Devuelve None si no se puede
+    resolver (en cuyo caso no programamos el refresh).
+    """
+    # Path explicito: tokens dict pasado al constructor
     if bs._tokens:
         t = bs._tokens.get("access_token")
         if t:
             return t
+
+    # Path sesion: extraemos via _auth_headers que llama _resolve_token
     try:
         headers = bs._auth_headers()
         auth = headers.get("Authorization", "")
@@ -171,52 +189,88 @@ async def gemelo_course_overview(
     fresh_max_minutes: int = Query(
         30,
         ge=0,
-        le=525600,
-        description="Edad máxima (minutos) para servir desde DB. 0 = forzar Brightspace.",
+        le=525600,  # 1 ano — escape para forzar DB con data muy vieja en pruebas
+        description="Edad maxima (minutos) para servir desde DB. 0 = forzar Brightspace.",
     ),
     svc: GemeloService = Depends(get_service),
 ):
     """
-    Estrategia DB-first con fallback a Brightspace y write-through lazy (B-1):
+    Devuelve el overview agregado del curso (medias del gradebook,
+    distribucion de riesgo, alertas, etc.) priorizando lectura desde
+    Postgres y cayendo a Brightspace solo cuando es necesario.
 
-    1. Intenta leer desde Postgres. Si tiene datos frescos, responde con source="db".
-    2. Si la DB no tiene datos frescos, llama Brightspace (source="brightspace").
-    3. Tras fallback exitoso, programa background sync para refrescar la DB.
+    Flujo:
 
-    Forzar bypass: ?fresh_max_minutes=0
+    1. Lee los snapshots desde Postgres. Si hay datos y `lastSyncAt`
+       esta dentro de `fresh_max_minutes`, responde con `source="db"`.
+       Tiempo tipico: < 50 ms.
+
+    2. Si la DB no tiene datos frescos (o el lookup falla), llama a
+       Brightspace para reconstruir el overview en vivo y responde
+       con `source="brightspace"`. Tiempo tipico: 1-3 s.
+
+    3. Tras un fallback exitoso a Brightspace, programa una tarea de
+       background que re-sincroniza los snapshots usando la sesion del
+       usuario actual. La proxima peticion al mismo curso encontrara
+       DB fresca y se servira rapida sin volver a Brightspace.
+
+    El cliente puede forzar el bypass de la cache con
+    `?fresh_max_minutes=0`.
     """
-    # Intento 1: DB-first
+    #|---------- Lectura rapida desde Postgres ----------|
     try:
         db_result = await build_course_overview_from_db(orgUnitId)
-        if db_result.get("hasData") and is_fresh(db_result.get("lastSyncAt"), fresh_max_minutes):
+        if db_result.get("hasData") and is_fresh(
+            db_result.get("lastSyncAt"), fresh_max_minutes
+        ):
             db_result["source"] = "db"
-            logger.info("overview ou=%s served from DB (lastSyncAt=%s)",
-                        orgUnitId, db_result.get("lastSyncAt"))
+            logger.info(
+                "overview ou=%s servido desde Postgres (lastSyncAt=%s)",
+                orgUnitId, db_result.get("lastSyncAt"),
+            )
             return db_result
     except Exception as e:
-        logger.warning("DB-first lookup failed for overview ou=%s: %s — falling back to Brightspace",
-                       orgUnitId, e)
+        logger.warning(
+            "overview ou=%s: lectura de Postgres fallo (%s); reconstruyendo desde Brightspace",
+            orgUnitId, e,
+        )
 
-    # Fallback: Brightspace (path original)
-    logger.info("overview ou=%s falling back to Brightspace", orgUnitId)
+    #|---------- Reconstruccion desde Brightspace + persistencia en background ----------|
+    logger.info("overview ou=%s reconstruyendo desde Brightspace", orgUnitId)
     try:
         bs_result = await svc.build_course_overview(orgUnitId)
         if isinstance(bs_result, dict):
             bs_result.setdefault("source", "brightspace")
 
-        # B-1: programa refresh de snapshots en background para la próxima visita
+        # Tras una llamada exitosa a Brightspace, persistimos los snapshots
+        # en background para acelerar la siguiente peticion al mismo curso.
+        # Errores aqui no afectan la respuesta al cliente.
         try:
             access_token = _extract_access_token_from_client(svc.bs)
             if access_token:
-                background_tasks.add_task(_refresh_overview_db_bg, orgUnitId, access_token)
-                logger.info("B-1 scheduled background DB refresh for ou=%s", orgUnitId)
+                background_tasks.add_task(
+                    _refresh_overview_db_bg, orgUnitId, access_token
+                )
+                logger.info(
+                    "overview ou=%s programado refresh DB en background",
+                    orgUnitId,
+                )
             else:
-                logger.warning("B-1 no access_token para ou=%s; skip refresh", orgUnitId)
+                logger.warning(
+                    "overview ou=%s sin access_token resoluble; no se programa refresh",
+                    orgUnitId,
+                )
         except Exception as e:
-            logger.warning("B-1 could not schedule background refresh ou=%s: %s", orgUnitId, e)
+            # Errores aqui no deben afectar la respuesta al cliente
+            logger.warning(
+                "overview ou=%s no se pudo programar refresh DB en background: %s",
+                orgUnitId, e,
+            )
 
         return bs_result
     except HTTPException:
+        # Propaga 401/403/etc. del fallback Brightspace tal cual,
+        # sin disfrazarlos como 500.
         raise
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -493,188 +547,6 @@ async def gemelo_learning_outcomes(
         return {"orgUnitId": orgUnitId, "outcomeSets": data}
     except Exception as e:
         _http500(e, "gemelo_learning_outcomes", orgUnitId=orgUnitId)
-
-
-@router.get("/course/{orgUnitId}/grade-items")
-async def gemelo_grade_items(
-    orgUnitId: int,
-    svc: GemeloService = Depends(get_service),
-):
-    """Return all grade items + dropbox folders in the course with their
-    due dates. Used by the frontend to build the course-wide due date calendar.
-
-    Merges TWO sources:
-    1. Grade items (gradebook columns) — may have DueDate/EndDate
-    2. Dropbox folders (assignments) — usually have DueDate set even when
-       the linked grade item does not (Brightspace UX puts DueDate on the
-       dropbox folder, not the grade item).
-
-    Both sources are linked via AssociatedTool.ToolItemId on grade items.
-
-    Returns:
-        {orgUnitId, count, items: [{id, name, weight, maxPoints, dueDate,
-                                    endDate, gradeType, source}]}
-    """
-    import asyncio
-
-    async def _safe_grade_items():
-        try:
-            raw = await svc.bs.list_grade_items(orgUnitId)
-            if isinstance(raw, dict):
-                return raw.get("Items") or raw.get("items") or []
-            return raw if isinstance(raw, list) else []
-        except Exception:
-            return []
-
-    async def _safe_dropbox_folders():
-        try:
-            raw = await svc.bs.list_dropbox_folders(orgUnitId)
-            if isinstance(raw, dict):
-                return raw.get("Items") or raw.get("items") or []
-            return raw if isinstance(raw, list) else []
-        except Exception:
-            return []
-
-    def _pick_dropbox_due_date(df: dict) -> Optional[str]:
-        """Extract a usable due/end date from a dropbox folder, trying several
-        fields because Brightspace stores dates in different places depending
-        on whether the teacher configured a real DueDate or only Availability."""
-        if not isinstance(df, dict):
-            return None
-        # Direct fields (older API shape)
-        direct = df.get("DueDate") or df.get("EndDate")
-        if direct:
-            return direct
-        # Newer API shape: Availability { StartDate, EndDate, DueDate }
-        availability = df.get("Availability") or {}
-        if isinstance(availability, dict):
-            for k in ("DueDate", "EndDate", "dueDate", "endDate"):
-                if availability.get(k):
-                    return availability[k]
-        # RestrictedDueDate etc.
-        for k in ("RestrictedDueDate", "SubmissionEndDate"):
-            if df.get(k):
-                return df[k]
-        return None
-
-    def _pick_dropbox_start_date(df: dict) -> Optional[str]:
-        """Extract the earliest visibility/availability date for a dropbox."""
-        if not isinstance(df, dict):
-            return None
-        direct = df.get("StartDate")
-        if direct:
-            return direct
-        availability = df.get("Availability") or {}
-        if isinstance(availability, dict):
-            for k in ("StartDate", "startDate"):
-                if availability.get(k):
-                    return availability[k]
-        return None
-
-    try:
-        grade_items, dropbox_folders = await asyncio.gather(
-            _safe_grade_items(),
-            _safe_dropbox_folders(),
-        )
-
-        # Build dropbox lookup by Id (and by GradeItemId for cross-ref)
-        dropbox_by_id = {}
-        dropbox_by_grade_item = {}
-        for df in dropbox_folders:
-            if not isinstance(df, dict):
-                continue
-            df_id = df.get("Id") or df.get("Identifier")
-            if df_id is not None:
-                dropbox_by_id[str(df_id)] = df
-            grade_item_id = df.get("GradeItemId")
-            if grade_item_id is not None:
-                dropbox_by_grade_item[str(grade_item_id)] = df
-
-        items = []
-        seen_dropbox_ids = set()
-
-        # 1. Grade items — try to enrich with dropbox folder due dates
-        for it in grade_items:
-            if not isinstance(it, dict):
-                continue
-            grade_id = it.get("Id") or it.get("Identifier")
-            name = it.get("Name")
-            due_date = it.get("DueDate")
-            end_date = it.get("EndDate")
-
-            # Try to find an associated dropbox folder via AssociatedTool
-            # Brightspace uses ToolId=1 OR ToolId=2000 for Dropbox depending on
-            # the API version. Try both.
-            associated = it.get("AssociatedTool") or {}
-            tool_item_id = associated.get("ToolItemId")
-            tool_id = associated.get("ToolId")
-            linked_dropbox = None
-            if tool_id in (1, 2000) and tool_item_id is not None:
-                linked_dropbox = dropbox_by_id.get(str(tool_item_id))
-            if not linked_dropbox and grade_id is not None:
-                linked_dropbox = dropbox_by_grade_item.get(str(grade_id))
-
-            start_date = None
-            if linked_dropbox:
-                seen_dropbox_ids.add(str(linked_dropbox.get("Id") or ""))
-                # Prefer dropbox due date if grade item doesn't have one
-                df_due = _pick_dropbox_due_date(linked_dropbox)
-                if not due_date:
-                    due_date = df_due
-                if not end_date:
-                    end_date = df_due
-                start_date = _pick_dropbox_start_date(linked_dropbox)
-
-            items.append({
-                "id": grade_id,
-                "name": name,
-                "weightPct": it.get("Weight"),
-                "maxPoints": it.get("MaxPoints"),
-                "startDate": start_date,
-                "dueDate": due_date,
-                "endDate": end_date,
-                "gradeType": it.get("GradeType"),
-                "categoryId": it.get("CategoryId"),
-                "source": "grade_item",
-                "linkedDropboxId": (linked_dropbox or {}).get("Id"),
-            })
-
-        # 2. Dropbox folders that aren't linked to any grade item yet
-        #    (e.g. assignments created but not yet graded)
-        for df in dropbox_folders:
-            if not isinstance(df, dict):
-                continue
-            df_id = df.get("Id") or df.get("Identifier")
-            if str(df_id) in seen_dropbox_ids:
-                continue
-            df_due = _pick_dropbox_due_date(df)
-            df_start = _pick_dropbox_start_date(df)
-            items.append({
-                "id": df_id,
-                "name": df.get("Name"),
-                "weightPct": None,
-                "maxPoints": None,
-                "startDate": df_start,
-                "dueDate": df_due,
-                "endDate": df_due,
-                "gradeType": "Dropbox",
-                "categoryId": df.get("CategoryId"),
-                "source": "dropbox",
-                "linkedDropboxId": df_id,
-            })
-
-        return {
-            "orgUnitId": orgUnitId,
-            "count": len(items),
-            "gradeItemsCount": len(grade_items),
-            "dropboxFoldersCount": len(dropbox_folders),
-            "items": items,
-        }
-    except Exception as e:
-        msg = str(e)
-        if "403" in msg or "401" in msg or "404" in msg:
-            return {"orgUnitId": orgUnitId, "count": 0, "items": [], "error": msg[:200]}
-        _http500(e, "gemelo_grade_items", orgUnitId=orgUnitId)
 
 
 @router.get(

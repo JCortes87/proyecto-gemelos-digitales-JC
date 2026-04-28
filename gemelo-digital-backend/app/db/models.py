@@ -5,6 +5,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
 
+#|----------------- Creación de tablas base ----------------------|
 
 class Course(Base):
     __tablename__ = "courses"
@@ -78,8 +79,7 @@ class OutcomeSet(Base):
     name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-
+    
 class SyncRun(Base):
     __tablename__ = "sync_runs"
 
@@ -121,8 +121,7 @@ class SyncError(Base):
     entity_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     error_message: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-
+    
 class StudentCourseMetricSnapshot(Base):
     __tablename__ = "student_course_metric_snapshots"
     __table_args__ = (

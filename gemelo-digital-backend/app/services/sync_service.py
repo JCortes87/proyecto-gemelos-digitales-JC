@@ -1,19 +1,28 @@
 from typing import Any, Dict
-from datetime import datetime
 
 from sqlalchemy import select
+
+#|----- Import para los snapshots -----|
+from datetime import datetime
 
 from app.db.models import Enrollment, Student, DropboxFolder, GradeItem, OutcomeSet, StudentCourseMetricSnapshot
 from app.db.session import SessionLocal
 from app.services.brightspace_client import BrightspaceClient
+
+#|-------------- Import para el tracking ----------------|
 from app.services.sync_tracking_service import SyncTrackingService
+
+#|------------- Import gemelo service -----------------|
 from app.services.gemelo_service import GemeloService
 
 
 class SyncService:
     def __init__(self, bs: BrightspaceClient):
         self.bs = bs
+        #|------ Se utiliza esta nueva variable para el Sync-------|
         self.tracking = SyncTrackingService()
+        
+        #|------ Agregar el gemelo service ------------------------|
         self.gemelo = GemeloService(self.bs)
 
     async def sync_classlist(self, orgUnitId: int) -> Dict[str, Any]:
@@ -25,11 +34,10 @@ class SyncService:
         inserted_enrollments = 0
         updated_enrollments = 0
 
-        if SessionLocal is None:
-            raise RuntimeError("DATABASE_URL no configurado")
-
         db = SessionLocal()
         try:
+            #|------- Lo modifiqué para hacer debug -----------|
+            #for row in classlist:
             for row in classlist:
                 user_id = row.get("Identifier") or row.get("UserId") or row.get("userId")
                 if user_id is None:
@@ -46,14 +54,25 @@ class SyncService:
                     or row.get("Name")
                     or row.get("name")
                 )
+
                 email = row.get("Email") or row.get("email")
 
+                #|-------- Este bloqué lo reemplacé para hacer debug ----------|
+                # role_name = None
+                # role = row.get("Role") or row.get("role")
+                # if isinstance(role, dict):
+                #     role_name = role.get("Name") or role.get("name")
+                # elif isinstance(role, str):
+                #     role_name = role
+                
+                #|-------- Esta es la nueva versión ------------|
                 role_name = (
                     row.get("ClasslistRoleDisplayName")
                     or row.get("RoleName")
                     or row.get("roleName")
                     or row.get("ClasslistRoleName")
                 )
+
                 if not role_name:
                     role = row.get("Role") or row.get("role")
                     if isinstance(role, dict):
@@ -117,7 +136,8 @@ class SyncService:
                         updated_enrollments += 1
 
             db.commit()
-
+            
+            #|----------- Para el tracking --------------------|
             self.tracking.finish_run(
                 run_id=run_id,
                 sync_type="classlist",
@@ -138,6 +158,12 @@ class SyncService:
                 "updated_enrollments": updated_enrollments,
             }
 
+        #|------- Reemplazo este bloque por el que lleva el tracking ---------|
+        # except Exception:
+        #     db.rollback()
+        #     raise
+        
+        #|------- Este es el bloque que lleva el tracking -------------|
         except Exception as e:
             db.rollback()
             self.tracking.register_error(
@@ -157,8 +183,10 @@ class SyncService:
                 message=str(e),
             )
             raise
+        
         finally:
             db.close()
+            
 
     async def sync_grade_items(self, orgUnitId: int) -> Dict[str, Any]:
         run_id = self.tracking.start_run("grade_items", orgUnitId)
@@ -167,15 +195,13 @@ class SyncService:
         inserted = 0
         updated = 0
 
-        if SessionLocal is None:
-            raise RuntimeError("DATABASE_URL no configurado")
-
         db = SessionLocal()
         try:
             for row in items:
                 grade_object_id = row.get("Id") or row.get("id")
                 if grade_object_id is None:
                     continue
+
                 try:
                     grade_object_id = int(grade_object_id)
                 except Exception:
@@ -233,18 +259,35 @@ class SyncService:
                 message="Grade items sync completed",
             )
 
-            return {"orgUnitId": orgUnitId, "count": len(items), "inserted": inserted, "updated": updated}
+            return {
+                "orgUnitId": orgUnitId,
+                "count": len(items),
+                "inserted": inserted,
+                "updated": updated,
+            }
 
         except Exception as e:
             db.rollback()
-            self.tracking.register_error(run_id, "grade_items", orgUnitId, str(e))
-            self.tracking.finish_run(run_id, "grade_items", orgUnitId, "failed",
-                                     inserted_count=inserted, updated_count=updated,
-                                     error_count=1, message=str(e))
+            self.tracking.register_error(
+                sync_run_id=run_id,
+                sync_type="grade_items",
+                org_unit_id=orgUnitId,
+                error_message=str(e),
+            )
+            self.tracking.finish_run(
+                run_id=run_id,
+                sync_type="grade_items",
+                org_unit_id=orgUnitId,
+                status="failed",
+                inserted_count=inserted,
+                updated_count=updated,
+                error_count=1,
+                message=str(e),
+            )
             raise
         finally:
             db.close()
-
+            
     async def sync_dropbox_folders(self, orgUnitId: int) -> Dict[str, Any]:
         run_id = self.tracking.start_run("dropbox_folders", orgUnitId)
         folders = await self.bs.list_dropbox_folders(orgUnitId)
@@ -252,15 +295,13 @@ class SyncService:
         inserted = 0
         updated = 0
 
-        if SessionLocal is None:
-            raise RuntimeError("DATABASE_URL no configurado")
-
         db = SessionLocal()
         try:
             for row in folders:
                 folder_id = row.get("Id") or row.get("id")
                 if folder_id is None:
                     continue
+
                 try:
                     folder_id = int(folder_id)
                 except Exception:
@@ -300,22 +341,46 @@ class SyncService:
 
             db.commit()
 
-            self.tracking.finish_run(run_id, "dropbox_folders", orgUnitId, "success",
-                                     inserted_count=inserted, updated_count=updated,
-                                     error_count=0, message="Dropbox folders sync completed")
+            self.tracking.finish_run(
+                run_id=run_id,
+                sync_type="dropbox_folders",
+                org_unit_id=orgUnitId,
+                status="success",
+                inserted_count=inserted,
+                updated_count=updated,
+                error_count=0,
+                message="Dropbox folders sync completed",
+            )
 
-            return {"orgUnitId": orgUnitId, "count": len(folders), "inserted": inserted, "updated": updated}
+            return {
+                "orgUnitId": orgUnitId,
+                "count": len(folders),
+                "inserted": inserted,
+                "updated": updated,
+            }
 
         except Exception as e:
             db.rollback()
-            self.tracking.register_error(run_id, "dropbox_folders", orgUnitId, str(e))
-            self.tracking.finish_run(run_id, "dropbox_folders", orgUnitId, "failed",
-                                     inserted_count=inserted, updated_count=updated,
-                                     error_count=1, message=str(e))
+            self.tracking.register_error(
+                sync_run_id=run_id,
+                sync_type="dropbox_folders",
+                org_unit_id=orgUnitId,
+                error_message=str(e),
+            )
+            self.tracking.finish_run(
+                run_id=run_id,
+                sync_type="dropbox_folders",
+                org_unit_id=orgUnitId,
+                status="failed",
+                inserted_count=inserted,
+                updated_count=updated,
+                error_count=1,
+                message=str(e),
+            )
             raise
         finally:
             db.close()
-
+            
     async def sync_outcome_sets(self, orgUnitId: int) -> Dict[str, Any]:
         run_id = self.tracking.start_run("outcome_sets", orgUnitId)
         sets_data = await self.bs.list_outcome_sets(orgUnitId)
@@ -324,15 +389,13 @@ class SyncService:
         inserted = 0
         updated = 0
 
-        if SessionLocal is None:
-            raise RuntimeError("DATABASE_URL no configurado")
-
         db = SessionLocal()
         try:
             for row in rows:
                 outcome_set_id = row.get("Id") or row.get("id")
                 if outcome_set_id is None:
                     continue
+
                 try:
                     outcome_set_id = int(outcome_set_id)
                 except Exception:
@@ -370,22 +433,46 @@ class SyncService:
 
             db.commit()
 
-            self.tracking.finish_run(run_id, "outcome_sets", orgUnitId, "success",
-                                     inserted_count=inserted, updated_count=updated,
-                                     error_count=0, message="Outcome sets sync completed")
+            self.tracking.finish_run(
+                run_id=run_id,
+                sync_type="outcome_sets",
+                org_unit_id=orgUnitId,
+                status="success",
+                inserted_count=inserted,
+                updated_count=updated,
+                error_count=0,
+                message="Outcome sets sync completed",
+            )
 
-            return {"orgUnitId": orgUnitId, "count": len(rows), "inserted": inserted, "updated": updated}
+            return {
+                "orgUnitId": orgUnitId,
+                "count": len(rows),
+                "inserted": inserted,
+                "updated": updated,
+            }
 
         except Exception as e:
             db.rollback()
-            self.tracking.register_error(run_id, "outcome_sets", orgUnitId, str(e))
-            self.tracking.finish_run(run_id, "outcome_sets", orgUnitId, "failed",
-                                     inserted_count=inserted, updated_count=updated,
-                                     error_count=1, message=str(e))
+            self.tracking.register_error(
+                sync_run_id=run_id,
+                sync_type="outcome_sets",
+                org_unit_id=orgUnitId,
+                error_message=str(e),
+            )
+            self.tracking.finish_run(
+                run_id=run_id,
+                sync_type="outcome_sets",
+                org_unit_id=orgUnitId,
+                status="failed",
+                inserted_count=inserted,
+                updated_count=updated,
+                error_count=1,
+                message=str(e),
+            )
             raise
         finally:
             db.close()
-
+        
     async def sync_master(self, orgUnitId: int) -> Dict[str, Any]:
         classlist_result = await self.sync_classlist(orgUnitId)
         grade_items_result = await self.sync_grade_items(orgUnitId)
@@ -399,7 +486,7 @@ class SyncService:
             "dropbox_folders": dropbox_result,
             "outcome_sets": outcome_sets_result,
         }
-
+        
     async def sync_student_metric_snapshots(self, orgUnitId: int) -> Dict[str, Any]:
         run_id = self.tracking.start_run("student_metric_snapshots", orgUnitId)
 
@@ -422,9 +509,6 @@ class SyncService:
 
         inserted = 0
         updated = 0
-
-        if SessionLocal is None:
-            raise RuntimeError("DATABASE_URL no configurado")
 
         db = SessionLocal()
         try:
@@ -449,7 +533,7 @@ class SyncService:
                     "overdue_count": int(summary.get("overdueCount") or 0),
                     "pending_submitted_count": int(summary.get("pendingSubmittedCount") or 0),
                     "open_count": int(summary.get("openCount") or 0),
-                    "risk_level": self._risk_from_performance(
+                    "risk_level": self.gemelo._risk_from_performance(
                         summary.get("currentPerformancePct"),
                         {"critical": 50.0, "watch": 70.0},
                     ),
@@ -495,36 +579,32 @@ class SyncService:
 
         except Exception as e:
             db.rollback()
-            self.tracking.register_error(run_id, "student_metric_snapshots", orgUnitId, str(e))
-            self.tracking.finish_run(run_id, "student_metric_snapshots", orgUnitId, "failed",
-                                     inserted_count=inserted, updated_count=updated,
-                                     error_count=1, message=str(e))
+            self.tracking.register_error(
+                sync_run_id=run_id,
+                sync_type="student_metric_snapshots",
+                org_unit_id=orgUnitId,
+                error_message=str(e),
+            )
+            self.tracking.finish_run(
+                run_id=run_id,
+                sync_type="student_metric_snapshots",
+                org_unit_id=orgUnitId,
+                status="failed",
+                inserted_count=inserted,
+                updated_count=updated,
+                error_count=1,
+                message=str(e),
+            )
             raise
         finally:
-            db.close()
-
-    async def compute_students_gradebook_metrics_for_sync(
-        self, orgUnitId: int, student_ids: list[int]
-    ) -> Dict[int, Any]:
+            db.close()    
+            
+    async def compute_students_gradebook_metrics_for_sync(self, orgUnitId: int, student_ids: list[int]) -> Dict[int, Any]:
         return await self.gemelo.compute_students_gradebook_metrics(
             orgUnitId=orgUnitId,
             student_ids=student_ids,
             course_cfg=None,
-        )
-
-    @staticmethod
-    def _risk_from_performance(perf_pct, thresholds: dict) -> str:
-        """Clasifica el riesgo de un estudiante basado en su rendimiento."""
-        if perf_pct is None:
-            return "pending"
-        try:
-            p = float(perf_pct)
-        except (TypeError, ValueError):
-            return "pending"
-        critical = float(thresholds.get("critical", 50.0))
-        watch = float(thresholds.get("watch", 70.0))
-        if p < critical:
-            return "alto"
-        if p < watch:
-            return "medio"
-        return "bajo"
+            )        
+      
+      
+      

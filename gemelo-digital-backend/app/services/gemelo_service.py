@@ -8,588 +8,49 @@ from typing import Any, Dict, List, Optional, Tuple
 from app.config_loader import load_course_bundle
 from app.domain.rubric_quality import detect_rubric_inconsistency
 
-
-# =========================================================
-# Helpers generales
-# =========================================================
-
-def _is_graded_value(v: Dict[str, Any]) -> bool:
-    """
-    Define si un grade value cuenta como 'calificado' para cobertura.
-    - Si hay PointsDenominator > 0, se considera calificado.
-    - Fallback a señales de publicación (DisplayedGrade o LastModified).
-    - Nunca contar dict vacío {} como calificado.
-    """
-    if not isinstance(v, dict) or not v:
-        return False
-
-    pn = v.get("PointsNumerator")
-    pd = v.get("PointsDenominator")
-
-    if pn is not None and pd is not None:
-        try:
-            return float(pd) > 0
-        except Exception:
-            return False
-
-    # Fallback: WeightedNumerator/WeightedDenominator también indica calificado
-    wn = v.get("WeightedNumerator")
-    wd = v.get("WeightedDenominator")
-    if wn is not None and wd is not None:
-        try:
-            return float(wd) > 0
-        except Exception:
-            return False
-
-    return bool(v.get("DisplayedGrade") or v.get("LastModified"))
-
-def _strip_html(text: Any) -> str:
-    s = str(text or "")
-    s = re.sub(r"<[^>]+>", " ", s)
-    s = re.sub(r"\s+", " ", s).strip()
-    return s
-
-
-# Regex to detect "Corte" / summary columns that aggregate other grades.
-# These must be displayed but NOT counted in weighted averages.
-# Matches: "Corte 1", "C1", "Cohorte 1", "1 Corte", "Primer Corte",
-#          "Corte N°1", "Corte Nº 1", "Corte I/II/III"
-_CORTE_REGEX = re.compile(
-    r"(?:^|\s|_|-)"                                   # word boundary-ish
-    r"(?:"
-    r"c(?:ohor?te|orte)?\s*(?:n[°º]?\s*)?([123]|i{1,3})"   # "Corte 1/2/3", "C1", "Cohorte 1", "Corte I/II/III"
-    r"|"
-    r"(primer|segund[oa]|tercer)\s+(?:cohor?te|corte)"     # "Primer/Segundo/Tercer Corte"
-    r"|"
-    r"([123])(?:er|do|ro)?\s+(?:cohor?te|corte)"          # "1er Corte", "2do Corte", "3 Corte"
-    r")"
-    r"(?:\s|$|:|_|-)",
-    re.IGNORECASE,
+#|---------- Helpers extraidos a modulos dedicados por dominio ----------|
+# Estos imports reemplazan las definiciones que antes vivian aqui mismo.
+# Cada modulo tiene responsabilidad unica y esta documentado.
+# Ver app/services/{text_utils,common_utils,grade_filters,scale_utils,risk_utils,role_utils}.py
+from app.services.text_utils import (
+    _strip_html,
+    _norm,
+    _looks_like_not_submitted,
+    _text_has_no_submission_signal,
 )
-
-
-def _is_corte_item(name: Any) -> bool:
-    """Detect if a grade item name matches a 'Corte' / summary pattern.
-    These are aggregated totals that should be shown but not counted in
-    weighted averages (they'd double-count).
-    Examples that match:
-      - "Corte 1", "Corte 2", "Corte 3"
-      - "C1", "C2", "C3"
-      - "Cohorte 1", "Cohorte 2"
-      - "1 Corte", "2 Corte", "3 Corte", "1er Corte", "2do Corte"
-      - "Primer Corte", "Segundo Corte", "Tercer Corte"
-      - "Corte I", "Corte II", "Corte III"
-    """
-    s = _strip_html(name)
-    if not s:
-        return False
-    return bool(_CORTE_REGEX.search(s))
-
-
-def _extract_corte_period(name: Any) -> Optional[int]:
-    """Extract the numeric period (1, 2, 3) from a Corte item name.
-    Returns None if not a Corte item."""
-    s = _strip_html(name)
-    if not s:
-        return None
-    m = _CORTE_REGEX.search(s)
-    if not m:
-        return None
-    # Group 1: numeric or roman (1, 2, 3, I, II, III)
-    # Group 2: spanish ordinal word (primer, segundo, tercero)
-    # Group 3: digit prefix (1er, 2do, etc.)
-    g1, g2, g3 = m.group(1), m.group(2), m.group(3)
-    if g1:
-        g1 = g1.lower()
-        if g1 == "i":
-            return 1
-        if g1 == "ii":
-            return 2
-        if g1 == "iii":
-            return 3
-        try:
-            return int(g1)
-        except Exception:
-            return None
-    if g2:
-        g2 = g2.lower()
-        if g2.startswith("primer"):
-            return 1
-        if g2.startswith("segund"):
-            return 2
-        if g2.startswith("tercer"):
-            return 3
-    if g3:
-        try:
-            return int(g3)
-        except Exception:
-            return None
-    return None
-
-
-def _looks_like_not_submitted(comment_html: Any) -> bool:
-    txt = _strip_html(comment_html).lower()
-    if not txt:
-        return False
-
-    patterns = [
-        "no entrego",
-        "no entregó",
-        "sin entrega",
-        "no presentó",
-        "no presento",
-        "not submitted",
-        "missing submission",
-        "did not submit",
-        "no submission",
-    ]
-    return any(p in txt for p in patterns)
-
-
-def _is_grade_zero(points_num: Any, displayed: Any) -> bool:
-    try:
-        if points_num is not None and float(points_num) == 0.0:
-            return True
-    except Exception:
-        pass
-
-    disp = str(displayed or "").strip().lower()
-    return disp in {"0%", "0.0%", "0"}
-
-def _parse_iso_dt(value: Any) -> Optional[datetime]:
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except Exception:
-        return None
-    
-def _as_items_list(classlist_resp: Any) -> List[Dict[str, Any]]:
-    """Normaliza la respuesta de classlist a una lista de dicts."""
-    if classlist_resp is None:
-        return []
-    if isinstance(classlist_resp, list):
-        return [x for x in classlist_resp if isinstance(x, dict)]
-    if isinstance(classlist_resp, dict):
-        items = classlist_resp.get("items") or classlist_resp.get("Items") or []
-        return [x for x in items if isinstance(x, dict)]
-    return []
-
-
-def _num(x: Any, default: float = 0.0) -> float:
-    try:
-        if x is None:
-            return float(default)
-        return float(x)
-    except Exception:
-        return float(default)
-
-
-def status_from_pct(pct: Any, thresholds: Dict[str, float]) -> str:
-    """
-    pct puede venir None cuando no hay evidencia/calificación consolidada.
-    En ese caso devolvemos 'pending'.
-    """
-    try:
-        if pct is None:
-            return "pending"
-        p = float(pct)
-    except Exception:
-        return "pending"
-
-    if p < float(thresholds.get("critical", 50.0)):
-        return "critico"
-    if p < float(thresholds.get("watch", 70.0)):
-        return "observacion"
-    return "solido"
-
-
-def weighted_avg(items: List[Tuple[float, float]]) -> float:
-    den = sum(w for _, w in items) or 0.0
-    if den == 0:
-        return 0.0
-    return sum(p * w for p, w in items) / den
-
-
-def _as_dict(obj: Any) -> Dict[str, Any]:
-    """
-    Convierte Pydantic/dataclass/obj a dict de forma defensiva.
-    Cubre: None, Ellipsis, primitivos, Pydantic v1/v2, objetos con __dict__.
-    """
-    if obj is None or obj is ...:
-        return {}
-
-    if isinstance(obj, dict):
-        return {k: v for k, v in obj.items() if v is not ...}
-
-    if isinstance(obj, (str, int, float, bool, list, tuple, set)):
-        return {}
-
-    if hasattr(obj, "model_dump"):
-        try:
-            result = obj.model_dump()
-            if isinstance(result, dict):
-                return {k: v for k, v in result.items() if v is not ...}
-        except Exception:
-            pass
-
-    if hasattr(obj, "dict"):
-        try:
-            result = obj.dict()
-            if isinstance(result, dict):
-                return {k: v for k, v in result.items() if v is not ...}
-        except Exception:
-            pass
-
-    try:
-        return {
-            k: v for k, v in vars(obj).items()
-            if not k.startswith("_") and v is not ...
-        }
-    except TypeError:
-        return {}
-
-
-def _get_thresholds(course_cfg: Any, legacy_cfg: Any) -> Dict[str, float]:
-    defaults = {"critical": 50.0, "watch": 70.0}
-
-    for cfg in (course_cfg, legacy_cfg):
-        if cfg is None or cfg is ...:
-            continue
-
-        try:
-            scale = getattr(cfg, "scale", None)
-            if scale is not None and scale is not ...:
-                thr = getattr(scale, "thresholds", None)
-                if thr is not None and thr is not ...:
-                    result = dict(thr) if not isinstance(thr, dict) else thr
-                    if result:
-                        return result
-        except Exception:
-            pass
-
-        try:
-            d = _as_dict(cfg)
-            sc = d.get("scale")
-            if isinstance(sc, dict):
-                thr = sc.get("thresholds")
-                if isinstance(thr, dict) and thr:
-                    return thr
-        except Exception:
-            pass
-
-    return defaults
-
-
-def _get_scale_settings(legacy_cfg: Any) -> Tuple[str, float]:
-    scale_type = "level_points"
-    max_level_points = 4.0
-
-    if legacy_cfg is None or legacy_cfg is ...:
-        return scale_type, max_level_points
-
-    try:
-        scale = getattr(legacy_cfg, "scale", None)
-        if scale is not None and scale is not ...:
-            st = getattr(scale, "type", None)
-            if st is not None and st is not ...:
-                scale_type = str(st)
-            mlp = getattr(scale, "maxLevelPoints", None)
-            if mlp is not None and mlp is not ...:
-                try:
-                    max_level_points = float(mlp)
-                except Exception:
-                    pass
-            return scale_type, max_level_points
-    except Exception:
-        pass
-
-    try:
-        d = _as_dict(legacy_cfg)
-        sc = d.get("scale", {})
-        if isinstance(sc, dict):
-            st = sc.get("type")
-            if st is not None:
-                scale_type = str(st)
-            mlp = sc.get("maxLevelPoints")
-            if mlp is not None:
-                try:
-                    max_level_points = float(mlp)
-                except Exception:
-                    pass
-    except Exception:
-        pass
-
-    return scale_type, max_level_points
-
-def _text_has_no_submission_signal(text: Any) -> bool:
-    s = str(text or "").strip().lower()
-    if not s:
-        return False
-
-    patterns = [
-        "no entrego",
-        "no entregó",
-        "no presento",
-        "no presentó",
-        "sin entrega",
-        "no submission",
-        "not submitted",
-        "did not submit",
-    ]
-    return any(p in s for p in patterns)
-
-
-# =========================================================
-# Macrocompetencias dinámicas (C1, C2, RA1, etc.)
-# =========================================================
-
-_MACRO_RE = re.compile(r"^([A-Za-z]+)\.(\d+)(?:\.)?")
-
-
-def _macro_code_from_unit(code: str) -> Optional[str]:
-    m = _MACRO_RE.match(str(code or "").strip())
-    if not m:
-        return None
-    prefix, num = m.group(1), m.group(2)
-    return f"{prefix}{num}"
-
-
-def _get_unit_weight_from_cfg(cfg: Any, unit_code: str) -> float:
-    if cfg is None:
-        return 1.0
-
-    rubrics = getattr(cfg, "rubrics", None) if not isinstance(cfg, dict) else cfg.get("rubrics")
-    if not rubrics or not isinstance(rubrics, dict):
-        return 1.0
-
-    for _, r in rubrics.items():
-        lu = getattr(r, "learningUnits", None) if not isinstance(r, dict) else r.get("learningUnits")
-        if isinstance(lu, dict) and unit_code in lu:
-            ud = lu[unit_code]
-            try:
-                return float(ud.get("weight", 1.0)) if isinstance(ud, dict) else float(getattr(ud, "weight", 1.0))
-            except Exception:
-                return 1.0
-
-    return 1.0
-
-
-def build_macro_units(
-    units: List[Dict[str, Any]],
-    cfg: Any,
-    thresholds: Dict[str, float],
-) -> List[Dict[str, Any]]:
-    acc: Dict[str, List[Tuple[float, float, str]]] = {}
-
-    for u in units:
-        child_code = str(u.get("code", "")).strip()
-        macro = _macro_code_from_unit(child_code)
-        if not macro:
-            continue
-
-        w = _get_unit_weight_from_cfg(cfg, child_code)
-        pct = _num(u.get("pct", 0.0), 0.0)
-        acc.setdefault(macro, []).append((pct, w, child_code))
-
-    out: List[Dict[str, Any]] = []
-    for macro_code, rows in acc.items():
-        pct_macro = weighted_avg([(p, w) for p, w, _ in rows])
-        pct_macro_round = round(pct_macro, 1)
-        out.append(
-            {
-                "code": macro_code,
-                "pct": pct_macro_round,
-                "status": status_from_pct(pct_macro_round, thresholds),
-                "children": [c for _, __, c in rows],
-            }
-        )
-
-    return sorted(out, key=lambda x: x["code"])
-
-
-# =========================================================
-# Roles / Access control
-# =========================================================
-
-def _norm(x: Any) -> str:
-    return str(x or "").strip().lower()
-
-
-def _is_student_role(role_name: str) -> bool:
-    r = _norm(role_name)
-    return ("estudiante" in r) or ("student" in r) or ("learner" in r)
-
-
-def _extract_role_name(row: Dict[str, Any]) -> str:
-    if not isinstance(row, dict):
-        return ""
-    for k in ("ClasslistRoleDisplayName", "RoleName", "ClasslistRoleName"):
-        v = row.get(k)
-        if v:
-            return str(v)
-    role_obj = row.get("Role")
-    if isinstance(role_obj, dict) and role_obj.get("Name"):
-        return str(role_obj.get("Name"))
-    return ""
-
-
-def _extract_user_id(row: Any) -> Optional[int]:
-    if not isinstance(row, dict):
-        return None
-    for k in ("Identifier", "UserId", "Id"):
-        v = row.get(k)
-        if v is None:
-            continue
-        try:
-            return int(v)
-        except Exception:
-            continue
-    return None
-
-
-def _display_name(row: Dict[str, Any]) -> str:
-    dn = row.get("DisplayName")
-    if dn:
-        return str(dn)
-    fn = row.get("FirstName")
-    ln = row.get("LastName")
-    if fn or ln:
-        return f"{fn or ''} {ln or ''}".strip()
-    odi = row.get("OrgDefinedId")
-    if odi:
-        return str(odi)
-    uid = _extract_user_id(row)
-    return str(uid) if uid is not None else ""
-
-
-def resolve_access_level(
-    classlist_role_name: str,
-    lis_roles: Optional[List[str]] = None,
-) -> str:
-    r = _norm(classlist_role_name)
-    lis = [_norm(x) for x in (lis_roles or [])]
-
-    is_admin = ("super administrator" in r) or ("administrator" in r) or any("administrator" in x for x in lis)
-    if is_admin:
-        return "admin"
-
-    is_teacher = ("instructor" in r) or ("faculty" in r) or any(
-        ("instructor" in x) or ("faculty" in x) for x in lis
-    )
-    if is_teacher:
-        return "teacher"
-
-    is_student = (
-        ("estudiante" in r) or ("student" in r) or ("learner" in r)
-        or any(("learner" in x) or ("student" in x) for x in lis)
-    )
-    if is_student:
-        return "student"
-
-    return "student"
-
-
-def normalize_view_from_enrollment(enrollment: Dict[str, Any]) -> Dict[str, Any]:
-    access = enrollment.get("Access") or {}
-    classlist_role = access.get("ClasslistRoleName")
-    lis_roles = access.get("LISRoles") or []
-
-    access_level = resolve_access_level(
-        str(classlist_role or ""), [str(x) for x in lis_roles]
-    )
-    view = "teacher" if access_level in ("admin", "teacher") else "student"
-
-    return {
-        "accessLevel": access_level,
-        "view": view,
-        "classlistRoleName": classlist_role,
-        "lisRoles": lis_roles,
-        "isAdmin": access_level == "admin",
-        "isInstructor": access_level == "teacher",
-        "isStudent": access_level == "student",
-    }
-
-
-# =========================================================
-# Lookups de rúbricas (Brightspace)
-# =========================================================
-
-def _lookup_level_points(
-    rubric_detail: Dict[str, Any], level_id: Any
-) -> Optional[float]:
-    if level_id is None:
-        return None
-    try:
-        level_id = int(level_id)
-    except Exception:
-        return None
-
-    criteria_groups = rubric_detail.get("CriteriaGroups") or []
-    if not criteria_groups:
-        return None
-
-    levels = criteria_groups[0].get("Levels") or []
-    for lv in levels:
-        try:
-            if int(lv.get("Id")) == level_id:
-                pts = lv.get("Points")
-                return float(pts) if pts is not None else None
-        except Exception:
-            continue
-    return None
-
-
-def _lookup_criterion_max_points(
-    rubric_detail: Dict[str, Any], criterion_id: Any
-) -> Optional[float]:
-    if criterion_id is None:
-        return None
-    try:
-        criterion_id = int(criterion_id)
-    except Exception:
-        return None
-
-    criteria_groups = rubric_detail.get("CriteriaGroups") or []
-    if not criteria_groups:
-        return None
-
-    criteria = criteria_groups[0].get("Criteria") or []
-    for c in criteria:
-        try:
-            if int(c.get("Id")) == criterion_id:
-                pts = [
-                    float(cell.get("Points"))
-                    for cell in (c.get("Cells") or [])
-                    if cell.get("Points") is not None
-                ]
-                return max(pts) if pts else None
-        except Exception:
-            continue
-    return None
-
-
-# =========================================================
-# Gradebook helpers
-# =========================================================
-
-def _parse_due_datetime(raw: Any) -> Optional[datetime]:
-    if not raw:
-        return None
-    try:
-        return datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
-    except Exception:
-        return None
-    
-def _is_graded(points_num: Any, points_den: Any) -> bool:
-    try:
-        return (
-            points_num is not None
-            and points_den is not None
-            and float(points_den) > 0
-        )
-    except Exception:
-        return False
+from app.services.common_utils import (
+    _num,
+    _parse_iso_dt,
+    _parse_due_datetime,
+    _as_dict,
+)
+from app.services.grade_filters import (
+    _is_graded_value,
+    _is_grade_zero,
+    _is_graded,
+)
+from app.services.scale_utils import (
+    status_from_pct,
+    _get_thresholds,
+    _get_scale_settings,
+    _lookup_level_points,
+    _lookup_criterion_max_points,
+)
+from app.services.risk_utils import (
+    weighted_avg,
+    _macro_code_from_unit,
+    _get_unit_weight_from_cfg,
+    build_macro_units,
+)
+from app.services.role_utils import (
+    _as_items_list,
+    _is_student_role,
+    _extract_role_name,
+    _extract_user_id,
+    _display_name,
+    resolve_access_level,
+    normalize_view_from_enrollment,
+)
 
 
 # =========================================================
@@ -608,19 +69,7 @@ class GemeloService:
         if not callable(fn):
             raise RuntimeError("brightspace_client no expone list_classlist")
 
-        # Graceful: if classlist is unavailable (403/401/404), return empty
-        try:
-            data = await fn(orgUnitId)
-        except Exception as e:
-            msg = str(e)
-            if "403" in msg or "401" in msg or "404" in msg:
-                import logging
-                logging.getLogger(__name__).warning(
-                    "list_course_students: classlist unavailable for course %s (%s)",
-                    orgUnitId, msg[:120],
-                )
-                return {"count": 0, "items": [], "roleCounts": {}}
-            raise
+        data = await fn(orgUnitId)
         items = _as_items_list(data)
 
         students: List[Dict[str, Any]] = []
@@ -640,26 +89,10 @@ class GemeloService:
             if uid is None:
                 continue
 
-            # Extract email from classlist entry — try every common field name
-            # CESA frequently puts the email in OrgDefinedId or UserName too.
-            user_obj = it.get("User") if isinstance(it.get("User"), dict) else {}
-            def _pick_email(*objs):
-                for o in objs:
-                    if not isinstance(o, dict):
-                        continue
-                    for k in ("EmailAddress", "emailAddress", "Email", "email",
-                              "UserName", "userName", "OrgDefinedId", "orgDefinedId"):
-                        v = o.get(k)
-                        if v and isinstance(v, str) and "@" in v:
-                            return v.strip()
-                return None
-            email = _pick_email(user_obj, it)
-
             students.append(
                 {
                     "userId": uid,
                     "displayName": _display_name(it),
-                    "email": email,
                     "roleName": role,
                 }
             )
@@ -787,45 +220,7 @@ class GemeloService:
         if not callable(fn):
             raise RuntimeError("brightspace_client no expone list_classlist")
 
-        # Attempt classlist fetch. If it fails (403/404), return a graceful
-        # empty-state response instead of blocking the whole course view.
-        # This lets Super Administrators see the course shell even when
-        # their token doesn't grant classlist access for that specific course.
-        try:
-            data = await fn(orgUnitId)
-        except Exception as e:
-            msg = str(e)
-            if "403" in msg or "401" in msg or "404" in msg:
-                import logging
-                logging.getLogger(__name__).warning(
-                    "classlist unavailable for course %s (%s) — returning empty overview",
-                    orgUnitId, msg[:120],
-                )
-                return {
-                    "orgUnitId": orgUnitId,
-                    "studentsCount": 0,
-                    "macroCompetencies": [],
-                    "courseGradebook": {
-                        "avgCurrentPerformancePct": 0.0,
-                        "avgCoveragePct": 0.0,
-                        "avgNotSubmittedPct": 0.0,
-                        "avgPendingUngradedPct": 0.0,
-                        "avgOverdueUnscoredPct": 0.0,
-                        "avgGradedItemsCount": 0,
-                        "avgTotalItemsCount": 0,
-                        "coverageCountText": "0/0",
-                        "status": "pending",
-                    },
-                    "globalRiskDistribution": {"alto": 0, "medio": 0, "bajo": 0, "pending": 0},
-                    "thresholds": {"critical": 50.0, "watch": 70.0},
-                    "alerts": [],
-                    "studentsAtRisk": [],
-                    "qualityFlags": [{
-                        "type": "classlist_unavailable",
-                        "message": "No se pudo obtener el classlist de este curso (403/404). El usuario no tiene permisos específicos en este curso.",
-                    }],
-                }
-            raise
+        data = await fn(orgUnitId)
         items = _as_items_list(data)
 
         student_ids: List[int] = []
@@ -872,30 +267,15 @@ class GemeloService:
             }
 
         # Semáforo: build_gemelo hace ~10 requests HTTP por estudiante.
-        # Con Semaphore(10) → mayor paralelismo para evitar 504 Gateway Timeout.
-        # Hard timeout de 50s (ALB timeout es 60s por defecto).
-        _overview_sem = asyncio.Semaphore(10)
+        # Con Semaphore(5) → ~6 lotes en paralelo, sin saturar Brightspace.
+        _overview_sem = asyncio.Semaphore(5)
 
         async def _build_gemelo_limited(uid: int):
             async with _overview_sem:
                 return await self.build_gemelo(orgUnitId, uid)
 
         tasks = [_build_gemelo_limited(uid) for uid in student_ids]
-        results: List[Any]
-        try:
-            results = await asyncio.wait_for(
-                asyncio.gather(*tasks, return_exceptions=True),
-                timeout=50.0,
-            )
-        except asyncio.TimeoutError:
-            # Partial results: cancel unfinished tasks and use what we have
-            import logging
-            logging.getLogger(__name__).warning(
-                "build_course_overview timeout (50s) for course %s with %d students — returning partial",
-                orgUnitId, len(student_ids),
-            )
-            results = [Exception("timeout") for _ in student_ids]
-            # Don't raise — proceed with empty-ish aggregation
+        results = await asyncio.gather(*tasks, return_exceptions=True)
 
         risk_dist = {"alto": 0, "medio": 0, "bajo": 0, "pending": 0}
         perf_vals: List[float] = []
@@ -1408,12 +788,8 @@ class GemeloService:
                     if isinstance(rubrics_cfg, dict)
                     else getattr(rubrics_cfg, rubricId, None)
                 )
-
                 criteria_outcomes = assessment.get("CriteriaOutcome") or []
                 if not criteria_outcomes:
-                    # Sin CriteriaOutcome significa que el docente aún no diligenció
-                    # esa rúbrica para este estudiante: caso normal, no es un problema
-                    # de calidad de datos. Lo omitimos silenciosamente.
                     continue
 
                 outcome_by_criterion: Dict[str, Dict[str, Any]] = {}
@@ -1423,18 +799,13 @@ class GemeloService:
                         continue
                     outcome_by_criterion[str(int(cid))] = co
 
-                # Fallback: si no hay configuración local de rúbrica, creamos una
-                # unidad sintética por rúbrica usando los datos de Brightspace
-                # directamente. Cada criterio aporta con peso 1.0 a esa unidad.
                 if not rubric_cfg:
-                    rubric_name = rubric_detail.get("Name") or f"Rúbrica {rubricId}"
-                    folder_name = folder.get("Name") or f"Folder {folderId}"
-                    unit_code = f"RUB-{rubricId}"
+                    synth_unit = f"RUB-{rubricId}"
                     for cid, co in outcome_by_criterion.items():
                         pct = self._pct_from_outcome(
                             co, rubric_detail, scale_type, max_level_points
                         )
-                        units_acc.setdefault(unit_code, []).append(
+                        units_acc.setdefault(synth_unit, []).append(
                             (
                                 pct,
                                 1.0,
@@ -1442,8 +813,6 @@ class GemeloService:
                                     "folderId": folderId,
                                     "rubricId": rubricId_int,
                                     "criterionId": int(cid),
-                                    "rubricName": rubric_name,
-                                    "folderName": folder_name,
                                 },
                             )
                         )
@@ -1597,60 +966,6 @@ class GemeloService:
             if not isinstance(raw_items, list):
                 return {}
 
-            # Fetch grade categories. Brightspace returns an array of category
-            # objects where each contains a nested Grades[] array listing the
-            # grade items that belong to that category. We use this to:
-            #   1) Resolve categoryName for each evidence
-            #   2) Build a gradeCategories[] structure so the frontend can
-            #      render "Resumen por Cortes" by category (most reliable
-            #      source of grouping — way more trustworthy than parsing
-            #      formulas, which Brightspace doesn't always expose).
-            categories_by_id: Dict[str, str] = {}
-            # Lookup: gradeObjectId → categoryId (when the list_grade_items
-            # response lacks CategoryId, which happens in some tenants).
-            item_to_category: Dict[str, int] = {}
-            grade_categories_out: List[Dict[str, Any]] = []
-            list_cats_fn = getattr(self.bs, "list_grade_categories", None)
-            if callable(list_cats_fn):
-                try:
-                    raw_cats = await list_cats_fn(orgUnitId)
-                    if isinstance(raw_cats, dict):
-                        raw_cats = raw_cats.get("Items") or raw_cats.get("items") or []
-                    for c in (raw_cats or []):
-                        if not isinstance(c, dict):
-                            continue
-                        cid = c.get("Id") or c.get("CategoryId")
-                        nm = c.get("Name") or c.get("name") or ""
-                        if cid is None:
-                            continue
-                        categories_by_id[str(cid)] = nm
-
-                        # Extract nested Grades[] and register item→category
-                        inner_grades = c.get("Grades") or c.get("grades") or []
-                        item_ids: List[int] = []
-                        for ig in inner_grades:
-                            if not isinstance(ig, dict):
-                                continue
-                            gid = ig.get("Id") or ig.get("Identifier")
-                            if gid is None:
-                                continue
-                            try:
-                                gid_int = int(gid)
-                            except Exception:
-                                continue
-                            item_ids.append(gid_int)
-                            item_to_category[str(gid_int)] = int(cid)
-
-                        grade_categories_out.append({
-                            "id": int(cid),
-                            "name": nm,
-                            "itemIds": item_ids,
-                        })
-                except Exception:
-                    categories_by_id = {}
-                    item_to_category = {}
-                    grade_categories_out = []
-
             course_dict = _as_dict(course_cfg)
             gp = (
                 course_dict.get("gradingPolicy", {})
@@ -1780,14 +1095,9 @@ class GemeloService:
                 it = row["item"]
                 val = row["value"] or {}
 
-                item_name = it.get("Name")
                 w = float(it.get("Weight", 0) or 0.0)
-
-                # Detect "Corte" / summary items: these are aggregated running totals
-                # (Corte 1/2/3, C1, Cohorte, etc.). We DISPLAY them but DO NOT count
-                # them in weighted averages — they'd double-count the component grades.
-                is_corte = _is_corte_item(item_name)
-                corte_period = _extract_corte_period(item_name) if is_corte else None
+                total_weight += w
+                total_items_count += 1
 
                 points_num = val.get("PointsNumerator")
                 points_den = val.get("PointsDenominator")
@@ -1807,110 +1117,44 @@ class GemeloService:
                         score_pct = round((float(points_num) / float(points_den)) * 100.0, 2)
                     except Exception:
                         score_pct = None
+
+                    graded_items_count += 1
+                    graded_weight += w
                     evidence_status = "graded"
                 else:
                     if is_overdue:
+                        overdue_unscored_count += 1
+                        overdue_unscored_weight += w
                         evidence_status = "overdue_unscored"
                     else:
+                        pending_ungraded_count += 1
+                        pending_ungraded_weight += w
                         evidence_status = "pending"
 
-                # Only non-Corte items contribute to aggregate counts/weights
-                if not is_corte:
-                    total_weight += w
-                    total_items_count += 1
-
-                    if has_grade:
-                        graded_items_count += 1
-                        graded_weight += w
-                    else:
-                        if is_overdue:
-                            overdue_unscored_count += 1
-                            overdue_unscored_weight += w
-                        else:
-                            pending_ungraded_count += 1
-                            pending_ungraded_weight += w
-
-                    if has_grade and weighted_num is not None and weighted_den is not None:
-                        if _num(weighted_den, 0.0) > 0:
-                            graded.append((float(weighted_num), float(weighted_den)))
+                if has_grade and weighted_num is not None and weighted_den is not None:
+                    if _num(weighted_den, 0.0) > 0:
+                        graded.append((float(weighted_num), float(weighted_den)))
 
                 if include_evidences:
-                    # Find linked dropbox folder ID for download/feedback links
-                    _assoc = it.get("AssociatedTool") or {}
-                    _tool_id = _assoc.get("ToolId")
-                    _tool_item = _assoc.get("ToolItemId")
-                    linked_dropbox_id = None
-                    if _tool_id in (1, 2000) and _tool_item is not None:
-                        try:
-                            linked_dropbox_id = int(_tool_item)
-                        except Exception:
-                            linked_dropbox_id = None
-
-                    # Extract category + formula metadata. Brightspace exposes:
-                    #   CategoryId          - numeric id (or null if uncategorized)
-                    #   Category.Name       - when the grade item is nested under a
-                    #                         category on certain API versions
-                    #   GradeType           - "Numeric", "Formula", "Calculated",
-                    #                         "PassFail", "SelectBox", "Text"
-                    #   Formula / FormulaExpression / Expression - for Formula type
-                    _cat_obj = it.get("Category") if isinstance(it.get("Category"), dict) else None
-                    category_id = it.get("CategoryId")
-                    if category_id is None and _cat_obj is not None:
-                        category_id = _cat_obj.get("Id")
-                    # CategoryId=0 means "uncategorized" in Brightspace, treat as None
-                    if category_id == 0:
-                        category_id = None
-                    # Fall back to the item→category lookup from the
-                    # categories endpoint (some tenants don't echo CategoryId
-                    # on the /grades/ list response)
-                    if category_id is None:
-                        gid_key = str(it.get("Id"))
-                        if gid_key in item_to_category:
-                            category_id = item_to_category[gid_key]
-                    category_name = None
-                    if _cat_obj is not None:
-                        category_name = _cat_obj.get("Name")
-                    if not category_name:
-                        category_name = it.get("CategoryName")
-                    # Fall back to the categories lookup we fetched above
-                    if not category_name and category_id is not None:
-                        category_name = categories_by_id.get(str(category_id))
-
-                    grade_type = it.get("GradeType") or ""
-                    formula_text = (
-                        it.get("Formula")
-                        or it.get("FormulaExpression")
-                        or it.get("Expression")
-                        or ""
-                    )
-
                     evidences.append(
                         {
                             "gradeObjectId": int(it.get("Id")),
-                            "name": item_name,
+                            "name": it.get("Name"),
                             "weightPct": w,
                             "scorePct": score_pct,
                             "status": evidence_status,
                             "isGraded": has_grade,
                             "isOverdue": is_overdue,
-                            "isCorte": is_corte,
-                            "cortePeriod": corte_period,
                             "dueDate": due_dt.isoformat() if due_dt else None,
                             "lastModified": val.get("LastModified"),
-                            "linkedDropboxId": linked_dropbox_id,
-                            "categoryId": category_id,
-                            "categoryName": category_name,
-                            "gradeType": grade_type,
-                            "formula": formula_text,
                         }
                     )
 
-                    # Don't mark Corte items as pending items
-                    if not has_grade and not is_corte:
+                    if not has_grade:
                         pending_items.append(
                             {
                                 "gradeObjectId": int(it.get("Id")),
-                                "name": item_name,
+                                "name": it.get("Name"),
                                 "weightPct": w,
                                 "status": evidence_status,
                                 "isOverdue": is_overdue,
@@ -1927,14 +1171,12 @@ class GemeloService:
                 else None
             )
 
-            # Fallback si no hay ponderados (también excluye Corte)
+            # Fallback si no hay ponderados
             if current_perf_pct is None:
                 acc: List[Tuple[float, float]] = []
                 for row in values:
                     it = row["item"]
                     val = row["value"] or {}
-                    if _is_corte_item(it.get("Name")):
-                        continue
                     w = float(it.get("Weight", 0) or 0.0)
                     pn = val.get("PointsNumerator")
                     pd = val.get("PointsDenominator")
@@ -1987,19 +1229,11 @@ class GemeloService:
                     key=lambda x: float(x.get("weightPct") or 0.0),
                     reverse=True,
                 )
-                # Expose the category structure so the frontend can render
-                # cortes grouped by their gradebook category (most reliable
-                # source of grouping, especially when the Formula text isn't
-                # exposed by the API).
-                out["gradeCategories"] = grade_categories_out
 
             return out
 
         try:
-            # Include evidences for BOTH teachers and students.
-            # Students need to see their own evidences (graded, pending, overdue)
-            # in the portal view.
-            gradebook_block = await _compute_gradebook(include_evidences=True) or {}
+            gradebook_block = await _compute_gradebook(include_evidences=is_teacher) or {}
         except Exception as e:
             qc_flags.append({"type": "gradebook_compute_failed", "message": str(e)})
             gradebook_block = {}
