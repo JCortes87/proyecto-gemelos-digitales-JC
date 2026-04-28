@@ -1241,22 +1241,67 @@ function StatusBadge({ status }) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ElevenLabs TTS/STT — alta calidad con fallback a Web Speech API
+//
+// Auto-replace: cuando se llama elSpeak() durante una respuesta en curso,
+// se cancela COMPLETAMENTE la anterior (audio + fetch en vuelo + callbacks)
+// antes de iniciar la nueva. Patron estandar UX (WhatsApp, ChatGPT voice).
+//
+// Implementacion:
+// - _elCurrentAudio: referencia al <audio> sonando para poder pausarlo.
+// - _elFetchController: AbortController del fetch en curso, para cancelar
+//   peticiones HTTP que aun no respondieron (race condition critica).
+// - _elCallToken: contador monotonico. Cada elSpeak captura su token al
+//   iniciar; si al recibir la respuesta el token global ya cambio, la
+//   call esta superseded y se descarta sin reproducir ni invocar onEnd.
 // ─────────────────────────────────────────────────────────────────────────────
 let _elCurrentAudio = null;
+let _elFetchController = null;
+let _elCallToken = 0;
+
 function elStop() {
-  if (_elCurrentAudio) { _elCurrentAudio.pause(); _elCurrentAudio = null; }
-  if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+  // Aborta cualquier fetch /speech/tts en vuelo
+  if (_elFetchController) {
+    try { _elFetchController.abort(); } catch (_) {}
+    _elFetchController = null;
+  }
+  // Pausa el audio que este sonando
+  if (_elCurrentAudio) {
+    try { _elCurrentAudio.pause(); } catch (_) {}
+    _elCurrentAudio = null;
+  }
+  // Cancela cualquier utterance del fallback Web Speech API
+  if ("speechSynthesis" in window) {
+    try { window.speechSynthesis.cancel(); } catch (_) {}
+  }
+  // Invalida cualquier call elSpeak en vuelo (sus respuestas se descartaran)
+  _elCallToken++;
 }
 
 async function elSpeak(rawText, onStart, onEnd) {
   if (!rawText || !rawText.trim()) return;
+
+  // Cancela cualquier respuesta anterior (audio + fetch + callbacks pendientes)
   elStop();
+
+  // Captura el token actual; si cambia mientras esta call esta en vuelo,
+  // significa que otro elSpeak la supersedio y debemos descartar.
+  const myToken = _elCallToken;
+  const controller = new AbortController();
+  _elFetchController = controller;
+
   // Limpiar HTML, emojis y entidades
   const clean = rawText
     .replace(/<[^>]*>/g, " ")
     .replace(/&lt;/g, "menor que").replace(/&gt;/g, "mayor que").replace(/&amp;/g, "y")
     .replace(/[^\u0000-\u007F\u00C0-\u024F\u0400-\u04FF\s]/g, "")
     .replace(/\[.*?\]/g, "").replace(/\s+/g, " ").trim().slice(0, 2000);
+
+  // Helper: solo invoca onEnd si esta call sigue siendo la activa
+  const safeEnd = () => {
+    if (myToken === _elCallToken) {
+      onEnd && onEnd();
+    }
+  };
 
   onStart && onStart();
   try {
@@ -1266,25 +1311,60 @@ async function elSpeak(rawText, onStart, onEnd) {
     const res = await fetch(apiUrl("/speech/tts"), {
       method: "POST", credentials: "include", headers: hdrs,
       body: JSON.stringify({ text: clean }),
+      signal: controller.signal,
     });
+
+    // Si nos supersedearon mientras esperabamos la respuesta, salir limpio
+    if (myToken !== _elCallToken) return;
+
     if (!res.ok) throw new Error("TTS " + res.status);
     const blob = await res.blob();
+
+    // Re-chequear despues de leer el blob
+    if (myToken !== _elCallToken) return;
+
     const url  = URL.createObjectURL(blob);
     const audio = new Audio(url);
+
+    // Re-chequear antes de empezar a reproducir
+    if (myToken !== _elCallToken) {
+      URL.revokeObjectURL(url);
+      return;
+    }
+
     _elCurrentAudio = audio;
-    audio.onended = audio.onerror = () => { onEnd && onEnd(); URL.revokeObjectURL(url); _elCurrentAudio = null; };
+    _elFetchController = null; // ya no hay fetch que cancelar
+
+    audio.onended = audio.onerror = () => {
+      // Solo callback y limpieza si seguimos siendo la call activa
+      if (myToken === _elCallToken) {
+        _elCurrentAudio = null;
+      }
+      URL.revokeObjectURL(url);
+      safeEnd();
+    };
     audio.play();
     return audio;
   } catch (e) {
+    // Fetch abortado por una nueva call: salir SIN onEnd (la nueva call
+    // ya manejara su propio ciclo onStart/onEnd).
+    if (e && (e.name === "AbortError" || e.code === 20)) return;
+
     console.warn("ElevenLabs TTS fallback:", e.message);
+
+    // Si nos supersedearon mientras subia el fetch, no caer al fallback
+    if (myToken !== _elCallToken) return;
+
     if ("speechSynthesis" in window) {
       const utt = new SpeechSynthesisUtterance(clean);
       utt.lang = "es-CO"; utt.rate = 0.92;
       const esV = window.speechSynthesis.getVoices().find(v => v.lang.startsWith("es"));
       if (esV) utt.voice = esV;
-      utt.onend = utt.onerror = () => onEnd && onEnd();
+      utt.onend = utt.onerror = () => safeEnd();
       window.speechSynthesis.speak(utt);
-    } else { onEnd && onEnd(); }
+    } else {
+      safeEnd();
+    }
   }
 }
 
