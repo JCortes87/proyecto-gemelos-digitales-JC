@@ -1,7 +1,7 @@
 """add sync control tables
 
 Revision ID: 87095c55fccf
-Revises: 
+Revises: 0001_initial_schema
 Create Date: 2026-03-24 09:46:14.645431
 
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = '87095c55fccf'
-down_revision: Union[str, Sequence[str], None] = None
+down_revision: Union[str, Sequence[str], None] = '0001_initial_schema'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
