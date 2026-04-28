@@ -549,6 +549,160 @@ async def gemelo_learning_outcomes(
         _http500(e, "gemelo_learning_outcomes", orgUnitId=orgUnitId)
 
 
+@router.get("/course/{orgUnitId}/grade-items")
+async def gemelo_grade_items(
+    orgUnitId: int,
+    svc: GemeloService = Depends(get_service),
+):
+    """Devuelve grade items + dropbox folders del curso con sus due dates.
+    Usado por el frontend para construir el calendario de entregas y los cortes."""
+    import asyncio
+
+    async def _safe_grade_items():
+        try:
+            raw = await svc.bs.list_grade_items(orgUnitId)
+            if isinstance(raw, dict):
+                return raw.get("Items") or raw.get("items") or []
+            return raw if isinstance(raw, list) else []
+        except Exception:
+            return []
+
+    async def _safe_dropbox_folders():
+        try:
+            raw = await svc.bs.list_dropbox_folders(orgUnitId)
+            if isinstance(raw, dict):
+                return raw.get("Items") or raw.get("items") or []
+            return raw if isinstance(raw, list) else []
+        except Exception:
+            return []
+
+    def _pick_dropbox_due_date(df: dict) -> Optional[str]:
+        if not isinstance(df, dict):
+            return None
+        direct = df.get("DueDate") or df.get("EndDate")
+        if direct:
+            return direct
+        availability = df.get("Availability") or {}
+        if isinstance(availability, dict):
+            for k in ("DueDate", "EndDate", "dueDate", "endDate"):
+                if availability.get(k):
+                    return availability[k]
+        for k in ("RestrictedDueDate", "SubmissionEndDate"):
+            if df.get(k):
+                return df[k]
+        return None
+
+    def _pick_dropbox_start_date(df: dict) -> Optional[str]:
+        if not isinstance(df, dict):
+            return None
+        direct = df.get("StartDate")
+        if direct:
+            return direct
+        availability = df.get("Availability") or {}
+        if isinstance(availability, dict):
+            for k in ("StartDate", "startDate"):
+                if availability.get(k):
+                    return availability[k]
+        return None
+
+    try:
+        grade_items, dropbox_folders = await asyncio.gather(
+            _safe_grade_items(),
+            _safe_dropbox_folders(),
+        )
+
+        dropbox_by_id = {}
+        dropbox_by_grade_item = {}
+        for df in dropbox_folders:
+            if not isinstance(df, dict):
+                continue
+            df_id = df.get("Id") or df.get("Identifier")
+            if df_id is not None:
+                dropbox_by_id[str(df_id)] = df
+            grade_item_id = df.get("GradeItemId")
+            if grade_item_id is not None:
+                dropbox_by_grade_item[str(grade_item_id)] = df
+
+        items = []
+        seen_dropbox_ids = set()
+
+        for it in grade_items:
+            if not isinstance(it, dict):
+                continue
+            grade_id = it.get("Id") or it.get("Identifier")
+            name = it.get("Name")
+            due_date = it.get("DueDate")
+            end_date = it.get("EndDate")
+
+            associated = it.get("AssociatedTool") or {}
+            tool_item_id = associated.get("ToolItemId")
+            tool_id = associated.get("ToolId")
+            linked_dropbox = None
+            if tool_id in (1, 2000) and tool_item_id is not None:
+                linked_dropbox = dropbox_by_id.get(str(tool_item_id))
+            if not linked_dropbox and grade_id is not None:
+                linked_dropbox = dropbox_by_grade_item.get(str(grade_id))
+
+            start_date = None
+            if linked_dropbox:
+                seen_dropbox_ids.add(str(linked_dropbox.get("Id") or ""))
+                df_due = _pick_dropbox_due_date(linked_dropbox)
+                if not due_date:
+                    due_date = df_due
+                if not end_date:
+                    end_date = df_due
+                start_date = _pick_dropbox_start_date(linked_dropbox)
+
+            items.append({
+                "id": grade_id,
+                "name": name,
+                "weightPct": it.get("Weight"),
+                "maxPoints": it.get("MaxPoints"),
+                "startDate": start_date,
+                "dueDate": due_date,
+                "endDate": end_date,
+                "gradeType": it.get("GradeType"),
+                "categoryId": it.get("CategoryId"),
+                "source": "grade_item",
+                "linkedDropboxId": (linked_dropbox or {}).get("Id"),
+            })
+
+        for df in dropbox_folders:
+            if not isinstance(df, dict):
+                continue
+            df_id = df.get("Id") or df.get("Identifier")
+            if str(df_id) in seen_dropbox_ids:
+                continue
+            df_due = _pick_dropbox_due_date(df)
+            df_start = _pick_dropbox_start_date(df)
+            items.append({
+                "id": df_id,
+                "name": df.get("Name"),
+                "weightPct": None,
+                "maxPoints": None,
+                "startDate": df_start,
+                "dueDate": df_due,
+                "endDate": df_due,
+                "gradeType": "Dropbox",
+                "categoryId": df.get("CategoryId"),
+                "source": "dropbox",
+                "linkedDropboxId": df_id,
+            })
+
+        return {
+            "orgUnitId": orgUnitId,
+            "count": len(items),
+            "gradeItemsCount": len(grade_items),
+            "dropboxFoldersCount": len(dropbox_folders),
+            "items": items,
+        }
+    except Exception as e:
+        msg = str(e)
+        if "403" in msg or "401" in msg or "404" in msg:
+            return {"orgUnitId": orgUnitId, "count": 0, "items": [], "error": msg[:200]}
+        _http500(e, "gemelo_grade_items", orgUnitId=orgUnitId)
+
+
 @router.get(
     "/debug/{orgUnitId}/folder/{folderId}/student/{userId}/rubric/{rubricId}/assessment"
 )
