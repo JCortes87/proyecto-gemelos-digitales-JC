@@ -1,34 +1,92 @@
 # app/services/brightspace_client.py
+"""
+Cliente HTTP delgado sobre la API de Brightspace (LE/LP).
+
+Resuelve el access_token desde:
+  1. dict `tokens` pasado explicitamente al constructor (legacy / jobs).
+  2. Header Authorization: Bearer <session_id> (cross-domain SPA).
+  3. Cookie gemelo_session_id (mismo dominio).
+
+Antes de cada llamada HTTP a Brightspace, si la sesion del usuario tiene
+refresh_token y el access_token esta por expirar (< REFRESH_THRESHOLD_SECONDS
+de vida restante), automaticamente mintea uno nuevo via Brightspace OAuth
+y actualiza SESSION_STORE. Asi una sesion del SPA no muere a la hora aunque
+el usuario deje el dashboard idle por horas.
+"""
+from __future__ import annotations
+
 import os
+import logging
+import time
 from typing import Any, Dict, Optional, List, Union
 
 import httpx
 from fastapi import Request, HTTPException
 
-from app.state import get_access_token
+from app.state import (
+    get_access_token,
+    get_session,
+    update_session_tokens,
+)
+from app.services.brightspace_auth import mint_access_token_from_refresh
+
+logger = logging.getLogger("uvicorn.error")
 
 JsonType = Union[Dict[str, Any], List[Any]]
 
-# Cookie name must match what main.py sets
+#|---------- Constantes de modulo ----------|
+# Cookie que main.py setea al final del OAuth callback. Tiene que matchear.
 SESSION_COOKIE = "gemelo_session_id"
 
+# Si al access_token le quedan menos de estos segundos de vida, refrescamos
+# proactivamente antes de hacer la request. 5 min da margen para que la
+# request en si no termine con un token expirado a mitad de camino.
+REFRESH_THRESHOLD_SECONDS = 300
 
+
+#|---------- Helpers de extraccion del session_id ----------|
 def _extract_session_id(request: Optional[Request]) -> Optional[str]:
-    """Extrae el session_id de la cookie de la request."""
+    """Saca el session_id de la cookie de la request."""
     if request is None:
         return None
     return request.cookies.get(SESSION_COOKIE)
 
 
+def _extract_session_id_any(request: Optional[Request]) -> Optional[str]:
+    """
+    Saca el session_id desde el header Authorization: Bearer <sid> o, si
+    no esta en el header, desde la cookie. Util cuando necesitamos el sid
+    para actualizar SESSION_STORE despues de un refresh.
+    """
+    if request is None:
+        return None
+
+    # Authorization: Bearer <session_id>
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        sid = auth_header[7:].strip()
+        if sid:
+            return sid
+
+    # Cookie
+    return _extract_session_id(request)
+
+
+#|---------- Resolucion de token (path sincrono — legacy y para tareas BG) ----------|
 def _resolve_token(request: Optional[Request], tokens: Optional[Dict[str, Any]]) -> str:
     """
     Resuelve el access_token con esta prioridad:
-    1. tokens dict explícito (legacy)
-    2. Authorization: Bearer <session_id> header (cross-domain)
-    3. Cookie gemelo_session_id
-    Lanza 401 si no hay token.
+      1. tokens dict explicito (legacy / BackgroundTask con token capturado).
+      2. Authorization: Bearer <session_id> header.
+      3. Cookie gemelo_session_id.
+
+    No hace refresh — solo retorna el token actual. Para refresh proactivo
+    ver `_resolve_token_with_refresh()` (async) que se usa antes de cada
+    request HTTP a Brightspace dentro de `_request_json()`.
+
+    Lanza 401 si no encuentra ningun token.
     """
-    # 1. dict explícito (legacy)
+    # 1. dict explicito (legacy)
     if tokens:
         t = tokens.get("access_token")
         if t:
@@ -44,7 +102,7 @@ def _resolve_token(request: Optional[Request], tokens: Optional[Dict[str, Any]])
                 if t:
                     return t
 
-        # 3. Cookie de sesión
+        # 3. Cookie de sesion
         sid = _extract_session_id(request)
         if sid:
             t = get_access_token(sid)
@@ -55,13 +113,25 @@ def _resolve_token(request: Optional[Request], tokens: Optional[Dict[str, Any]])
         status_code=401,
         detail=(
             "No autenticado. "
-            "Inicia sesión en /auth/brightspace/login "
+            "Inicia sesion en /auth/brightspace/login "
             "o accede desde Brightspace mediante LTI."
         ),
     )
 
 
+#|---------- BrightspaceClient: wrapper async sobre la API de Brightspace ----------|
 class BrightspaceClient:
+    """
+    Wrapper httpx-async para la API de Brightspace.
+
+    Usage normal (FastAPI dep):
+        bs = BrightspaceClient(request=request)   # via Depends
+        await bs.list_classlist(orgUnitId)
+
+    Usage para BackgroundTask / cron:
+        bs = BrightspaceClient(tokens={"access_token": "..."})
+    """
+
     def __init__(
         self,
         tokens: Optional[Dict[str, Any]] = None,
@@ -78,9 +148,64 @@ class BrightspaceClient:
         if not self.base_url:
             raise RuntimeError("Falta BRIGHTSPACE_BASE_URL en variables de entorno")
 
+    #|---------- Resolucion de auth headers (sincrono — sin refresh) ----------|
     def _auth_headers(self) -> Dict[str, str]:
+        """
+        Construye el header Authorization sin refrescar. Lo usa el path
+        sincrono (BackgroundTask helpers que necesitan capturar un token
+        para usarlo despues).
+        """
         token = _resolve_token(self._request, self._tokens)
         return {"Authorization": f"Bearer {token}"}
+
+    #|---------- Resolucion de auth headers con refresh proactivo (async) ----------|
+    async def _auth_headers_with_refresh(self) -> Dict[str, str]:
+        """
+        Igual que `_auth_headers()` pero con refresh proactivo:
+
+        1. Si tenemos session_id (cookie o Bearer), miramos la sesion en
+           SESSION_STORE.
+        2. Si la sesion existe, tiene refresh_token, y al access_token le
+           quedan < REFRESH_THRESHOLD_SECONDS de vida → mintamos uno nuevo
+           y actualizamos SESSION_STORE.
+        3. Si no hay session_id (caso legacy con `tokens` dict explicito)
+           o el refresh falla, caemos al path sincrono `_auth_headers()`.
+
+        Es lo que se llama desde `_request_json()` antes de cada llamada
+        HTTP a Brightspace.
+        """
+        sid = _extract_session_id_any(self._request)
+        if sid:
+            session = get_session(sid)
+            if session:
+                expires_at = float(session.get("expires_at") or 0)
+                refresh_token = session.get("refresh_token")
+                seconds_left = expires_at - time.time()
+
+                #|-------- Solo refrescar si hay refresh_token Y el token va a expirar pronto --------|
+                if refresh_token and seconds_left < REFRESH_THRESHOLD_SECONDS:
+                    logger.info(
+                        "Refrescando access_token (sid=%s, seconds_left=%.0f)",
+                        sid[:8] + "...", seconds_left,
+                    )
+                    new_data = await mint_access_token_from_refresh(refresh_token)
+                    if new_data:
+                        # Actualiza SESSION_STORE para que las proximas
+                        # requests usen el token nuevo sin refrescar otra vez.
+                        update_session_tokens(sid, new_data)
+                        return {"Authorization": f"Bearer {new_data['access_token']}"}
+                    else:
+                        # El refresh fallo (refresh_token revocado, red, etc).
+                        # Caemos al token actual: si esta vencido Brightspace
+                        # respondera 401 y el endpoint la propaga al usuario,
+                        # quien tendra que relogearse.
+                        logger.warning(
+                            "Refresh fallo para sid=%s; usando access_token actual",
+                            sid[:8] + "...",
+                        )
+
+        # Path por default: token actual (sea de session, tokens dict o lo que sea)
+        return self._auth_headers()
 
     @staticmethod
     def _ensure_json(r: httpx.Response, url: str) -> None:
@@ -102,10 +227,17 @@ class BrightspaceClient:
         params: Optional[Dict[str, Any]] = None,
         timeout: int = 30,
     ) -> JsonType:
+        """
+        Llama a Brightspace con auto-refresh de token si esta por expirar.
+
+        Refresca proactivamente ANTES de hacer la request (no reactivo
+        en 401) para evitar el round-trip extra del retry. El refresh
+        solo aplica a sesiones de usuario (donde tenemos refresh_token);
+        las llamadas con `tokens` dict explicito siguen como antes.
+        """
+        headers = await self._auth_headers_with_refresh()
         async with httpx.AsyncClient(timeout=timeout) as client:
-            r = await client.request(
-                method, url, headers=self._auth_headers(), params=params
-            )
+            r = await client.request(method, url, headers=headers, params=params)
         self._ensure_json(r, url)
         return r.json()
 

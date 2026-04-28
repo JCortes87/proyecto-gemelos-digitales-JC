@@ -6,10 +6,16 @@ from app.db.session import SessionLocal
 
 async def build_course_overview_from_db(orgUnitId: int) -> dict:
     """
-    Lee el overview agregado del curso directamente de Postgres (L2 read-path).
+    Lee el overview agregado del curso directamente desde Postgres,
+    sin tocar la API de Brightspace.
 
-    Depende de snapshots previamente poblados por
-    SyncService.sync_student_metric_snapshots(orgUnitId).
+    Devuelve la misma forma que `GemeloService.build_course_overview`
+    (medias del gradebook, distribucion de riesgo, alertas, etc.) pero
+    armada a partir de los snapshots persistidos.
+
+    Depende de que `SyncService.sync_student_metric_snapshots(orgUnitId)`
+    haya corrido recientemente. Si no hay snapshots para ese curso,
+    retorna `hasData: False`.
     """
     db = SessionLocal()
     try:

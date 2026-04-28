@@ -12,31 +12,38 @@ from app.services.brightspace_client import BrightspaceClient, get_brightspace_c
 from app.services.gemelo_service import GemeloService
 from app.services.sync_service import SyncService
 
-# L2 read-path: lectura DB-first y chequeo de edad
+#|---------- Lectura desde Postgres con chequeo de frescura de los datos ----------|
 from app.services.gemelo_db_service import build_course_overview_from_db
 from app.services.db_freshness import is_fresh
 
 
-# B-1 (lazy write-through): tras un fallback Brightspace exitoso,
-# refresca los snapshots en DB en background para que la proxima
-# visita al endpoint caiga al path DB-first (rapido).
+#|---------- Persistir snapshots tras fallback a Brightspace (background task) ----------|
 async def _refresh_overview_db_bg(orgUnitId: int, access_token: str) -> None:
     """
-    Tarea de background ejecutada DESPUES de devolver la respuesta al
-    cliente. Usa el access_token capturado en el momento del request
-    (no depende del Request original que ya cerro su scope).
+    Tarea de background que se ejecuta DESPUES de devolver la respuesta
+    al cliente. Re-sincroniza los snapshots de metricas del curso usando
+    el access_token capturado en el momento del request.
+
+    Se dispara cuando el endpoint /overview tuvo que llamar a Brightspace
+    porque los datos en Postgres estaban viejos. Tras la respuesta al
+    cliente, esta tarea actualiza la DB para que la proxima peticion al
+    mismo curso encuentre datos frescos y se sirva rapido sin volver a
+    Brightspace.
+
+    Recibe el token como string (no el Request original) para no depender
+    del scope de la request, que ya termino al ejecutarse esta tarea.
     """
     try:
         bs = BrightspaceClient(tokens={"access_token": access_token})
         sync_svc = SyncService(bs)
         result = await sync_svc.sync_student_metric_snapshots(orgUnitId)
         logger.info(
-            "B-1 background refresh ou=%s OK: %s",
+            "Refresh DB en background completado ou=%s: %s",
             orgUnitId, str(result)[:200],
         )
     except Exception as e:
         logger.warning(
-            "B-1 background refresh ou=%s FAILED: %s",
+            "Refresh DB en background fallo ou=%s: %s",
             orgUnitId, e,
         )
 
@@ -188,23 +195,29 @@ async def gemelo_course_overview(
     svc: GemeloService = Depends(get_service),
 ):
     """
-    Estrategia DB-first con fallback a Brightspace y write-through lazy
-    (Fase 5 — L2 read-path + B-1):
+    Devuelve el overview agregado del curso (medias del gradebook,
+    distribucion de riesgo, alertas, etc.) priorizando lectura desde
+    Postgres y cayendo a Brightspace solo cuando es necesario.
 
-    1. Intenta leer desde Postgres (build_course_overview_from_db).
-       - Si tiene datos Y `lastSyncAt` esta dentro de fresh_max_minutes,
-         responde con `source="db"`. Tiempo: <50ms tipico.
-    2. Si la DB no tiene datos frescos (o el lookup falla), cae al path
-       original que llama Brightspace y responde con `source="brightspace"`.
-       Tiempo: 1-3s tipico.
-    3. (B-1 lazy write-through) Tras un fallback exitoso, programa una
-       BackgroundTask que re-sincroniza los snapshots con la sesion del
-       usuario actual. La proxima visita encuentra DB fresca y va por el
-       path rapido. Self-healing sin scheduler.
+    Flujo:
 
-    El cliente puede forzar el bypass con `?fresh_max_minutes=0`.
+    1. Lee los snapshots desde Postgres. Si hay datos y `lastSyncAt`
+       esta dentro de `fresh_max_minutes`, responde con `source="db"`.
+       Tiempo tipico: < 50 ms.
+
+    2. Si la DB no tiene datos frescos (o el lookup falla), llama a
+       Brightspace para reconstruir el overview en vivo y responde
+       con `source="brightspace"`. Tiempo tipico: 1-3 s.
+
+    3. Tras un fallback exitoso a Brightspace, programa una tarea de
+       background que re-sincroniza los snapshots usando la sesion del
+       usuario actual. La proxima peticion al mismo curso encontrara
+       DB fresca y se servira rapida sin volver a Brightspace.
+
+    El cliente puede forzar el bypass de la cache con
+    `?fresh_max_minutes=0`.
     """
-    # Intento 1: DB-first
+    #|---------- Lectura rapida desde Postgres ----------|
     try:
         db_result = await build_course_overview_from_db(orgUnitId)
         if db_result.get("hasData") and is_fresh(
@@ -212,26 +225,26 @@ async def gemelo_course_overview(
         ):
             db_result["source"] = "db"
             logger.info(
-                "overview ou=%s served from DB (lastSyncAt=%s)",
+                "overview ou=%s servido desde Postgres (lastSyncAt=%s)",
                 orgUnitId, db_result.get("lastSyncAt"),
             )
             return db_result
     except Exception as e:
         logger.warning(
-            "DB-first lookup failed for overview ou=%s: %s — falling back to Brightspace",
+            "overview ou=%s: lectura de Postgres fallo (%s); reconstruyendo desde Brightspace",
             orgUnitId, e,
         )
 
-    # Fallback: Brightspace (path original)
-    logger.info("overview ou=%s falling back to Brightspace", orgUnitId)
+    #|---------- Reconstruccion desde Brightspace + persistencia en background ----------|
+    logger.info("overview ou=%s reconstruyendo desde Brightspace", orgUnitId)
     try:
         bs_result = await svc.build_course_overview(orgUnitId)
         if isinstance(bs_result, dict):
             bs_result.setdefault("source", "brightspace")
 
-        # B-1 (lazy write-through): tras un fallback exitoso, programa
-        # un refresh de snapshots usando el token del usuario actual.
-        # La respuesta al cliente no se demora — la task corre despues.
+        # Tras una llamada exitosa a Brightspace, persistimos los snapshots
+        # en background para acelerar la siguiente peticion al mismo curso.
+        # Errores aqui no afectan la respuesta al cliente.
         try:
             access_token = _extract_access_token_from_client(svc.bs)
             if access_token:
@@ -239,18 +252,18 @@ async def gemelo_course_overview(
                     _refresh_overview_db_bg, orgUnitId, access_token
                 )
                 logger.info(
-                    "B-1 scheduled background DB refresh for ou=%s",
+                    "overview ou=%s programado refresh DB en background",
                     orgUnitId,
                 )
             else:
                 logger.warning(
-                    "B-1 no access_token resoluble para ou=%s; skip refresh",
+                    "overview ou=%s sin access_token resoluble; no se programa refresh",
                     orgUnitId,
                 )
         except Exception as e:
             # Errores aqui no deben afectar la respuesta al cliente
             logger.warning(
-                "B-1 could not schedule background refresh ou=%s: %s",
+                "overview ou=%s no se pudo programar refresh DB en background: %s",
                 orgUnitId, e,
             )
 

@@ -27,6 +27,7 @@ from app.state import (
 from app.api.gemelo import router as gemelo_router
 from app.api.lti_keys import get_jwks
 from app.api import lti
+from app.api import admin as admin_api
 
 # ── Capa Postgres (Fase 3: integración manual, scheduler OFF) ─────────────────
 from sqlalchemy import text
@@ -44,6 +45,7 @@ app = FastAPI(title="Gemelo Digital - Backend")
 
 app.include_router(lti.router)
 app.include_router(gemelo_router)
+app.include_router(admin_api.router)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # CORS
