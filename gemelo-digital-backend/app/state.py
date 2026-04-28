@@ -92,8 +92,72 @@ def get_access_token(session_id: str) -> Optional[str]:
     """Atajo: devuelve solo el access_token de la sesión, o None."""
     s = get_session(session_id)
     return s.get("access_token") if s else None
- 
- 
+
+
+#|---------- Refresh-token: actualizar tokens en sesion existente ----------|
+def update_session_tokens(
+    session_id: str,
+    new_token_data: Dict[str, Any],
+) -> bool:
+    """
+    Actualiza el access_token / refresh_token / expires_at de una sesion
+    EXISTENTE tras una mintada exitosa via refresh_token.
+
+    Se invoca desde brightspace_client.py cuando detecta que el
+    access_token actual esta por expirar y llamo a
+    mint_access_token_from_refresh() (en app/services/brightspace_auth.py).
+
+    No crea sesiones nuevas — solo actualiza si ya existe. Preserva
+    user_id / user_name / user_email / iat (lo identificativo del
+    usuario) intactos.
+
+    Args:
+        session_id: el id de sesion a actualizar.
+        new_token_data: dict con al menos `access_token`. Otros campos
+                        opcionales: `refresh_token` (si Brightspace lo
+                        roto), `expires_in`, `expires_at`, `scope`,
+                        `token_type`.
+
+    Returns:
+        True si la sesion existia y se actualizo.
+        False si no existia (expirada o nunca creada) o si el dict
+        venia sin access_token.
+    """
+    if not session_id or not isinstance(new_token_data, dict):
+        return False
+    if not new_token_data.get("access_token"):
+        return False
+
+    with _STORE_LOCK:
+        s = SESSION_STORE.get(session_id)
+        if not s:
+            return False
+
+        #|-------- Solo tocamos los campos relacionados a tokens ----------|
+        s["access_token"] = new_token_data["access_token"]
+
+        # Brightspace puede rotar el refresh_token: si vino uno nuevo,
+        # lo guardamos. Si no vino, conservamos el viejo (sigue valido).
+        if new_token_data.get("refresh_token"):
+            s["refresh_token"] = new_token_data["refresh_token"]
+
+        # expires_at puede venir calculado por brightspace_auth (preferido)
+        # o derivable de expires_in.
+        if "expires_at" in new_token_data:
+            s["expires_at"] = float(new_token_data["expires_at"])
+        elif "expires_in" in new_token_data:
+            s["expires_at"] = time.time() + int(new_token_data["expires_in"])
+
+        # Campos cosmeticos que pueden venir en la respuesta
+        if new_token_data.get("token_type"):
+            s["token_type"] = new_token_data["token_type"]
+        if new_token_data.get("scope"):
+            s["scope"] = new_token_data["scope"]
+
+        SESSION_STORE[session_id] = s
+        return True
+
+
 # ── Compatibilidad hacia atrás ────────────────────────────────────────────────
 # El dict global ya no se usa para autenticación real.
 # Se mantiene vacío para que los imports legacy no rompan.
