@@ -55,7 +55,7 @@ function normalizeBackendAlert(a) {
   };
 }
 
-export default function SmartAlerts({
+function SmartAlerts({
   studentRows = [],
   overview = null,
   courseInfo = null,
@@ -358,3 +358,5 @@ export default function SmartAlerts({
     </div>
   );
 }
+
+export default React.memo(SmartAlerts);

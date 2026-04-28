@@ -20,7 +20,7 @@ const translations = {
     "common.print": "Imprimir",
     "common.logout": "Cerrar sesión",
     // Dashboard
-    "dashboard.title": "Gemelo Digital · Vista Docente",
+    "dashboard.title": "G.D · Vista Docente",
     "dashboard.students": "Estudiantes",
     "dashboard.courseManagement": "Gestión del curso",
     "dashboard.riskAcademic": "Riesgo académico",
@@ -33,7 +33,7 @@ const translations = {
     "dashboard.myCourses": "Mis cursos",
     "dashboard.noCourse": "Selecciona un curso",
     // Portal
-    "portal.title": "Gemelo Digital · Mi Rendimiento",
+    "portal.title": "G.D · Mi Rendimiento",
     "portal.greeting": "Hola",
     "portal.myGrade": "Mi Nota Actual",
     "portal.coverage": "Cobertura",

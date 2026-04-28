@@ -1,15 +1,6 @@
 import React from "react";
 import { injectStyles } from "../../styles/global";
-
-const API_BASE_URL = (
-  import.meta.env?.VITE_API_BASE_URL ||
-  import.meta.env?.VITE_GEMELO_BASE_URL ||
-  ""
-).replace(/\/$/, "");
-
-function apiUrl(path) {
-  return API_BASE_URL ? `${API_BASE_URL}${path}` : path;
-}
+import { apiUrl } from "../../utils/api";
 
 export default function LoginScreen({ orgUnitId }) {
   React.useEffect(() => { injectStyles(); }, []);
@@ -23,7 +14,7 @@ export default function LoginScreen({ orgUnitId }) {
   return (
     <main
       role="main"
-      aria-label="Inicio de sesión - Gemelo Digital CESA"
+      aria-label="Inicio de sesión - G.D CESA"
       style={{
         minHeight: "100vh", background: "var(--bg)",
         display: "flex", alignItems: "center", justifyContent: "center",
@@ -49,10 +40,10 @@ export default function LoginScreen({ orgUnitId }) {
           }}>CESA</div>
           <div style={{ textAlign: "left" }}>
             <div style={{ fontSize: 16, fontWeight: 900, color: "var(--text)", letterSpacing: "-0.02em" }}>
-              Gemelo Digital
+              G.D
             </div>
             <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-              v2.0
+              V.260428
             </div>
           </div>
         </div>
@@ -101,7 +92,7 @@ export default function LoginScreen({ orgUnitId }) {
         }}>
           <p style={{ fontSize: 11, color: "var(--brand)", fontWeight: 700, margin: 0 }}>
             También puedes acceder directamente desde tu curso en Brightspace
-            usando el enlace de la herramienta Gemelo Digital.
+            usando el enlace de la herramienta G.D.
           </p>
         </div>
       </div>

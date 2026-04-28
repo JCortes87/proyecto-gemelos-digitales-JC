@@ -1408,27 +1408,12 @@ class GemeloService:
                     if isinstance(rubrics_cfg, dict)
                     else getattr(rubrics_cfg, rubricId, None)
                 )
-                if not rubric_cfg:
-                    qc_flags.append(
-                        {
-                            "type": "missing_rubric_config",
-                            "rubricId": rubricId,
-                            "folderId": folderId,
-                        }
-                    )
-                    continue
 
                 criteria_outcomes = assessment.get("CriteriaOutcome") or []
                 if not criteria_outcomes:
-                    qc_flags.append(
-                        {
-                            "type": "no_rubric_outcome",
-                            "rubricId": rubricId,
-                            "folderId": folderId,
-                            "userId": userId,
-                            "message": "No hay CriteriaOutcome (rúbrica no diligenciada/publicada).",
-                        }
-                    )
+                    # Sin CriteriaOutcome significa que el docente aún no diligenció
+                    # esa rúbrica para este estudiante: caso normal, no es un problema
+                    # de calidad de datos. Lo omitimos silenciosamente.
                     continue
 
                 outcome_by_criterion: Dict[str, Dict[str, Any]] = {}
@@ -1437,6 +1422,32 @@ class GemeloService:
                     if cid is None:
                         continue
                     outcome_by_criterion[str(int(cid))] = co
+
+                # Fallback: si no hay configuración local de rúbrica, creamos una
+                # unidad sintética por rúbrica usando los datos de Brightspace
+                # directamente. Cada criterio aporta con peso 1.0 a esa unidad.
+                if not rubric_cfg:
+                    rubric_name = rubric_detail.get("Name") or f"Rúbrica {rubricId}"
+                    folder_name = folder.get("Name") or f"Folder {folderId}"
+                    unit_code = f"RUB-{rubricId}"
+                    for cid, co in outcome_by_criterion.items():
+                        pct = self._pct_from_outcome(
+                            co, rubric_detail, scale_type, max_level_points
+                        )
+                        units_acc.setdefault(unit_code, []).append(
+                            (
+                                pct,
+                                1.0,
+                                {
+                                    "folderId": folderId,
+                                    "rubricId": rubricId_int,
+                                    "criterionId": int(cid),
+                                    "rubricName": rubric_name,
+                                    "folderName": folder_name,
+                                },
+                            )
+                        )
+                    continue
 
                 learning_units = (
                     getattr(rubric_cfg, "learningUnits", None)

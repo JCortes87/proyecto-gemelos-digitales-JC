@@ -392,6 +392,7 @@ const GLOBAL_STYLES = `
   .voice-btn:hover { border-color: var(--brand); background: var(--brand-light); color: var(--brand); }
   .voice-btn.listening { border-color: var(--critical); background: var(--critical-bg); color: var(--critical); animation: voicePulse 1s ease infinite; }
   @keyframes voicePulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(217,45,32,0.3); } 50% { box-shadow: 0 0 0 6px rgba(217,45,32,0); } }
+  @keyframes skeletonShimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 
   .voice-hint { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 10px; border: 1px dashed var(--border); background: var(--bg); color: var(--muted); font-size: 11px; font-weight: 600; flex-wrap: wrap; }
 

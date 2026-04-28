@@ -35,7 +35,45 @@ export function CourseProvider({ children, orgUnitId: externalOrgUnitId }) {
   const [loadingCourses, setLoadingCourses] = useState(false);
   const [courseListLoaded, setCourseListLoaded] = useState(false);
 
-  const thresholds = overview?.thresholds || { critical: 50, watch: 70 };
+  // Per-course threshold overrides (#13). Stored in localStorage as
+  // gemelo_thresholds_<orgUnitId> = JSON.stringify({critical, watch}).
+  const [thresholdOverrides, setThresholdOverrides] = useState({});
+
+  useEffect(() => {
+    if (!orgUnitId) return;
+    try {
+      const raw = localStorage.getItem(`gemelo_thresholds_${orgUnitId}`);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        setThresholdOverrides((prev) => ({ ...prev, [orgUnitId]: parsed }));
+      }
+    } catch { /* ignore */ }
+  }, [orgUnitId]);
+
+  const baseThresholds = overview?.thresholds || { critical: 50, watch: 70 };
+  const override = thresholdOverrides[orgUnitId];
+  const thresholds = override ? { ...baseThresholds, ...override } : baseThresholds;
+
+  const setCourseThresholds = useCallback((next) => {
+    if (!orgUnitId) return;
+    const clean = {
+      critical: Math.max(0, Math.min(100, Number(next.critical) || 0)),
+      watch: Math.max(0, Math.min(100, Number(next.watch) || 0)),
+    };
+    if (clean.watch < clean.critical) clean.watch = clean.critical;
+    setThresholdOverrides((prev) => ({ ...prev, [orgUnitId]: clean }));
+    try { localStorage.setItem(`gemelo_thresholds_${orgUnitId}`, JSON.stringify(clean)); } catch { /* ignore */ }
+  }, [orgUnitId]);
+
+  const resetCourseThresholds = useCallback(() => {
+    if (!orgUnitId) return;
+    setThresholdOverrides((prev) => {
+      const n = { ...prev };
+      delete n[orgUnitId];
+      return n;
+    });
+    try { localStorage.removeItem(`gemelo_thresholds_${orgUnitId}`); } catch { /* ignore */ }
+  }, [orgUnitId]);
 
   // Search courses
   const searchCourses = useCallback(async (term) => {
@@ -122,6 +160,9 @@ export function CourseProvider({ children, orgUnitId: externalOrgUnitId }) {
       setError,
 
       thresholds,
+      isThresholdOverridden: !!override,
+      setCourseThresholds,
+      resetCourseThresholds,
 
       courseList,
       loadingCourses,

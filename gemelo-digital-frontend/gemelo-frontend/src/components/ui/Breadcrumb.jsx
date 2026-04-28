@@ -71,7 +71,7 @@ export default function Breadcrumb({ items = [], style = {} }) {
               </span>
             )}
             {!isLast && (
-              <span style={{ color: "var(--border2, #CDD3DE)", fontSize: 11 }}>›</span>
+              <span aria-hidden="true" style={{ color: "var(--border2, #CDD3DE)", fontSize: 11 }}>›</span>
             )}
           </React.Fragment>
         );

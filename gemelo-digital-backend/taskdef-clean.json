@@ -21,8 +21,8 @@
       "essential": true,
       "command": [],
       "environment": [
-        { "name": "ELEVENLABS_API_KEY", "value": "sk_7844a11273a93403a35da574e314338d66e51417d79ed494" },
-        { "name": "ELEVENLABS_VOICE_ID", "value": "pFZP5JQG7iQjIQuC4Bku" },
+        { "name": "ELEVENLABS_API_KEY", "value": "67e3f0bd9fcdb7bd0123c15d4e9faa4af80e9c81599bc62bf36a741d356ae1a3" },
+        { "name": "ELEVENLABS_VOICE_ID", "value": "YExhVa4bZONzeingloMX" },
         {
           "name": "BRIGHTSPACE_SCOPE",
           "value": "core:*:* Application:*:* Data:*:* enrollment:own_enrollment:read enrollment:orgunit:read users:own_profile:read users:profile:read grades:gradeobjects:read grades:gradevalues:read grades:own_grades:read grades:gradeschemes:read grades:gradesettings:read grades:gradestatistics:read grades:gradecategories:read outcomes:sets:read outcomes:alignments:read content:modules:readonly content:topics:readonly content:toc:read content:completions:read rubrics:objects:read rubrics:assessments:read dropbox:folders:read discussions:forums:readonly discussions:topics:readonly quizzing:quizzes:read quizzing:attempts:read organizations:organization:read orgunits:course:read role:detail:read"
@@ -66,6 +66,10 @@
         {
           "name": "BRIGHTSPACE_TOKEN_URL",
           "value": "https://auth.brightspace.com/core/connect/token"
+        },
+        {
+          "name": "DATABASE_URL",
+          "value": "postgresql+psycopg://gemelo_admin:GemeloD1g1tal2026!@gemelo-digital-db.crp1lzwejl3x.us-east-1.rds.amazonaws.com:5432/gemelo_digital"
         }
       ],
       "mountPoints": [],

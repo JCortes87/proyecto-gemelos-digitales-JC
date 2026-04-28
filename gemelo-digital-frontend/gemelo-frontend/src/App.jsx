@@ -32,7 +32,7 @@ function PageLoader() {
         borderRadius: 24, padding: "40px 48px", textAlign: "center",
         boxShadow: "0 8px 32px rgba(15,24,39,0.12)",
       }}>
-        <div style={{ fontSize: 20, fontWeight: 800, color: "var(--text)" }}>CESA · Gemelo Digital</div>
+        <div style={{ fontSize: 20, fontWeight: 800, color: "var(--text)" }}>CESA · G.D</div>
         <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 4 }}>Cargando...</div>
       </div>
     </div>
@@ -40,7 +40,7 @@ function PageLoader() {
 }
 
 function AppRoutes() {
-  const { authUser, authChecked, isDualRole, isStudent } = useAuth();
+  const { authUser, authChecked, isDualRole, isStudent, isSuperAdmin } = useAuth();
 
   if (!authChecked) return <PageLoader />;
   if (!authUser) return <LoginScreen />;
@@ -87,11 +87,11 @@ function AppRoutes() {
         {/* Login page */}
         <Route path="/login" element={<LoginScreen />} />
 
-        {/* Home — role selector for dual-role, auto-redirect for single-role */}
+        {/* Home — role selector for dual-role/superadmin, auto-redirect for single-role */}
         <Route
           path="/"
           element={
-            isDualRole
+            isDualRole || isSuperAdmin
               ? <RoleHome />
               : <Navigate to={isStudent ? "/portal" : "/dashboard"} replace />
           }
@@ -101,7 +101,7 @@ function AppRoutes() {
         <Route
           path="*"
           element={
-            isDualRole
+            isDualRole || isSuperAdmin
               ? <Navigate to="/" replace />
               : <Navigate to={isStudent ? "/portal" : "/dashboard"} replace />
           }
@@ -122,7 +122,7 @@ export default function App() {
         <ThemeProvider>
           <ToastProvider>
             <AuthProvider>
-              <ErrorBoundary sectionName="Gemelo Digital">
+              <ErrorBoundary sectionName="G.D">
                 <AppRoutes />
               </ErrorBoundary>
             </AuthProvider>

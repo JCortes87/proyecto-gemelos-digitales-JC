@@ -1,14 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
-
-const API_BASE_URL = (
-  import.meta.env?.VITE_API_BASE_URL ||
-  import.meta.env?.VITE_GEMELO_BASE_URL ||
-  ""
-).replace(/\/$/, "");
-
-function apiUrl(path) {
-  return API_BASE_URL ? `${API_BASE_URL}${path}` : path;
-}
+import { apiUrl } from "../utils/api";
 
 const AuthContext = createContext(null);
 
@@ -21,7 +12,8 @@ function mapSingleRole(backendRole) {
   const r = String(backendRole).toLowerCase().trim();
   if (ROLES_STUDENT.has(r) || r.includes("estudiante") || r.includes("student")) return "student";
   if (ROLES_INSTRUCTOR.has(r) || r.includes("instructor") || r.includes("admin") || r.includes("coordinador")) return "instructor";
-  return "instructor"; // unknown roles default to instructor
+  console.warn(`[AuthContext] Rol desconocido de Brightspace: "${backendRole}" — asignando "instructor" por defecto`);
+  return "instructor";
 }
 
 // Determine all app-level roles from backend all_roles array
@@ -97,7 +89,9 @@ export function AuthProvider({ children }) {
                 items.map(c => String(c.roleName || "").trim()).filter(r => r)
               )];
               if (rolesFromCourses.length > 0) {
-                allRolesRaw = rolesFromCourses;
+                // Merge course roles with system roles from /auth/me
+                // (system roles like "Super Administrator" don't appear in enrollments)
+                allRolesRaw = [...new Set([...allRolesRaw, ...rolesFromCourses])];
               }
             }
           } catch {
@@ -107,9 +101,12 @@ export function AuthProvider({ children }) {
           const appRoles = mapAllRoles(allRolesRaw);
           const primaryRole = mapSingleRole(data.role) || appRoles[0];
 
-          const isSuperAdmin = allRolesRaw.some(
-            (r) => String(r).toLowerCase().includes("super admin")
-          );
+          // SuperAdmin detection: env var list, backend role, or enrolled roles
+          const superAdminIds = (import.meta.env?.VITE_SUPERADMIN_IDS || "").split(",").map(s => s.trim()).filter(Boolean);
+          const isSuperAdmin =
+            superAdminIds.includes(String(data.user_id)) ||
+            allRolesRaw.some((r) => String(r).toLowerCase().includes("super admin")) ||
+            String(data.role || "").toLowerCase().includes("super admin");
           const user = {
             ...data,
             all_roles: allRolesRaw,

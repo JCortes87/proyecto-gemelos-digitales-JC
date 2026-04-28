@@ -18,13 +18,13 @@ import { COLORS } from "../../utils/colors";
  * Data comes from useCourseSnapshots (localStorage-persisted).
  * If there are < 2 snapshots, shows an empty state.
  */
-export default function CourseTrends({ snapshots = [] }) {
-  const data = snapshots.map((s) => ({
+function CourseTrends({ snapshots = [] }) {
+  const data = React.useMemo(() => snapshots.map((s) => ({
     date: s.date ? s.date.slice(5) : "",  // MM-DD
     "Nota promedio": s.avgPct != null ? Number((s.avgPct / 10).toFixed(2)) : null,
     "% en riesgo": s.atRiskPct != null ? Number(s.atRiskPct.toFixed(1)) : null,
     "Cobertura": s.coveragePct != null ? Number(s.coveragePct.toFixed(1)) : null,
-  }));
+  })), [snapshots]);
 
   if (snapshots.length < 2) {
     return (
@@ -88,3 +88,5 @@ export default function CourseTrends({ snapshots = [] }) {
     </div>
   );
 }
+
+export default React.memo(CourseTrends);

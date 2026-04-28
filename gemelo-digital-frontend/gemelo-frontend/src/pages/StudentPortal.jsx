@@ -1,5 +1,7 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, lazy, Suspense } from "react";
 import { useNavigate } from "react-router-dom";
+
+const StudentOverviewPanel = lazy(() => import("./StudentOverviewPanel"));
 import {
   ResponsiveContainer,
   LineChart,
@@ -12,7 +14,7 @@ import {
 } from "recharts";
 import { useAuth } from "../context/AuthContext";
 import { apiGet } from "../utils/api";
-import { COLORS, colorForPct, colorForRisk } from "../utils/colors";
+import { COLORS, STATUS_CONFIG, colorForPct, colorForRisk } from "../utils/colors";
 import {
   fmtPct,
   fmtGrade10FromPct,
@@ -22,6 +24,7 @@ import {
   flattenOutcomeDescriptions,
   buildCorteGroups,
 } from "../utils/helpers";
+import { isStudentRole } from "../utils/roles";
 import { injectStyles } from "../styles/global";
 import useMediaQuery from "../hooks/useMediaQuery";
 import DueDateCalendar from "../components/dashboard/DueDateCalendar";
@@ -41,7 +44,7 @@ function formatDueDate(iso) {
 
 /* ── Inline micro-components (keep portal self-contained) ── */
 
-function CircularRing({ pct, size = 80, stroke = 8, color, label, sublabel, fontSize }) {
+const CircularRing = React.memo(function CircularRing({ pct, size = 80, stroke = 8, color, label, sublabel, fontSize }) {
   const r = (size - stroke) / 2;
   const circ = 2 * Math.PI * r;
   const pctClamped = Math.max(0, Math.min(100, Number(pct) || 0));
@@ -49,8 +52,15 @@ function CircularRing({ pct, size = 80, stroke = 8, color, label, sublabel, font
   const ringColor = color || "var(--brand)";
   const textSize = fontSize || Math.round(size * 0.22);
   return (
-    <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
-      <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
+    <div
+      style={{ position: "relative", width: size, height: size, flexShrink: 0 }}
+      role="progressbar"
+      aria-valuenow={Math.round(pctClamped)}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-label={sublabel ? `${sublabel}: ${Math.round(pctClamped)}%` : `Progreso ${Math.round(pctClamped)}%`}
+    >
+      <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }} aria-hidden="true">
         <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--border)" strokeWidth={stroke} />
         <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={ringColor} strokeWidth={stroke}
           strokeLinecap="round" strokeDasharray={circ} strokeDashoffset={offset}
@@ -62,21 +72,11 @@ function CircularRing({ pct, size = 80, stroke = 8, color, label, sublabel, font
       </div>
     </div>
   );
-}
+});
 
 function StatusBadge({ status }) {
   const s = normStatus(status);
-  const CONFIG = {
-    solido: { bg: "var(--ok-bg)", fg: "#1B5E20", dot: COLORS.ok, label: "Óptimo" },
-    optimo: { bg: "var(--ok-bg)", fg: "#1B5E20", dot: COLORS.ok, label: "Óptimo" },
-    "en seguimiento": { bg: "var(--watch-bg)", fg: "#9A3412", dot: COLORS.watch, label: "Seguimiento" },
-    critico: { bg: "var(--critical-bg)", fg: "#B42318", dot: COLORS.critical, label: "Crítico" },
-    pending: { bg: "var(--pending-bg)", fg: "var(--muted)", dot: COLORS.pending, label: "Pendiente" },
-    alto: { bg: "var(--critical-bg)", fg: "#B42318", dot: COLORS.critical, label: "Alto" },
-    medio: { bg: "var(--watch-bg)", fg: "#9A3412", dot: COLORS.watch, label: "Medio" },
-    bajo: { bg: "var(--ok-bg)", fg: "#1B5E20", dot: COLORS.ok, label: "Bajo" },
-  };
-  const cfg = CONFIG[s] || { bg: "var(--pending-bg)", fg: "var(--muted)", dot: COLORS.pending, label: status || "—" };
+  const cfg = STATUS_CONFIG[s] || { bg: "var(--pending-bg)", fg: "var(--muted)", dot: COLORS.pending, label: status || "—" };
   return (
     <span className="badge" style={{ background: cfg.bg, color: cfg.fg, border: `1px solid ${cfg.dot}22`, fontWeight: 700, letterSpacing: "0.03em", padding: "4px 10px", fontSize: 11, borderRadius: 999 }}>
       <span className="pulse-dot" style={{ background: cfg.dot, width: 5, height: 5, borderRadius: "50%", display: "inline-block", flexShrink: 0 }} />
@@ -111,13 +111,14 @@ function ProgressBar({ value, color, animate = true }) {
 
 /* ── Student Portal Page ── */
 
-export default function StudentPortal({ orgUnitIdOverride, userIdOverride }) {
+export default function StudentPortal({ orgUnitIdOverride, userIdOverride, allowOverviewPanel = true }) {
   useEffect(() => { injectStyles(); }, []);
 
   const { authUser, logout, initialOrgUnitId, isDualRole } = useAuth();
   const navigate = useNavigate();
   const isMobile = useMediaQuery("(max-width: 640px)");
   const [darkMode, setDarkMode] = useState(false);
+  const [showOverviewPanel, setShowOverviewPanel] = useState(false);
   const [showCoursePanel, setShowCoursePanel] = useState(false);
   const [studentCourses, setStudentCourses] = useState([]);
   const [loadingCourses, setLoadingCourses] = useState(false);
@@ -145,12 +146,8 @@ export default function StudentPortal({ orgUnitIdOverride, userIdOverride }) {
       try {
         const data = await apiGet("/brightspace/courses/enrolled?active_only=false&limit=200");
         if (!alive) return;
-        const STUDENT_ROLES = ["estudiante ef", "student", "estudiante"];
         const items = Array.isArray(data?.items) ? data.items : [];
-        const myStudentCourses = items.filter(c => {
-          const rn = String(c.roleName || "").toLowerCase().trim();
-          return STUDENT_ROLES.some(sr => rn.includes(sr));
-        });
+        const myStudentCourses = items.filter(c => isStudentRole(c.roleName));
         myStudentCourses.sort((a, b) => {
           if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
           return String(a.name || "").localeCompare(String(b.name || ""), "es", { sensitivity: "base" });
@@ -210,9 +207,21 @@ export default function StudentPortal({ orgUnitIdOverride, userIdOverride }) {
   const [courseInfo, setCourseInfo] = useState(null);
   const [learningOutcomesPayload, setLearningOutcomesPayload] = useState(null);
 
-  const userId = userIdOverride || authUser?.user_id;
+  const impersonateUser = !userIdOverride ? sessionStorage.getItem("gemelo_impersonate_user") : null;
+  const userId = userIdOverride || (impersonateUser ? Number(impersonateUser) : null) || authUser?.user_id;
+  // Clean up impersonation flag after reading it
+  useEffect(() => {
+    if (impersonateUser) sessionStorage.removeItem("gemelo_impersonate_user");
+  }, []);
   const userName = authUser?.user_name || "Estudiante";
   const firstName = userName.split(" ")[0];
+
+  // Resolve course name: prefer courseInfo from API, fallback to enrolled courses list
+  const courseName = useMemo(() => {
+    if (courseInfo?.Name) return courseInfo.Name;
+    const match = studentCourses.find(c => String(c.id) === String(orgUnitId) || String(c.orgUnitId) === String(orgUnitId));
+    return match?.name || null;
+  }, [courseInfo, studentCourses, orgUnitId]);
 
   // Load student data
   useEffect(() => {
@@ -345,7 +354,7 @@ export default function StudentPortal({ orgUnitIdOverride, userIdOverride }) {
           <div style={{ fontSize: 48, marginBottom: 16 }}>🎓</div>
           <h2 style={{ fontSize: 20, fontWeight: 900, color: "var(--text)", margin: "0 0 10px" }}>Portal Estudiante</h2>
           <p style={{ fontSize: 14, color: "var(--muted)", lineHeight: 1.6, margin: "0 0 24px" }}>
-            Hola, {firstName}. Para ver tu información académica, accede desde tu curso en Brightspace usando el enlace de Gemelo Digital.
+            Hola, {firstName}. Para ver tu información académica, accede desde tu curso en Brightspace usando el enlace de G.D.
           </p>
           <button onClick={logout} style={{ background: "none", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 16px", fontSize: 12, fontWeight: 700, color: "var(--muted)", cursor: "pointer" }}>
             Cerrar sesión
@@ -404,10 +413,10 @@ export default function StudentPortal({ orgUnitIdOverride, userIdOverride }) {
         <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
           <div style={{ width: 32, height: 32, borderRadius: 8, background: "var(--brand)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 10, fontWeight: 900, flexShrink: 0 }}>CESA</div>
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)" }}>Gemelo Digital</div>
+            <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)" }}>G.D</div>
             <div style={{ fontSize: 9, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Portal Estudiante</div>
           </div>
-          {courseInfo?.Name && (
+          {courseName && (
             <div style={{
               fontSize: 11, fontWeight: 700, color: "var(--brand)",
               padding: "4px 10px", borderRadius: 8,
@@ -416,11 +425,27 @@ export default function StudentPortal({ orgUnitIdOverride, userIdOverride }) {
               overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
               maxWidth: isMobile ? 120 : 280,
             }}>
-              {courseInfo.Name}
+              {courseName}
             </div>
           )}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {/* Ver mi resumen general — solo para el propio estudiante o super admin */}
+          {allowOverviewPanel && (
+            <button
+              onClick={() => setShowOverviewPanel(true)}
+              title="Ver rendimiento general en todas mis asignaturas"
+              aria-label="Ver mi resumen general"
+              style={{
+                display: "flex", alignItems: "center", gap: 6,
+                padding: "7px 14px", fontSize: 12, fontWeight: 700,
+                borderRadius: 10, border: "1px solid var(--brand)",
+                background: "var(--brand-light)", color: "var(--brand)", cursor: "pointer",
+              }}
+            >
+              📊 {isMobile ? "" : "Mi resumen"}
+            </button>
+          )}
           {(studentCourses.length > 1 || isDualRole) && (
             <button
               onClick={handleGoHome}
@@ -543,13 +568,13 @@ export default function StudentPortal({ orgUnitIdOverride, userIdOverride }) {
         {/* Page Header */}
         <div style={{ marginBottom: 20 }}>
           <div style={{ fontSize: 10, fontWeight: 800, color: "var(--brand)", textTransform: "uppercase", letterSpacing: "0.12em", marginBottom: 4 }}>
-            Gemelo Digital · Mi Rendimiento
+            G.D · Mi Rendimiento
           </div>
           <h1 style={{ fontSize: isMobile ? 22 : 28, fontWeight: 900, color: "var(--text)", letterSpacing: "-0.03em", lineHeight: 1.1 }}>
             Hola, {firstName}
           </h1>
           <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 4, fontWeight: 500 }}>
-            {courseInfo?.Name || `Curso ${orgUnitId}`}
+            {courseName || `Curso ${orgUnitId}`}
           </div>
         </div>
 
@@ -965,7 +990,7 @@ export default function StudentPortal({ orgUnitIdOverride, userIdOverride }) {
               <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 12, lineHeight: 1.5 }}>
                 Aquí ves todas las entregas del curso organizadas por fecha. Pasa el cursor sobre una tarea para ver cuántos días te quedan y el rango completo de fechas disponible para entregar. Las entregas marcadas con <strong style={{ color: "#dc2626" }}>¡!</strong> vencen en menos de 2 días.
               </div>
-              <DueDateCalendar orgUnitId={orgUnitId} />
+              <DueDateCalendar orgUnitId={orgUnitId} studentEvidences={evidences} />
             </Card>
           </div>
         ) : null}
@@ -1081,9 +1106,23 @@ export default function StudentPortal({ orgUnitIdOverride, userIdOverride }) {
 
         {/* Footer */}
         <div style={{ textAlign: "center", padding: "20px 0 40px", fontSize: 11, color: "var(--muted)" }}>
-          CESA · Gemelo Digital v2.0 · Portal Estudiante
+          CESA · G.D V.260428 · Portal Estudiante
         </div>
       </main>
+
+      {/* StudentOverviewPanel overlay — para que el estudiante vea su resumen general */}
+      {showOverviewPanel && userId && (
+        <Suspense fallback={
+          <div style={{ position: "fixed", inset: 0, zIndex: 300, background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, color: "var(--muted)" }}>
+            Cargando resumen general...
+          </div>
+        }>
+          <StudentOverviewPanel
+            userId={userId}
+            onClose={() => setShowOverviewPanel(false)}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

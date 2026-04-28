@@ -8,5 +8,9 @@ COPY app ./app
 COPY main.py ./main.py
 COPY config ./config
 COPY frontend_dist ./frontend_dist
+COPY alembic ./alembic
+COPY alembic.ini ./alembic.ini
+COPY start.sh ./start.sh
+RUN chmod +x ./start.sh
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["./start.sh"]

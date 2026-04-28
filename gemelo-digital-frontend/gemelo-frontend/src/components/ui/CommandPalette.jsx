@@ -15,12 +15,18 @@ export default function CommandPalette({ open, onClose, commands = [] }) {
   const [query, setQuery] = useState("");
   const [activeIdx, setActiveIdx] = useState(0);
   const inputRef = useRef(null);
+  const dialogRef = useRef(null);
+  const previousFocusRef = useRef(null);
 
   useEffect(() => {
     if (open) {
+      previousFocusRef.current = document.activeElement;
       setQuery("");
       setActiveIdx(0);
       setTimeout(() => inputRef.current?.focus(), 50);
+    } else if (previousFocusRef.current) {
+      previousFocusRef.current.focus();
+      previousFocusRef.current = null;
     }
   }, [open]);
 
@@ -54,6 +60,24 @@ export default function CommandPalette({ open, onClose, commands = [] }) {
     } else if (e.key === "Escape") {
       e.preventDefault();
       onClose?.();
+    } else if (e.key === "Tab") {
+      // Focus trap — keep Tab cycling within the dialog
+      const root = dialogRef.current;
+      if (!root) return;
+      const focusables = root.querySelectorAll(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      );
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement;
+      if (e.shiftKey && active === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
     }
   };
 
@@ -83,7 +107,9 @@ export default function CommandPalette({ open, onClose, commands = [] }) {
       }}
     >
       <div
+        ref={dialogRef}
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={handleKeyDown}
         style={{
           width: "min(640px, 100%)",
           background: "var(--card)",

@@ -36,26 +36,25 @@ import useCompactMode from "../hooks/useCompactMode";
 import useKeyboardShortcuts from "../hooks/useKeyboardShortcuts";
 import useCourseSnapshots from "../hooks/useCourseSnapshots";
 import useStudentChat from "../hooks/useStudentChat";
-import { exportStudentsCsv, exportCourseReport } from "../utils/export";
+import { exportStudentsCsv, exportCourseReport, STUDENT_CSV_COLUMNS } from "../utils/export";
+import { apiUrl, apiGet, mapLimit, API_BASE_URL } from "../utils/api";
+import { elSpeak, elStop, elListen } from "../utils/speech";
+import { COLORS, STATUS_CONFIG, colorForRisk, colorForPct, colorForLearningOutcome } from "../utils/colors";
+import {
+  toDate, weeksBetween, clamp, normStatus,
+  fmtPct, fmtGrade10FromPct, contentRhythmStatus,
+  parseFormulaReferences, matchEvidencesByFormula,
+  detectCortePeriod, buildCorteGroups,
+  flattenOutcomeDescriptions, isVisibleContentItem,
+  safeAvg, pickCriticalMacroFromGemelo,
+  computeRiskFromPct, suggestRouteForStudent,
+} from "../utils/helpers";
+import { isStudentRole } from "../utils/roles";
 /**
  * =========================
  * Config
  * =========================
  */
-
-const API_BASE_URL = (
-  import.meta.env?.VITE_API_BASE_URL ||
-  import.meta.env?.VITE_GEMELO_BASE_URL ||
-  ""
-).replace(/\/$/, "");
-
-if (!API_BASE_URL) {
-  console.error("⚠️ Falta definir VITE_API_BASE_URL (o VITE_GEMELO_BASE_URL) en el .env");
-}
-
-function apiUrl(path) {
-  return API_BASE_URL ? `${API_BASE_URL}${path}` : path;
-}
 
 const DEFAULT_ORG_UNIT_ID = 0; // Se sobreescribe con el curso del LTI o selección del docente
 
@@ -934,21 +933,6 @@ const GLOBAL_STYLES = `
   }
 `;
 
-function toDate(x) {
-  const d = x ? new Date(x) : null;
-  return d && !Number.isNaN(d.getTime()) ? d : null;
-}
-
-function weeksBetween(start, end) {
-  if (!start || !end) return 0;
-  const ms = Math.max(0, end.getTime() - start.getTime());
-  return ms / (7 * 24 * 60 * 60 * 1000);
-}
-
-function clamp(n, a, b) {
-  return Math.max(a, Math.min(b, n));
-}
-
 function injectStyles() {
   if (typeof document === "undefined") return;
   const id = "gemelo-styles";
@@ -991,380 +975,6 @@ function useMediaQuery(query) {
 
 /**
  * =========================
- * Colors
- * =========================
- */
-const COLORS = {
-  critical: "#D92D20",
-  watch: "#F79009",
-  ok: "#12B76A",
-  pending: "#98A2B3",
-  brand: "#0B5FFF",
-};
-
-const STATUS_CONFIG = {
-  solido: { bg: "var(--ok-bg)", fg: "#1B5E20", dot: COLORS.ok, label: "Óptimo" },
-  "óptimo": { bg: "var(--ok-bg)", fg: "#1B5E20", dot: COLORS.ok, label: "Óptimo" },
-  optimo: { bg: "var(--ok-bg)", fg: "#1B5E20", dot: COLORS.ok, label: "Óptimo" },
-  observacion: { bg: "var(--watch-bg)", fg: "#9A3412", dot: COLORS.watch, label: "Seguimiento" },
-  "en seguimiento": { bg: "var(--watch-bg)", fg: "#9A3412", dot: COLORS.watch, label: "Seguimiento" },
-  "en desarrollo": { bg: "var(--watch-bg)", fg: "#9A3412", dot: COLORS.watch, label: "En desarrollo" },
-  critico: { bg: "var(--critical-bg)", fg: "#B42318", dot: COLORS.critical, label: "Crítico" },
-  cargando: { bg: "var(--brand-light)", fg: "#1D4ED8", dot: COLORS.brand, label: "Cargando" },
-  pending: { bg: "var(--pending-bg)", fg: "var(--muted)", dot: COLORS.pending, label: "Pendiente" },
-  alto: { bg: "var(--critical-bg)", fg: "#B42318", dot: COLORS.critical, label: "Alto" },
-  medio: { bg: "var(--watch-bg)", fg: "#9A3412", dot: COLORS.watch, label: "Medio" },
-  bajo: { bg: "var(--ok-bg)", fg: "#1B5E20", dot: COLORS.ok, label: "Bajo" },
-};
-
-/**
- * =========================
- * Helpers
- * =========================
- */
-function normStatus(x) {
-  return String(x || "").toLowerCase().trim();
-}
-
-function colorForRisk(risk) {
-  const r = normStatus(risk);
-  if (r === "alto" || r === "critico") return COLORS.critical;
-  if (r === "medio" || r === "en desarrollo") return COLORS.watch;
-  if (r === "bajo" || r === "óptimo") return COLORS.ok;
-  return COLORS.pending;
-}
-
-function colorForPct(pct, thresholds) {
-  if (pct === null || pct === undefined || Number.isNaN(Number(pct))) return COLORS.pending;
-  const p = Number(pct);
-  const thr = thresholds || { critical: 50, watch: 70 };
-  if (p < Number(thr.critical)) return COLORS.critical;
-  if (p < Number(thr.watch)) return COLORS.watch;
-  return COLORS.ok;
-}
-
-function contentRhythmStatus(progressRatio) {
-  if (progressRatio == null) {
-    return { status: "pending", color: COLORS.pending, bg: "var(--pending-bg)", label: "Pendiente" };
-  }
-  if (progressRatio < 0.8) {
-    return { status: "critico", color: COLORS.critical, bg: "var(--critical-bg)", label: "Crítico" };
-  }
-  if (progressRatio < 1.0) {
-    return { status: "observacion", color: COLORS.watch, bg: "var(--watch-bg)", label: "En seguimiento" };
-  }
-  return { status: "solido", color: COLORS.ok, bg: "var(--ok-bg)", label: "Óptimo" };
-}
-
-function colorForLearningOutcome(m, thresholds) {
-  const st = normStatus(m?.status);
-  if (st === "critico") return COLORS.critical;
-  if (st === "en desarrollo" || st === "en seguimiento" || st === "observacion") return COLORS.watch;
-  if (st === "optimo" || st === "solido" || st === "óptimo") return COLORS.ok;
-  return colorForPct(m?.avgPct, thresholds);
-}
-
-function fmtPct(x) {
-  if (x === null || x === undefined || Number.isNaN(Number(x))) return "—";
-  return `${Number(x).toFixed(1)}%`;
-}
-
-function fmtGrade10FromPct(pct) {
-  if (pct === null || pct === undefined || Number.isNaN(Number(pct))) return "—";
-  return (Number(pct) / 10).toFixed(1);
-}
-
-// Parse a Brightspace grade item formula to extract the evidence names it
-// references. Example: AVG{ [Actividad I-1 ...Puntos recibidos], ... }
-function parseFormulaReferences(formula) {
-  if (!formula || typeof formula !== "string") return [];
-  let decoded = formula;
-  try {
-    if (typeof document !== "undefined") {
-      const txt = document.createElement("textarea");
-      txt.innerHTML = formula;
-      decoded = txt.value;
-    }
-  } catch {}
-  const re = /\[([^\]]+?)\.(?:Puntos recibidos|Points Received|Puntos Recibidos|Puntos|Points|Calificaci[óo]n|Grade|Score|Max Points|Puntaje)\]/gi;
-  const names = [];
-  let m;
-  while ((m = re.exec(decoded)) !== null) {
-    const name = m[1].trim();
-    if (name && !names.includes(name)) names.push(name);
-  }
-  if (names.length === 0) {
-    const re2 = /\[([^\]]+?)\]/g;
-    while ((m = re2.exec(decoded)) !== null) {
-      const name = m[1].trim();
-      if (name && /[A-Za-zÁÉÍÓÚáéíóúÑñ]/.test(name) && !names.includes(name)) {
-        names.push(name);
-      }
-    }
-  }
-  return names;
-}
-
-// Match formula references against an evidence list.
-function matchEvidencesByFormula(corteItem, allEvidences) {
-  const refs = parseFormulaReferences(corteItem?.formula);
-  if (refs.length === 0) return [];
-  const list = Array.isArray(allEvidences) ? allEvidences : [];
-  const norm = (s) => String(s || "").toLowerCase().trim();
-  const out = [];
-  const seen = new Set();
-  for (const ref of refs) {
-    const r = norm(ref);
-    let hit = list.find((e) => norm(e.name) === r);
-    if (!hit) hit = list.find((e) => norm(e.name).startsWith(r));
-    if (!hit) hit = list.find((e) => norm(e.name).includes(r) || r.includes(norm(e.name)));
-    if (hit && !seen.has(hit.gradeObjectId)) {
-      out.push(hit);
-      seen.add(hit.gradeObjectId);
-    }
-  }
-  return out;
-}
-
-// Detect a Corte period from a name string. Returns 1..4 or null.
-// Intentionally requires the literal word "corte" to avoid matching
-// category prefixes like "C1 - Tareas" that aren't grading periods.
-function detectCortePeriod(name) {
-  if (!name) return null;
-  const s = String(name).trim();
-  let m = s.match(/\b(?:CORTE|Corte)\s*([1-4])\b/i);
-  if (m) return parseInt(m[1], 10);
-  const ordinalMap = { primer: 1, segundo: 2, tercer: 3, tercero: 3, cuarto: 4 };
-  m = s.match(/\b(primer|segundo|tercer|tercero|cuarto)\s*corte\b/i);
-  if (m) return ordinalMap[m[1].toLowerCase()];
-  const wordMap = { uno: 1, dos: 2, tres: 3, cuatro: 4 };
-  m = s.match(/\bcorte\s*(uno|dos|tres|cuatro)\b/i);
-  if (m) return wordMap[m[1].toLowerCase()];
-  return null;
-}
-
-// Build corte groups preferring gradeCategories (from backend) over formula
-// parsing. See utils/helpers.js for full documentation.
-function buildCorteGroups(evidences, gradeCategories) {
-  const list = Array.isArray(evidences) ? evidences : [];
-  if (list.length === 0) return [];
-  const corteItems = list.filter((e) => e?.isCorte === true);
-  const nonCorteItems = list.filter((e) => e?.isCorte !== true);
-  const cats = Array.isArray(gradeCategories) ? gradeCategories : [];
-  if (cats.length > 0) {
-    const groups = [];
-    const byId = new Map();
-    for (const e of list) byId.set(String(e.gradeObjectId), e);
-    for (const cat of cats) {
-      const period = detectCortePeriod(cat?.name);
-      if (period == null) continue;   // only surface "Corte N" categories
-      const ids = Array.isArray(cat?.itemIds) ? cat.itemIds : [];
-      const itemsInCat = ids.map((id) => byId.get(String(id))).filter(Boolean);
-      if (itemsInCat.length === 0) continue;
-      const aggregates = itemsInCat.filter((e) => e.isCorte === true || String(e.gradeType || "").toLowerCase() === "formula");
-      const components = itemsInCat.filter((e) => e.isCorte !== true && String(e.gradeType || "").toLowerCase() !== "formula");
-      if (aggregates.length === 0 && components.length === 0) continue;
-      groups.push({ id: `cat-${cat.id}`, name: cat.name || `Corte ${period}`, period, aggregates, components });
-    }
-    if (groups.length > 0) {
-      groups.sort((a, b) => {
-        const pa = a.period ?? 99, pb = b.period ?? 99;
-        if (pa !== pb) return pa - pb;
-        return String(a.name).localeCompare(String(b.name), "es");
-      });
-      return groups;
-    }
-  }
-  // Order-based bucketing (Brightspace returns rollups AFTER their components)
-  const isRollup = (e) => e?.isCorte === true || String(e?.gradeType || "").toLowerCase() === "formula";
-  const rollups = list.filter(isRollup);
-  if (rollups.length > 0) {
-    const groups = [];
-    let bucket = [];
-    let periodCounter = 0;
-    for (const e of list) {
-      if (isRollup(e)) {
-        periodCounter += 1;
-        const fromFormula = matchEvidencesByFormula(e, list.filter((x) => !isRollup(x)));
-        const components = fromFormula.length > 0 ? fromFormula : bucket;
-        groups.push({
-          id: `corte-${e.gradeObjectId}`,
-          name: e.name || `Sección ${periodCounter}`,
-          period: e.cortePeriod ?? periodCounter,
-          aggregates: [e],
-          components,
-        });
-        bucket = [];
-      } else {
-        bucket.push(e);
-      }
-    }
-    if (bucket.length > 0) {
-      groups.push({ id: "tail-unassigned", name: "Sin corte asignado", period: null, aggregates: [], components: bucket });
-    }
-    return groups;
-  }
-  return [];
-}
-
-function flattenOutcomeDescriptions(payload) {
-  const sets = payload?.outcomeSets;
-  if (!Array.isArray(sets)) return [];
-  const flat = [];
-  for (const s of sets) {
-    for (const o of s?.Outcomes || []) {
-      if (o?.Description) flat.push(String(o.Description));
-    }
-  }
-  return flat;
-}
-
-function isVisibleContentItem(item) {
-  if (!item || typeof item !== "object") return false;
-  if (item.IsHidden === true) return false;
-
-  // En Brightspace content root:
-  // Type 0 = módulo/folder
-  // Type 1 = topic/item
-  // Queremos contar solo contenido real, no módulos.
-  return Number(item.Type) !== 0;
-}
-
-function safeAvg(list) {
-  const nums = (Array.isArray(list) ? list : [])
-    .map((x) => Number(x))
-    .filter((x) => Number.isFinite(x));
-  if (!nums.length) return null;
-  return nums.reduce((a, b) => a + b, 0) / nums.length;
-}
-
-async function apiGet(path, opts = {}) {
-  // Incluir session_id como Bearer token (cross-domain — cookies bloqueadas por el browser)
-  const _sid = localStorage.getItem("gemelo_sid");
-  const _authHeader = _sid ? { "Authorization": `Bearer ${_sid}` } : {};
-  const res = await fetch(apiUrl(path), {
-    method: "GET",
-    credentials: "include",
-    headers: { Accept: "application/json", ..._authHeader, ...(opts.headers || {}) },
-    signal: opts.signal,
-  });
-
-  const ct = res.headers.get("content-type") || "";
-  const isJson =
-    ct.includes("application/json") ||
-    ct.includes("application/problem+json");
-
-  if (!res.ok) {
-    const body = isJson
-      ? await res.json().catch(() => ({}))
-      : await res.text().catch(() => "");
-    const msg =
-      typeof body === "string"
-        ? body
-        : body?.detail || body?.message || body?.error || JSON.stringify(body);
-    throw new Error(`HTTP ${res.status} - ${String(msg).slice(0, 600)}`);
-  }
-
-  if (!isJson) {
-    const txt = await res.text().catch(() => "");
-    throw new Error(`Respuesta no JSON (${ct}): ${txt.slice(0, 300)}`);
-  }
-
-  return res.json();
-}
-
-async function mapLimit(arr, limit, mapper) {
-  const list = Array.isArray(arr) ? arr : [];
-  const results = new Array(list.length);
-  let i = 0;
-  const workers = new Array(Math.min(limit, list.length)).fill(null).map(async () => {
-    while (i < list.length) {
-      const idx = i++;
-      results[idx] = await mapper(list[idx], idx);
-    }
-  });
-  await Promise.all(workers);
-  return results;
-}
-
-function pickCriticalMacroFromGemelo(g) {
-  const arr = g?.macro?.units || g?.macroUnits || [];
-  if (!Array.isArray(arr) || !arr.length) return null;
-  const copy = arr
-    .map((x) => ({ code: x.code, pct: Number(x.pct ?? x.avgPct ?? 0) }))
-    .filter((x) => x.code);
-  if (!copy.length) return null;
-  copy.sort((a, b) => a.pct - b.pct);
-  return copy[0];
-}
-
-function computeRiskFromPct(pct) {
-  // Calcula riesgo basado en nota de 0-100:
-  //   < 50%  → alto   (nota < 5.0)
-  //   50-70% → medio  (nota 5.0 – 7.0)
-  //   ≥ 70%  → bajo   (nota ≥ 7.0)
-  //   null   → pending
-  if (pct == null || Number.isNaN(Number(pct))) return "pending";
-  const p = Number(pct);
-  if (p < 50) return "alto";
-  if (p < 70) return "medio";
-  return "bajo";
-}
-
-function suggestRouteForStudent(s, thresholds) {
-  const risk = String(s?.risk || "").toLowerCase();
-  const perf = s?.currentPerformancePct != null ? Number(s.currentPerformancePct) : null;
-  const cov = s?.coveragePct != null ? Number(s.coveragePct) : null;
-
-  if (cov != null && cov < 40) {
-    return {
-      id: "route_coverage",
-      title: "Ruta 0 — Activar evidencia",
-      summary: "Priorizar calificación de evidencias pendientes.",
-      actions: [
-        "Identificar 1 evidencia crítica y publicarla esta semana",
-        "Acordar fecha de entrega con el estudiante",
-      ],
-    };
-  }
-
-  if (risk === "alto") {
-    return {
-      id: "route_high_risk",
-      title: "Ruta 1 — Recuperación",
-      summary: "Intervención inmediata con plan corto (7 días).",
-      actions: [
-        "Reunión 1:1 (15 min) para acordar objetivo semanal",
-        "Actividad de refuerzo o re-entrega enfocada en el error",
-        "Retroalimentación concreta + checklist de mejora",
-      ],
-    };
-  }
-
-  if (risk === "medio" || (perf != null && perf < thresholds.watch)) {
-    const macro = s?.mostCriticalMacro?.code;
-    return {
-      id: "route_watch",
-      title: "Ruta 2 — Ajuste dirigido",
-      summary: macro ? `Enfoque: ${macro} (${fmtPct(s?.mostCriticalMacro?.pct)})` : "Enfoque: desempeño general",
-      actions: [
-        "Microtarea guiada (30–45 min) sobre el punto débil",
-        "Ejemplo resuelto + plantilla de entrega",
-        "Seguimiento en próxima evidencia",
-      ],
-    };
-  }
-
-  return {
-    id: "route_ok",
-    title: "Ruta 3 — Mantener desempeño",
-    summary: "Sostener ritmo y calidad.",
-    actions: ["Mantener entregas a tiempo", "Extensión opcional: reto avanzado"],
-  };
-}
-
-/**
- * =========================
  * UI Atoms
  * =========================
  */
@@ -1398,86 +1008,10 @@ function StatusBadge({ status }) {
 }
 
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ElevenLabs TTS/STT — alta calidad con fallback a Web Speech API
-// ─────────────────────────────────────────────────────────────────────────────
-let _elCurrentAudio = null;
-function elStop() {
-  if (_elCurrentAudio) { _elCurrentAudio.pause(); _elCurrentAudio = null; }
-  if ("speechSynthesis" in window) window.speechSynthesis.cancel();
-}
-
-async function elSpeak(rawText, onStart, onEnd) {
-  if (!rawText || !rawText.trim()) return;
-  elStop();
-  // Limpiar HTML, emojis y entidades
-  const clean = rawText
-    .replace(/<[^>]*>/g, " ")
-    .replace(/&lt;/g, "menor que").replace(/&gt;/g, "mayor que").replace(/&amp;/g, "y")
-    .replace(/[^\u0000-\u007F\u00C0-\u024F\u0400-\u04FF\s]/g, "")
-    .replace(/\[.*?\]/g, "").replace(/\s+/g, " ").trim().slice(0, 2000);
-
-  onStart && onStart();
-  try {
-    const sid = localStorage.getItem("gemelo_sid");
-    const hdrs = { "Content-Type": "application/json" };
-    if (sid) hdrs["Authorization"] = "Bearer " + sid;
-    const res = await fetch(apiUrl("/speech/tts"), {
-      method: "POST", credentials: "include", headers: hdrs,
-      body: JSON.stringify({ text: clean }),
-    });
-    if (!res.ok) throw new Error("TTS " + res.status);
-    const blob = await res.blob();
-    const url  = URL.createObjectURL(blob);
-    const audio = new Audio(url);
-    _elCurrentAudio = audio;
-    audio.onended = audio.onerror = () => { onEnd && onEnd(); URL.revokeObjectURL(url); _elCurrentAudio = null; };
-    audio.play();
-    return audio;
-  } catch (e) {
-    console.warn("ElevenLabs TTS fallback:", e.message);
-    if ("speechSynthesis" in window) {
-      const utt = new SpeechSynthesisUtterance(clean);
-      utt.lang = "es-CO"; utt.rate = 0.92;
-      const esV = window.speechSynthesis.getVoices().find(v => v.lang.startsWith("es"));
-      if (esV) utt.voice = esV;
-      utt.onend = utt.onerror = () => onEnd && onEnd();
-      window.speechSynthesis.speak(utt);
-    } else { onEnd && onEnd(); }
-  }
-}
-
-async function elListen(onResult, onError) {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
-    const chunks = [];
-    recorder.ondataavailable = e => chunks.push(e.data);
-    recorder.onstop = async () => {
-      stream.getTracks().forEach(t => t.stop());
-      const blob = new Blob(chunks, { type: "audio/webm" });
-      const form = new FormData();
-      form.append("audio", blob, "audio.webm");
-      try {
-        const sid = localStorage.getItem("gemelo_sid");
-        const hdrs = sid ? { "Authorization": "Bearer " + sid } : {};
-        const res = await fetch(apiUrl("/speech/stt"), { method: "POST", credentials: "include", headers: hdrs, body: form });
-        if (!res.ok) throw new Error("STT " + res.status);
-        const data = await res.json();
-        onResult && onResult(data.text || "");
-      } catch (e) { onError && onError(e); }
-    };
-    recorder.start();
-    setTimeout(() => { if (recorder.state === "recording") recorder.stop(); }, 10000);
-    return recorder;
-  } catch (e) { onError && onError(e); }
-}
-
-
 // ─────────────────────────────────────────────
 // CircularRing — SVG progress ring (CESA Curator style)
 // ─────────────────────────────────────────────
-function CircularRing({ pct, size = 80, stroke = 8, color, label, sublabel, fontSize }) {
+const CircularRing = React.memo(function CircularRing({ pct, size = 80, stroke = 8, color, label, sublabel, fontSize }) {
   const r = (size - stroke) / 2;
   const circ = 2 * Math.PI * r;
   const pctClamped = Math.max(0, Math.min(100, Number(pct) || 0));
@@ -1485,8 +1019,15 @@ function CircularRing({ pct, size = 80, stroke = 8, color, label, sublabel, font
   const ringColor = color || "var(--brand)";
   const textSize = fontSize || Math.round(size * 0.22);
   return (
-    <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
-      <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
+    <div
+      style={{ position: "relative", width: size, height: size, flexShrink: 0 }}
+      role="progressbar"
+      aria-valuenow={Math.round(pctClamped)}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-label={sublabel ? `${sublabel}: ${Math.round(pctClamped)}%` : `Progreso ${Math.round(pctClamped)}%`}
+    >
+      <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }} aria-hidden="true">
         <circle
           cx={size / 2} cy={size / 2} r={r}
           fill="none" stroke="var(--border)" strokeWidth={stroke}
@@ -1503,6 +1044,108 @@ function CircularRing({ pct, size = 80, stroke = 8, color, label, sublabel, font
       <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
         <span style={{ fontSize: textSize, fontWeight: 900, fontFamily: "var(--font-mono)", color: ringColor, lineHeight: 1 }}>{label ?? `${Math.round(pctClamped)}%`}</span>
         {sublabel && <span style={{ fontSize: Math.round(textSize * 0.55), fontWeight: 700, color: "var(--muted)", marginTop: 1 }}>{sublabel}</span>}
+      </div>
+    </div>
+  );
+});
+
+// ─────────────────────────────────────────────
+// ThresholdsModal — configurar umbrales de riesgo del curso (#13)
+// ─────────────────────────────────────────────
+function ThresholdsModal({ current, base, isOverridden, onSave, onReset, onClose }) {
+  const [crit, setCrit] = useState(Number(current?.critical ?? 50));
+  const [watch, setWatch] = useState(Number(current?.watch ?? 70));
+  const valid = watch >= crit;
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Configurar umbrales de riesgo"
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, zIndex: 10000,
+        background: "rgba(13,17,23,0.65)", backdropFilter: "blur(4px)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        padding: 20,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "min(440px, 100%)", background: "var(--card)",
+          border: "1px solid var(--border)", borderRadius: 16,
+          boxShadow: "var(--shadow-lg)", padding: "20px 22px",
+          fontFamily: "var(--font)",
+        }}
+      >
+        <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text)", marginBottom: 4 }}>
+          Umbrales de riesgo del curso
+        </div>
+        <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 16 }}>
+          Define los porcentajes a partir de los cuales un estudiante se considera <b>en observación</b> o <b>crítico</b>. Se aplica solo a este curso.
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <label style={{ display: "block" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, fontWeight: 700, color: COLORS.critical, marginBottom: 4 }}>
+              <span>Crítico (&lt; %)</span><span style={{ fontFamily: "var(--font-mono)" }}>{crit}%</span>
+            </div>
+            <input type="range" min={0} max={100} value={crit} onChange={(e) => setCrit(Number(e.target.value))} style={{ width: "100%" }} />
+          </label>
+          <label style={{ display: "block" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, fontWeight: 700, color: COLORS.watch, marginBottom: 4 }}>
+              <span>Observación (&lt; %)</span><span style={{ fontFamily: "var(--font-mono)" }}>{watch}%</span>
+            </div>
+            <input type="range" min={0} max={100} value={watch} onChange={(e) => setWatch(Number(e.target.value))} style={{ width: "100%" }} />
+          </label>
+        </div>
+
+        {!valid && (
+          <div style={{ marginTop: 10, fontSize: 11, color: COLORS.critical, fontWeight: 600 }}>
+            El umbral de observación debe ser ≥ al crítico.
+          </div>
+        )}
+
+        <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 12 }}>
+          Por defecto del sistema: crítico {base?.critical ?? 50}% · observación {base?.watch ?? 70}%
+        </div>
+
+        <div style={{ display: "flex", gap: 8, marginTop: 18, justifyContent: "flex-end" }}>
+          {isOverridden && (
+            <button
+              onClick={onReset}
+              style={{
+                padding: "8px 14px", borderRadius: 8, border: "1px solid var(--border)",
+                background: "var(--bg)", color: "var(--muted)", fontSize: 12,
+                fontWeight: 700, cursor: "pointer", fontFamily: "var(--font)",
+              }}
+            >
+              Restablecer
+            </button>
+          )}
+          <button
+            onClick={onClose}
+            style={{
+              padding: "8px 14px", borderRadius: 8, border: "1px solid var(--border)",
+              background: "var(--bg)", color: "var(--text)", fontSize: 12,
+              fontWeight: 700, cursor: "pointer", fontFamily: "var(--font)",
+            }}
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={() => onSave({ critical: crit, watch })}
+            disabled={!valid}
+            style={{
+              padding: "8px 14px", borderRadius: 8, border: "none",
+              background: valid ? "var(--brand)" : "var(--border)",
+              color: "#fff", fontSize: 12, fontWeight: 800,
+              cursor: valid ? "pointer" : "not-allowed", fontFamily: "var(--font)",
+            }}
+          >
+            Guardar
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -1812,17 +1455,17 @@ function CoverageBars({ donePct, pendingPct, overduePct, openPct }) {
 const ONBOARDING_STEPS = [
   {
     id: "welcome",
-    title: "Bienvenido a Gemelo Digital",
+    title: "Bienvenido a G.D",
     icon: "🎓",
-    desc: "Tu asistente académico inteligente. Aquí puedes monitorear el desempeño de tus estudiantes en tiempo real, identificar riesgos y tomar decisiones de acompañamiento.",
+    desc: "Tu asistente académico inteligente para CESA. Monitorea el desempeño de tus estudiantes en tiempo real, identifica riesgos y toma decisiones de acompañamiento basadas en datos.",
     highlight: null,
-    voice: (name) => `Bienvenido a Gemelo Digital${name ? ", " + name : ""}. Tu asistente académico inteligente para el seguimiento de tus estudiantes.`,
+    voice: (name) => `Bienvenido a G.D${name ? ", " + name : ""}. Tu asistente académico inteligente para el seguimiento de tus estudiantes.`,
   },
   {
     id: "dashboard",
     title: "Dashboard del curso",
     icon: "📊",
-    desc: "Ve el panorama completo de tu curso: nota promedio, estudiantes en riesgo, distribución de calificaciones y cumplimiento evaluativo.",
+    desc: "Ve el panorama completo: nota promedio, estudiantes en riesgo, distribución de calificaciones, cumplimiento evaluativo y resultados de aprendizaje evaluados con rúbricas.",
     highlight: "dashboard",
     voice: () => "El Dashboard te da el panorama completo de tu curso. Aquí ves el promedio, los estudiantes en riesgo y el cumplimiento evaluativo.",
   },
@@ -1830,15 +1473,23 @@ const ONBOARDING_STEPS = [
     id: "priority",
     title: "Estudiantes prioritarios",
     icon: "🔴",
-    desc: "Identifica automáticamente quiénes necesitan atención urgente: nota crítica, baja cobertura o ítems vencidos sin calificar.",
+    desc: "Identifica automáticamente quiénes necesitan atención urgente: nota crítica, baja cobertura o ítems vencidos sin calificar. Haz clic en un estudiante para ver su gemelo digital completo.",
     highlight: "priority",
     voice: () => "La sección de estudiantes prioritarios te muestra quiénes necesitan atención urgente, con nota crítica o pendientes sin calificar.",
+  },
+  {
+    id: "calendar",
+    title: "Calendario de entregas",
+    icon: "📅",
+    desc: "Visualiza todas las fechas de entrega del curso. Al abrir el detalle de un estudiante, el calendario muestra su estado individual por actividad: entregada ✓, vencida ✗ o pendiente.",
+    highlight: null,
+    voice: () => "El Calendario de entregas muestra todas las fechas del curso. Puedes ver el estado de cada actividad por estudiante.",
   },
   {
     id: "routes",
     title: "Rutas de atención",
     icon: "🛤️",
-    desc: "Cada estudiante tiene una ruta de intervención asignada automáticamente: activar evidencia, recuperación, ajuste dirigido o mantener desempeño.",
+    desc: "Cada estudiante tiene una ruta de intervención asignada automáticamente: activar evidencia, recuperación, ajuste dirigido o mantener desempeño. Úsalas para priorizar tus acciones.",
     highlight: "routes",
     voice: () => "Las Rutas de atención te indican qué acción tomar con cada estudiante, desde activar evidencias hasta planes de recuperación.",
   },
@@ -1846,19 +1497,168 @@ const ONBOARDING_STEPS = [
     id: "ai",
     title: "Asistente IA con voz",
     icon: "🤖",
-    desc: "Puedes hacer preguntas en lenguaje natural: '¿Quiénes están en riesgo alto?', '¿Cuál es el promedio?'. También puedes hablar con el micrófono.",
+    desc: "Consulta en lenguaje natural: '¿Quiénes están en riesgo alto?', '¿Cuál es el promedio?'. También puedes hablar con el micrófono y obtener respuestas en segundos.",
     highlight: "assistant",
     voice: () => "El Asistente de Inteligencia Artificial responde tus preguntas en lenguaje natural. Puedes escribir o usar el micrófono para consultar el estado de tu curso.",
   },
   {
     id: "courses",
-    title: "Cambiar de curso",
+    title: "Cursos y roles",
     icon: "📚",
-    desc: "Usa el botón 'Mis cursos' en la barra superior para cambiar entre tus cursos activos en cualquier momento.",
+    desc: "Usa 'Mis cursos' en la barra superior para cambiar entre tus cursos activos. Si tienes doble rol (docente y estudiante), desde la pantalla de inicio puedes elegir cómo acceder.",
     highlight: null,
-    voice: () => "Puedes cambiar entre tus cursos en cualquier momento usando el botón Mis cursos en la barra superior. ¡Listo para comenzar!",
+    voice: () => "Puedes cambiar entre tus cursos en cualquier momento usando el botón Mis cursos. Si tienes doble rol, elige tu vista desde la pantalla de inicio. ¡Listo para comenzar!",
   },
 ];
+
+// Novedades recientes de la plataforma
+const UPDATES_STEPS = [
+  {
+    id: "rebrand_gd",
+    title: "Nueva identidad: G.D",
+    icon: "🆔",
+    tag: "Nuevo",
+    desc: "La plataforma adopta una identidad más compacta: 'Gemelo Digital' ahora se muestra como 'G.D' en toda la interfaz, narraciones de voz y reportes PDF. Versión V.260428 (28-04-2026).",
+  },
+  {
+    id: "pdf_informe",
+    title: "Descargar Informe PDF Institucional",
+    icon: "📄",
+    tag: "Nuevo",
+    desc: "El botón 'Descargar informe' en la retroalimentación de evidencias genera un PDF institucional CESA con la entrega, la nota semaforizada (cuadro de color al lado del nombre de la entrega), la rúbrica utilizada, el documento subido y el comentario general del docente.",
+  },
+  {
+    id: "fix_priority_names",
+    title: "Estudiantes prioritarios: nombres correctos",
+    icon: "🔧",
+    tag: "Mejorado",
+    desc: "Se corrigió la regresión donde los estudiantes prioritarios mostraban su número de ID en lugar del nombre. Ahora los snapshots sincronizan también la lista de clase para resolver siempre el nombre legible.",
+  },
+  {
+    id: "coordinator",
+    title: "Panel Coordinador",
+    icon: "🏛️",
+    tag: "Nuevo",
+    desc: "Coordinadores y administradores tienen un panel dedicado para visualizar el desempeño de todos los cursos de un período académico: notas, cobertura y riesgo por asignatura.",
+  },
+  {
+    id: "student_overview",
+    title: "Rendimiento General del Estudiante",
+    icon: "📊",
+    tag: "SuperAdmin",
+    desc: "Los SuperAdministradores pueden ver el desempeño completo de cualquier estudiante a través de todas sus asignaturas: notas, cobertura, riesgo y entregas por curso.",
+  },
+  {
+    id: "my_summary",
+    title: "Mi Resumen (Portal Estudiante)",
+    icon: "📋",
+    tag: "Nuevo",
+    desc: "Los estudiantes ahora tienen un botón '📊 Mi resumen' en su portal que consolida su desempeño en todos los cursos activos del semestre en una sola vista.",
+  },
+  {
+    id: "calendar_status",
+    title: "Calendario con Estado de Entregas",
+    icon: "📅",
+    tag: "Mejorado",
+    desc: "El calendario ahora muestra el estado individual de cada actividad para el estudiante seleccionado: ✓ verde para entregadas y calificadas, ✗ rojo para vencidas sin entrega.",
+  },
+  {
+    id: "superadmin",
+    title: "Herramientas SuperAdmin",
+    icon: "🔑",
+    tag: "SuperAdmin",
+    desc: "Los SuperAdministradores pueden suplantar usuarios (docentes o estudiantes), buscar cursos por período académico con selector de semestres, y consultar reportes cruzados.",
+  },
+];
+
+function UpdatesModal({ onClose }) {
+  const [step, setStep] = React.useState(0);
+  const current = UPDATES_STEPS[step];
+  const isLast = step === UPDATES_STEPS.length - 1;
+  const TAG_COLORS = { "Nuevo": "#16a34a", "Mejorado": "var(--brand)", "SuperAdmin": "#7c3aed" };
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 9999,
+      background: "rgba(0,0,0,0.72)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      fontFamily: "var(--font)", padding: 20,
+      backdropFilter: "blur(4px)",
+    }}>
+      <div style={{
+        background: "var(--card)", borderRadius: 20,
+        padding: "36px 40px", maxWidth: 500, width: "100%",
+        boxShadow: "0 24px 80px rgba(0,0,0,0.3)",
+        position: "relative",
+      }}>
+        <button
+          onClick={onClose}
+          style={{ position: "absolute", top: 14, right: 14, background: "none", border: "none", fontSize: 18, cursor: "pointer", color: "var(--muted)", padding: 4, lineHeight: 1 }}
+        >✕</button>
+
+        <div style={{ textAlign: "center", marginBottom: 20 }}>
+          <span style={{ fontSize: 11, fontWeight: 800, color: "var(--brand)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
+            🆕 Novedades · G.D
+          </span>
+        </div>
+
+        <div style={{ display: "flex", gap: 6, marginBottom: 24, justifyContent: "center" }}>
+          {UPDATES_STEPS.map((_, i) => (
+            <div key={i} onClick={() => setStep(i)} style={{
+              width: i === step ? 22 : 8, height: 8, borderRadius: 99,
+              background: i === step ? "var(--brand)" : i < step ? "#16a34a" : "var(--border)",
+              transition: "all 0.3s ease", cursor: "pointer",
+            }} />
+          ))}
+        </div>
+
+        <div style={{ textAlign: "center", fontSize: 44, marginBottom: 12, lineHeight: 1 }}>
+          {current.icon}
+        </div>
+
+        <div style={{ textAlign: "center", marginBottom: 10 }}>
+          <span style={{
+            display: "inline-block",
+            fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em",
+            padding: "3px 10px", borderRadius: 99,
+            background: (TAG_COLORS[current.tag] || "var(--brand)") + "1a",
+            color: TAG_COLORS[current.tag] || "var(--brand)",
+            border: "1px solid " + (TAG_COLORS[current.tag] || "var(--brand)") + "40",
+          }}>
+            {current.tag}
+          </span>
+        </div>
+
+        <h2 style={{ fontSize: 21, fontWeight: 900, color: "var(--text)", textAlign: "center", margin: "0 0 12px", letterSpacing: "-0.02em" }}>
+          {current.title}
+        </h2>
+
+        <p style={{ fontSize: 14, color: "var(--muted)", lineHeight: 1.65, textAlign: "center", margin: "0 0 24px" }}>
+          {current.desc}
+        </p>
+
+        <div style={{ fontSize: 11, color: "var(--muted)", textAlign: "center", marginBottom: 16, fontWeight: 600 }}>
+          {step + 1} de {UPDATES_STEPS.length}
+        </div>
+
+        <div style={{ display: "flex", gap: 10 }}>
+          {step > 0 && (
+            <button
+              onClick={() => setStep(s => s - 1)}
+              style={{ flex: 1, padding: "11px 0", borderRadius: 10, border: "1px solid var(--border)", background: "transparent", fontSize: 13, fontWeight: 700, color: "var(--muted)", cursor: "pointer" }}
+            >← Anterior</button>
+          )}
+          <button
+            onClick={() => isLast ? onClose() : setStep(s => s + 1)}
+            style={{ flex: 2, padding: "11px 0", borderRadius: 10, border: "none", background: "var(--brand)", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer", boxShadow: "0 4px 14px rgba(11,95,255,0.3)" }}
+          >
+            {isLast ? "¡Entendido! ✓" : "Siguiente →"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function OnboardingTutorial({ userName, onFinish }) {
   const [step, setStep] = React.useState(0);
@@ -2020,10 +1820,10 @@ function LoginScreen({ orgUnitId }) {
           }}>CESA</div>
           <div style={{ textAlign: "left" }}>
             <div style={{ fontSize: 16, fontWeight: 900, color: "var(--text)", letterSpacing: "-0.02em" }}>
-              Gemelo Digital
+              G.D
             </div>
             <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-              Vista Docente · v2.0325
+              Vista Docente · V.260428
             </div>
           </div>
         </div>
@@ -2078,7 +1878,7 @@ function LoginScreen({ orgUnitId }) {
         }}>
           <p style={{ fontSize: 11, color: "var(--brand)", fontWeight: 700, margin: 0 }}>
             💡 También puedes acceder directamente desde tu curso en Brightspace
-            usando el enlace de la herramienta Gemelo Digital.
+            usando el enlace de la herramienta G.D.
           </p>
         </div>
       </div>
@@ -2086,7 +1886,7 @@ function LoginScreen({ orgUnitId }) {
   );
 }
 
-function CesaLoader({ title = "CESA · Gemelo Digital v2.0", subtitle = "Cargando tablero..." }) {
+function CesaLoader({ title = "CESA · G.D V.260428", subtitle = "Cargando tablero..." }) {
   React.useEffect(() => {
     injectStyles();
   }, []);
@@ -2902,7 +2702,7 @@ function VoiceAssistant({ studentRows, overview, raDashboard, courseInfo, thresh
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{ width: 10, height: 10, borderRadius: "50%", background: "var(--brand)", boxShadow: "0 0 8px var(--brand)", animation: aiStatus !== "idle" ? "pulse 1.4s ease infinite" : "none" }} />
           <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text)" }}>Asistente IA Académica</div>
-          <span className="tag" style={{ background: "var(--brand-light)", color: "var(--brand)", fontSize: 10 }}>v2.0325 · 25/03/2026</span>
+          <span className="tag" style={{ background: "var(--brand-light)", color: "var(--brand)", fontSize: 10 }}>V.260428 · 16/04/2026</span>
         </div>
         <div style={{ fontSize: 12, color: "var(--muted)" }}>
           {studentRows.length} estudiantes · {courseInfo?.Name || "Curso activo"}
@@ -3151,9 +2951,6 @@ function findStudentByName(rows, name) {
 function CoursePanel({ courses, loadingCourses, currentId, onSelect, onClose }) {
   const [search, setSearch] = React.useState("");
 
-  const STUDENT_ROLES = ["estudiante ef", "student", "estudiante"];
-  const isStudentRole = (rn) => STUDENT_ROLES.some(sr => String(rn || "").toLowerCase().includes(sr));
-
   const filtered = React.useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return courses;
@@ -3276,8 +3073,7 @@ function CourseItem({ course, isActive, isCurrent, onSelect, accent }) {
   const period = startYear && endYear && startYear !== endYear
     ? `${startYear}–${endYear}` : startYear ? String(startYear) : null;
 
-  const STUDENT_ROLES = ["estudiante ef", "student", "estudiante"];
-  const isStudent = STUDENT_ROLES.some(sr => String(course.roleName || "").toLowerCase().includes(sr));
+  const isStudent = isStudentRole(course.roleName);
   const accentColor = accent || (isStudent ? "var(--ok)" : "var(--brand)");
 
   const handleClick = () => {
@@ -3541,7 +3337,7 @@ function RoutesView({ studentRows, overview, courseInfo, thresholds, onSelectStu
       {/* Page header */}
       <div>
         <div style={{ fontSize: 10, fontWeight: 800, color: "var(--brand)", textTransform: "uppercase", letterSpacing: "0.12em", marginBottom: 4 }}>
-          Gemelo Digital · Rutas de atención
+          G.D · Rutas de atención
         </div>
         <h1 style={{ fontSize: isMobile ? 20 : 26, fontWeight: 900, color: "var(--text)", letterSpacing: "-0.02em", lineHeight: 1.1 }}>
           {courseInfo?.Name || "Curso activo"}
@@ -3675,7 +3471,7 @@ function AppSidebar({ activeTab, setActiveTab, currentCourseName, mobileOpen, on
         <div className="sidebar-logo">
           <div className="sidebar-logo-icon" style={{ fontSize: 12, letterSpacing: "0.01em" }}>CESA</div>
           <div className="sidebar-logo-text">
-            <div className="sidebar-logo-name">CESA · Gemelo</div>
+            <div className="sidebar-logo-name">CESA · G.D</div>
             <div className="sidebar-logo-sub">Vista Docente</div>
           </div>
         </div>
@@ -3707,8 +3503,8 @@ function AppSidebar({ activeTab, setActiveTab, currentCourseName, mobileOpen, on
             </div>
           )}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 2px" }}>
-            <span style={{ fontSize: 9, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Gemelo Digital</span>
-            <span style={{ fontSize: 9, fontWeight: 700, color: "var(--muted)", background: "var(--bg)", padding: "2px 7px", borderRadius: 99, border: "1px solid var(--border)" }}>v2.0325</span>
+            <span style={{ fontSize: 9, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.08em" }}>G.D</span>
+            <span style={{ fontSize: 9, fontWeight: 700, color: "var(--muted)", background: "var(--bg)", padding: "2px 7px", borderRadius: 99, border: "1px solid var(--border)" }}>V.260428</span>
           </div>
         </div>
       </aside>
@@ -3727,7 +3523,10 @@ function AppTopbar({
   handleOpenCoursePanel,
   authUser, isDualRole, onGoHome,
   onOpenPalette, onOpenCoordinator,
+  isSuperAdmin, studentRows, onImpersonate,
 }) {
+  const [showImpersonateMenu, setShowImpersonateMenu] = useState(false);
+  const [impersonateSearch, setImpersonateSearch] = useState("");
   return (
     <header className="app-topbar">
       {/* Left */}
@@ -3781,7 +3580,7 @@ function AppTopbar({
             </>}
           </button>
         )}
-        {isDualRole && (
+        {(isDualRole || isSuperAdmin) && (
           <button
             className="btn"
             onClick={onGoHome}
@@ -3809,6 +3608,105 @@ function AppTopbar({
           >
             🏛
           </button>
+        )}
+        {onImpersonate && (
+          <div style={{ position: "relative" }}>
+            <button
+              className="btn"
+              onClick={() => setShowImpersonateMenu((v) => !v)}
+              title="Ver como profesor o estudiante"
+              style={{
+                padding: "7px 12px", fontSize: 12, borderRadius: 10,
+                background: "rgba(255, 170, 0, 0.12)",
+                color: "#b27300",
+                border: "1px solid rgba(255, 170, 0, 0.3)",
+              }}
+            >
+              👁 {isMobile ? "" : "Ver como..."}
+            </button>
+            {showImpersonateMenu && (
+              <div
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 200,
+                  width: 320, maxHeight: 400, background: "var(--card)",
+                  border: "1px solid var(--border)", borderRadius: 12,
+                  boxShadow: "var(--shadow-lg)", display: "flex", flexDirection: "column",
+                  overflow: "hidden",
+                }}
+              >
+                <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--border)" }}>
+                  <div style={{ fontSize: 12, fontWeight: 800, color: "var(--text)", marginBottom: 6 }}>
+                    👁 Impersonar usuario
+                  </div>
+                  <input
+                    value={impersonateSearch}
+                    onChange={(e) => setImpersonateSearch(e.target.value)}
+                    placeholder="Buscar estudiante..."
+                    autoFocus
+                    style={{
+                      width: "100%", padding: "8px 10px", fontSize: 12,
+                      border: "1px solid var(--border)", borderRadius: 8,
+                      background: "var(--bg)", color: "var(--text)",
+                      fontFamily: "var(--font)", outline: "none",
+                    }}
+                  />
+                </div>
+                <div style={{ flex: 1, overflowY: "auto", padding: "4px 0", maxHeight: 300 }}>
+                  {(Array.isArray(studentRows) ? studentRows : [])
+                    .filter((s) => {
+                      if (!impersonateSearch.trim()) return true;
+                      const q = impersonateSearch.toLowerCase();
+                      return (s.displayName || "").toLowerCase().includes(q) ||
+                             String(s.userId).includes(q);
+                    })
+                    .slice(0, 30)
+                    .map((s) => (
+                      <button
+                        key={s.userId}
+                        onClick={() => {
+                          onImpersonate({ userId: s.userId, name: s.displayName });
+                          setShowImpersonateMenu(false);
+                          setImpersonateSearch("");
+                        }}
+                        style={{
+                          display: "flex", alignItems: "center", gap: 8,
+                          width: "100%", padding: "8px 14px", border: "none",
+                          background: "transparent", cursor: "pointer",
+                          fontSize: 12, fontFamily: "var(--font)",
+                          color: "var(--text)", textAlign: "left",
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = "var(--brand-light)"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                      >
+                        <div style={{
+                          width: 28, height: 28, borderRadius: "50%",
+                          background: "var(--brand-light)", display: "flex",
+                          alignItems: "center", justifyContent: "center",
+                          fontSize: 11, fontWeight: 800, color: "var(--brand)", flexShrink: 0,
+                        }}>{(s.displayName || "?").charAt(0).toUpperCase()}</div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {s.displayName}
+                          </div>
+                          <div style={{ fontSize: 10, color: "var(--muted)" }}>ID {s.userId}</div>
+                        </div>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: "#b27300" }}>Ver como</span>
+                      </button>
+                    ))
+                  }
+                  {(Array.isArray(studentRows) ? studentRows : []).length === 0 && (
+                    <div style={{ padding: "16px 14px", textAlign: "center", color: "var(--muted)", fontSize: 11 }}>
+                      Carga un curso primero para ver estudiantes
+                    </div>
+                  )}
+                </div>
+                <div style={{ padding: "8px 14px", borderTop: "1px solid var(--border)", fontSize: 10, color: "var(--muted)", textAlign: "center" }}>
+                  Vista previa del portal del estudiante
+                </div>
+              </div>
+            )}
+          </div>
         )}
         <button
           className="topbar-icon-btn"
@@ -3882,286 +3780,95 @@ function AppTopbar({
 }
 
 // ──────────────────────────────────────────────
-// FloatingAI — Floating button for AI assistant
+// FloatingAI — Help menu (tutorial + updates + AI assistant)
 // ──────────────────────────────────────────────
-function FloatingAI({ studentRows, overview, raDashboard, courseInfo, thresholds, onOpenAssistant }) {
+function FloatingAI({ onOpenTutorial, onOpenAssistant }) {
   const [open, setOpen] = React.useState(false);
-  const [activeInsight, setActiveInsight] = React.useState(null);
-  const [chatInput, setChatInput] = React.useState("");
-  const [chatMsg, setChatMsg] = React.useState(null);
-  const [fabListening, setFabListening] = React.useState(false);
-  const fabRecRef = React.useRef(null);
-  const fabVoiceOk = typeof window !== "undefined" && !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+  const [showUpdates, setShowUpdates] = React.useState(false);
 
-  // Mini voice for FAB panel
-  const fabToggleMic = () => {
-    if (!fabVoiceOk) return;
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (fabListening) { fabRecRef.current?.stop(); setFabListening(false); return; }
-    const rec = new SR(); rec.lang = "es-CO"; rec.continuous = false; rec.interimResults = false;
-    rec.onstart = () => setFabListening(true);
-    rec.onend   = () => setFabListening(false);
-    rec.onerror = () => setFabListening(false);
-    rec.onresult = (e) => {
-      const t = Array.from(e.results).map(r => r[0].transcript).join(" ").trim();
-      if (t) { setChatInput(t); setTimeout(() => handleChatWithText(t), 100); }
-    };
-    fabRecRef.current = rec; rec.start();
-  };
-
-  // FAB mini suggestions (5 random, rotated on open)
-  const FAB_BANK = [
-    "¿Quiénes están en riesgo alto?",
-    "¿Cuál es el promedio del curso?",
-    "¿Hay estudiantes sin nota?",
-    "¿Qué RA está más crítico?",
-    "¿Quiénes son el top 3?",
-    "Dame un resumen del curso",
-    "¿Cuántos aprobaron?",
-    "¿Cuántos tienen nota menor a 5?",
-    "¿Cómo va la cobertura?",
-    "¿Quién tiene la nota más baja?",
-  ];
-  const [fabChips] = React.useState(() => FAB_BANK.sort(() => Math.random() - 0.5).slice(0, 4));
-
-  const rows = Array.isArray(studentRows) ? studentRows : [];
-  const withGrades = rows.filter(s => s.currentPerformancePct != null);
-  const altos  = rows.filter(s => computeRiskFromPct(s.currentPerformancePct) === "alto");
-  const medios = rows.filter(s => computeRiskFromPct(s.currentPerformancePct) === "medio");
-  const zeros  = rows.filter(s => s.currentPerformancePct == null);
-  const avg    = withGrades.length
-    ? (withGrades.reduce((a, s) => a + Number(s.currentPerformancePct) / 10, 0) / withGrades.length).toFixed(1)
-    : null;
-
-  const CHIPS = [
+  const menuItems = [
     {
-      id: "riesgo", icon: "🔴", label: "Riesgo",
-      badge: (altos.length + medios.length) || null,
-      badgeColor: altos.length > 0 ? "var(--critical)" : "var(--watch)",
-      body: () => altos.length + medios.length === 0
-        ? "Todos dentro del rango esperado."
-        : `${altos.length} alto · ${medios.length} medio. ${altos.length > 0 ? altos.slice(0,2).map(s => s.displayName.split(",")[0]).join(", ") + (altos.length > 2 ? " +" + (altos.length-2) + " más." : ".") : ""}`,
+      icon: "📖",
+      title: "Tutorial",
+      desc: "Guía paso a paso de la plataforma",
+      onClick: () => { setOpen(false); onOpenTutorial?.(); },
     },
     {
-      id: "promedio", icon: "📊", label: "Promedio",
-      badge: avg || "—",
-      badgeColor: avg ? colorForPct(Number(avg) * 10, thresholds) : "var(--muted)",
-      body: () => avg == null ? "Sin calificaciones aún."
-        : Number(avg) >= 7 ? `${avg}/10 — buen desempeño grupal.`
-        : `${avg}/10 — por debajo de 7.0.`,
+      icon: "🆕",
+      title: "Actualizaciones",
+      desc: `${UPDATES_STEPS.length} novedades recientes`,
+      badge: UPDATES_STEPS.length,
+      onClick: () => { setOpen(false); setShowUpdates(true); },
     },
     {
-      id: "sinnota", icon: "⚠️", label: "Sin nota",
-      badge: zeros.length || null,
-      badgeColor: "var(--watch)",
-      body: () => zeros.length === 0 ? "Todos tienen nota registrada."
-        : `${zeros.length}: ${zeros.slice(0,2).map(s => s.displayName.split(",")[0]).join(", ")}${zeros.length > 2 ? " +" + (zeros.length-2) : ""}.`,
-    },
-    {
-      id: "ra", icon: "🎯", label: "RA crítico",
-      badge: null,
-      badgeColor: "var(--muted)",
-      body: () => {
-        const ras = Array.isArray(raDashboard?.ras) ? raDashboard.ras.filter(r => r.studentsWithData > 0) : [];
-        if (!ras.length) return "Sin datos de RA con rúbricas aún.";
-        const w = [...ras].sort((a,b) => a.avgPct - b.avgPct)[0];
-        return `${w.code}: ${fmtPct(w.avgPct)} · ${w.studentsWithData} est.`;
-      },
+      icon: "🤖",
+      title: "Asistente IA",
+      desc: "Consultas en lenguaje natural",
+      onClick: () => { setOpen(false); onOpenAssistant?.(); },
     },
   ];
-
-  // Quick chat responder — orden: específico antes que genérico
-  const quickAnswer = (q) => {
-    const c = q.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-    const n = rows.length;
-    // RA crítico (ANTES de "menor" y "critico" genérico)
-    if (c.includes("que ra") || c.includes("ra critico") || c.includes("ra mas") ||
-        c.includes("resultado de aprendizaje") || c.includes("resultados de aprendizaje") ||
-        (c.includes("ra") && (c.includes("critico") || c.includes("bajo") || c.includes("peor")))) {
-      const ras = Array.isArray(raDashboard?.ras) ? raDashboard.ras.filter(r => r.studentsWithData > 0) : [];
-      if (!ras.length) return "Sin datos de RA disponibles aún.";
-      const w = [...ras].sort((a,b) => a.avgPct - b.avgPct)[0];
-      return `RA con menor desempeño: ${w.code} con ${fmtPct(w.avgPct)} promedio.`;
-    }
-    // Por debajo de 5 (ANTES de "menor" genérico)
-    if (c.includes("debajo de 5") || c.includes("menor a 5") || c.includes("menor de 5") || c.includes("5.0") || c.includes("reprobado") || (c.includes("cuantos") && c.includes("5"))) {
-      const rep = withGrades.filter(s => s.currentPerformancePct / 10 < 5);
-      return `Con nota menor a 5.0: ${rep.length} de ${n}.${rep.length ? " " + rep.slice(0,2).map(s=>s.displayName.split(",")[0]).join(", ") + (rep.length > 2 ? " y " + (rep.length-2) + " más." : ".") : ""}`;
-    }
-    // Nota más baja (ANTES de "nota" genérico)
-    if ((c.includes("nota") && (c.includes("mas baja") || c.includes("baja") || c.includes("menor nota") || c.includes("peor"))) ||
-        (c.includes("quien") && c.includes("baj"))) {
-      const worst = [...withGrades].sort((a,b) => a.currentPerformancePct - b.currentPerformancePct)[0];
-      if (!worst) return "Sin calificaciones registradas.";
-      return `Nota más baja: ${worst.displayName.split(",")[0]} con ${fmtGrade10FromPct(worst.currentPerformancePct)}.`;
-    }
-    // Riesgo alto (ANTES de riesgo genérico)
-    if (c.includes("riesgo alto") || (c.includes("riesgo") && c.includes("quienes"))) {
-      if (!altos.length) return "Ningún estudiante en riesgo alto.";
-      return `Riesgo alto: ${altos.length} estudiantes. ${altos.slice(0,2).map(s=>s.displayName.split(",")[0]).join(", ")}${altos.length > 2 ? " y " + (altos.length-2) + " más." : "."}`;
-    }
-    // Riesgo medio
-    if (c.includes("riesgo medio")) {
-      if (!medios.length) return "Ningún estudiante en riesgo medio.";
-      return `Riesgo medio: ${medios.length} estudiantes. ${medios.slice(0,2).map(s=>s.displayName.split(",")[0]).join(", ")}${medios.length > 2 ? " y " + (medios.length-2) + " más." : "."}`;
-    }
-    // Riesgo general
-    if (c.includes("riesgo") || c.includes("risk"))
-      return `Riesgo: ${altos.length} alto, ${medios.length} medio, ${zeros.length} sin nota de ${n} estudiantes.`;
-    // Resumen
-    if (c.includes("resumen") || c.includes("dame un") || c.includes("como va"))
-      return `${n} estudiantes - Promedio ${avg ?? "sin datos"}/10 - Alto: ${altos.length} - Medio: ${medios.length} - Sin nota: ${zeros.length}.`;
-    // Sin nota / actividad
-    if (c.includes("sin nota") || c.includes("sin evidencia") || c.includes("actividad reciente") || c.includes("sin actividad"))
-      return zeros.length ? `${zeros.length} sin nota: ${zeros.slice(0,3).map(s=>s.displayName.split(",")[0]).join(", ")}${zeros.length > 3 ? " y " + (zeros.length-3) + " mas." : "."}` : "Todos tienen nota registrada.";
-    // Aprobados
-    if (c.includes("aprobado") || c.includes("aprobaron")) {
-      const ap = withGrades.filter(s => s.currentPerformancePct / 10 >= 7);
-      return `Aprobados con nota mayor o igual a 7: ${ap.length} de ${n} (${n ? Math.round(ap.length/n*100) : 0} por ciento).`;
-    }
-    // Top
-    if (c.includes("top") || c.includes("mejor")) {
-      const topS = [...withGrades].sort((a,b) => b.currentPerformancePct - a.currentPerformancePct).slice(0,3);
-      if (!topS.length) return "Sin calificaciones disponibles.";
-      return `Top 3: ${topS.map((s,i) => (i+1)+". "+s.displayName.split(",")[0]+" ("+fmtGrade10FromPct(s.currentPerformancePct)+")").join(", ")}.`;
-    }
-    // Promedio (DESPUÉS de nota más baja)
-    if (c.includes("promedio") || c.includes("cual es la nota") || c.includes("nota promedio"))
-      return `Promedio del curso: ${avg ?? "sin datos"}/10 (${withGrades.length} con nota).`;
-    // Nota genérico (last resort para "nota")
-    if (c.includes("nota"))
-      return `Promedio del curso: ${avg ?? "sin datos"}/10.`;
-    // RA general
-    if (c.includes("ra") || c.includes("aprendizaje") || c.includes("logro")) {
-      const ras = Array.isArray(raDashboard?.ras) ? raDashboard.ras.filter(r => r.studentsWithData > 0) : [];
-      if (!ras.length) return "Sin datos de RA disponibles aún.";
-      const w = [...ras].sort((a,b) => a.avgPct - b.avgPct)[0];
-      return `RA con menor desempeño: ${w.code} con ${fmtPct(w.avgPct)} promedio.`;
-    }
-    if (c.includes("ruta") || c.includes("intervencion") || c.includes("prescripcion")) {
-      const routeCounts = { route_coverage: 0, route_high_risk: 0, route_watch: 0, route_ok: 0 };
-      rows.forEach(s => { const rid = s.route?.id || ""; if (routeCounts[rid] !== undefined) routeCounts[rid]++; });
-      return `Rutas: R0=${routeCounts.route_coverage}, R1=${routeCounts.route_high_risk}, R2=${routeCounts.route_watch}, R3=${routeCounts.route_ok}.`;
-    }
-    return "No reconoci esa consulta. Prueba: riesgo, promedio, sin nota, resumen, aprobados, RA critico, rutas.";
-  };
-
-  const handleChatWithText = (text) => {
-    const q = (text || chatInput).trim();
-    if (!q) return;
-    setChatMsg({ q, a: quickAnswer(q) });
-    setChatInput("");
-    setActiveInsight(null);
-  };
-  const handleChat = () => handleChatWithText(chatInput);
-
-  const insight = activeInsight ? CHIPS.find(c => c.id === activeInsight) : null;
 
   return (
-    <div className="ai-fab">
-      {open && (
-        <div className="ai-fab-panel" style={{ width: 290, maxHeight: "none" }}>
-          {/* Header */}
-          <div className="ai-fab-panel-header" style={{ padding: "10px 13px" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-              <span style={{ fontSize: 14 }}>⚡</span>
-              <span style={{ fontSize: 12, fontWeight: 800 }}>Análisis rápido</span>
+    <>
+      {showUpdates && <UpdatesModal onClose={() => setShowUpdates(false)} />}
+      <div className="ai-fab">
+        {open && (
+          <div className="ai-fab-panel" style={{ width: 250, maxHeight: "none" }}>
+            <div className="ai-fab-panel-header" style={{ padding: "10px 13px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                <span style={{ fontSize: 14 }}>❓</span>
+                <span style={{ fontSize: 12, fontWeight: 800 }}>Centro de ayuda</span>
+              </div>
+              <button
+                onClick={() => setOpen(false)}
+                style={{ background: "rgba(255,255,255,0.2)", border: "none", color: "#fff", borderRadius: 6, width: 24, height: 24, cursor: "pointer", fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center" }}
+              >✕</button>
             </div>
-            <button onClick={() => { setOpen(false); setActiveInsight(null); setChatMsg(null); setFabListening(false); fabRecRef.current?.stop(); }}
-              style={{ background: "rgba(255,255,255,0.2)", border: "none", color: "#fff", borderRadius: 6, width: 24, height: 24, cursor: "pointer", fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center" }}>
-              ✕
-            </button>
-          </div>
 
-          {/* 2×2 stat chips */}
-          <div style={{ padding: "9px 9px 0", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-            {CHIPS.map(c => (
-              <button key={c.id}
-                onClick={() => { setActiveInsight(prev => prev === c.id ? null : c.id); setChatMsg(null); }}
-                style={{
-                  display: "flex", alignItems: "center", gap: 6,
-                  padding: "6px 9px", borderRadius: 8, cursor: "pointer",
-                  border: "1.5px solid " + (activeInsight === c.id ? "var(--brand)" : "var(--border)"),
-                  background: activeInsight === c.id ? "var(--brand-light)" : "var(--bg)",
-                  transition: "all 0.13s",
-                }}
-              >
-                <span style={{ fontSize: 13, flexShrink: 0 }}>{c.icon}</span>
-                <span style={{ fontSize: 11, fontWeight: 700, color: activeInsight === c.id ? "var(--brand)" : "var(--text)", flex: 1, textAlign: "left" }}>{c.label}</span>
-                {c.badge != null && (
-                  <span style={{ fontSize: 10, fontWeight: 900, fontFamily: "var(--font-mono)", color: c.badgeColor, flexShrink: 0 }}>{c.badge}</span>
-                )}
-              </button>
-            ))}
-          </div>
-
-          {/* Mini suggestion chips */}
-          <div style={{ padding: "8px 9px 0" }}>
-            <div style={{ fontSize: 9, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>Pregunta rápida</div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-              {fabChips.map(q => (
-                <button key={q} onClick={() => handleChatWithText(q)}
-                  style={{ fontSize: 10, fontWeight: 600, padding: "4px 9px", borderRadius: 999, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--muted)", cursor: "pointer", transition: "all 0.12s", whiteSpace: "nowrap" }}
-                  onMouseEnter={e => { e.currentTarget.style.borderColor="var(--brand)"; e.currentTarget.style.color="var(--brand)"; }}
-                  onMouseLeave={e => { e.currentTarget.style.borderColor="var(--border)"; e.currentTarget.style.color="var(--muted)"; }}
-                >{q}</button>
+            <div style={{ padding: "10px 9px 12px", display: "flex", flexDirection: "column", gap: 6 }}>
+              {menuItems.map((item) => (
+                <button
+                  key={item.title}
+                  onClick={item.onClick}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 10,
+                    padding: "12px 14px", borderRadius: 10,
+                    border: "1.5px solid var(--border)",
+                    background: "var(--bg)", cursor: "pointer",
+                    textAlign: "left", fontFamily: "var(--font)",
+                    transition: "all 0.13s", position: "relative",
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = "var(--brand)"; e.currentTarget.style.background = "var(--brand-light)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.background = "var(--bg)"; }}
+                >
+                  <span style={{ fontSize: 22, flexShrink: 0 }}>{item.icon}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: "var(--text)" }}>{item.title}</div>
+                    <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 1 }}>{item.desc}</div>
+                  </div>
+                  {item.badge != null && (
+                    <span style={{
+                      fontSize: 9, fontWeight: 900, background: "#16a34a", color: "#fff",
+                      padding: "2px 6px", borderRadius: 99, flexShrink: 0,
+                    }}>
+                      {item.badge}
+                    </span>
+                  )}
+                </button>
               ))}
             </div>
           </div>
+        )}
 
-          {/* Insight or chat answer */}
-          {(insight || chatMsg) && (
-            <div style={{ margin: "7px 9px 0", padding: "9px 11px", borderRadius: 9, background: "var(--brand-light)", border: "1px solid var(--brand-light2)", animation: "fadeUp 0.16s ease both" }}>
-              {insight && <>
-                <div style={{ fontSize: 10, fontWeight: 800, color: "var(--brand)", marginBottom: 2, textTransform: "uppercase", letterSpacing: "0.06em" }}>{insight.label}</div>
-                <div style={{ fontSize: 11, color: "var(--text)", lineHeight: 1.5 }} dangerouslySetInnerHTML={{ __html: insight.body() }} />
-              </>}
-              {chatMsg && !insight && <>
-                <div style={{ fontSize: 9, color: "var(--muted)", marginBottom: 3, fontStyle: "italic" }}>"{chatMsg.q}"</div>
-                <div style={{ fontSize: 11, color: "var(--text)", lineHeight: 1.5 }} dangerouslySetInnerHTML={{ __html: chatMsg.a }} />
-              </>}
-            </div>
-          )}
-
-          {/* Input + voice */}
-          <div style={{ padding: "7px 9px 0", display: "flex", gap: 5, alignItems: "center" }}>
-            <button onClick={fabToggleMic}
-              title={fabVoiceOk ? (fabListening ? "Detener voz" : "Hablar") : "Micrófono no disponible"}
-              style={{ width: 34, height: 34, borderRadius: 8, border: "1.5px solid " + (fabListening ? "var(--critical)" : "var(--border)"), background: fabListening ? "var(--critical-bg)" : "var(--bg)", color: fabListening ? "var(--critical)" : "var(--muted)", fontSize: 14, cursor: fabVoiceOk ? "pointer" : "not-allowed", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", opacity: fabVoiceOk ? 1 : 0.4, transition: "all 0.15s" }}
-            >{fabListening ? "⏹" : "🎙️"}</button>
-            <input
-              value={chatInput}
-              onChange={e => setChatInput(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter") handleChat(); }}
-              placeholder={fabListening ? "🎙️ Escuchando…" : "Escribe o usa el micrófono…"}
-              style={{ flex: 1, fontSize: 11, padding: "7px 9px", borderRadius: 8, border: "1px solid " + (fabListening ? "var(--critical)" : "var(--border)"), background: "var(--bg)", color: "var(--text)", fontFamily: "var(--font)", outline: "none", height: 34, transition: "border-color 0.15s" }}
-            />
-            <button onClick={handleChat}
-              style={{ width: 34, height: 34, borderRadius: 8, border: "none", background: "var(--brand)", color: "#fff", fontSize: 14, cursor: "pointer", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-              ↵
-            </button>
-          </div>
-
-          {/* CTA */}
-          <div style={{ padding: "7px 9px 9px" }}>
-            <button
-              onClick={() => { setOpen(false); setActiveInsight(null); setChatMsg(null); onOpenAssistant?.(); }}
-              style={{ width: "100%", padding: "7px 0", borderRadius: 8, border: "none", background: "var(--text)", color: "var(--card)", fontWeight: 800, fontSize: 11, cursor: "pointer", fontFamily: "var(--font)", opacity: 0.85 }}
-            >
-              🤖 Asistente completo
-            </button>
-          </div>
-        </div>
-      )}
-
-      <button
-        className={`ai-fab-btn${open ? " active" : ""}`}
-        onClick={() => { setOpen(v => !v); setActiveInsight(null); setChatMsg(null); }}
-        title="Análisis rápido"
-      >
-        <span style={{ color: "#fff", fontSize: 20 }}>{open ? "✕" : "⚡"}</span>
-      </button>
-    </div>
+        <button
+          className={`ai-fab-btn${open ? " active" : ""}`}
+          onClick={() => setOpen(v => !v)}
+          title="Centro de ayuda"
+        >
+          <span style={{ color: "#fff", fontSize: open ? 20 : 22, fontWeight: 900 }}>{open ? "✕" : "?"}</span>
+        </button>
+      </div>
+    </>
   );
 }
 
@@ -4453,6 +4160,10 @@ export default function TeacherDashboard() {
   const [query, setQuery] = useState("");
   const [onlyRisk, setOnlyRisk] = useState(false);
 
+  // CSV export configuration: which columns to include + popover open state
+  const [csvOpen, setCsvOpen] = useState(false);
+  const [csvColumns, setCsvColumns] = useState(() => STUDENT_CSV_COLUMNS.map((c) => c.key));
+
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [studentDetail, setStudentDetail] = useState(null);
   const [studentLoading, setStudentLoading] = useState(false);
@@ -4522,6 +4233,33 @@ export default function TeacherDashboard() {
       setLoadingCourses(false);
     }
   }, []);
+
+  // Auto-cargar la lista de cursos al montar: necesaria para detectar si
+  // el usuario es estudiante (no profesor) en el curso actual y redirigir.
+  useEffect(() => {
+    if (!courseListLoaded && !loadingCourses && orgUnitId && orgUnitId !== 0) {
+      searchCourses("");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgUnitId]);
+
+  // Auto-redirect to /portal if user is only enrolled as student in this course.
+  // SuperAdmins are exempt (they can view any course as instructor).
+  useEffect(() => {
+    if (isSuperAdmin) return;
+    if (!orgUnitId || orgUnitId === 0) return;
+    if (!courseListLoaded || courseList.length === 0) return;
+    const idStr = String(orgUnitId);
+    const matches = courseList.filter(c => String(c.id) === idStr);
+    if (matches.length === 0) return;
+    const hasInstructorRole = matches.some(c => !isStudentRole(c.roleName));
+    const hasStudentRole = matches.some(c => isStudentRole(c.roleName));
+    if (hasStudentRole && !hasInstructorRole) {
+      sessionStorage.setItem("gemelo_pending_org", String(orgUnitId));
+      window.location.href = window.location.origin + "/portal";
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgUnitId, courseListLoaded, courseList, isSuperAdmin]);
 
   // Cargar lista de cursos del docente (lazy — solo cuando abre el panel)
   const loadCourseList = React.useCallback(async () => {
@@ -5053,7 +4791,34 @@ export default function TeacherDashboard() {
     };
   }, [selectedStudent?.userId, orgUnitId]);
 
-  const thresholds = overview?.thresholds || { critical: 50, watch: 70 };
+  // #13 Per-course threshold override (persisted in localStorage)
+  const [thresholdsOverride, setThresholdsOverride] = useState(null);
+  const [showThresholdsModal, setShowThresholdsModal] = useState(false);
+  useEffect(() => {
+    if (!orgUnitId) { setThresholdsOverride(null); return; }
+    try {
+      const raw = localStorage.getItem(`gemelo_thresholds_${orgUnitId}`);
+      setThresholdsOverride(raw ? JSON.parse(raw) : null);
+    } catch { setThresholdsOverride(null); }
+  }, [orgUnitId]);
+  const baseThresholds = overview?.thresholds || { critical: 50, watch: 70 };
+  const thresholds = thresholdsOverride
+    ? { ...baseThresholds, ...thresholdsOverride }
+    : baseThresholds;
+  const saveThresholds = (next) => {
+    if (!orgUnitId) return;
+    const clean = {
+      critical: Math.max(0, Math.min(100, Number(next.critical) || 0)),
+      watch: Math.max(0, Math.min(100, Number(next.watch) || 0)),
+    };
+    if (clean.watch < clean.critical) clean.watch = clean.critical;
+    setThresholdsOverride(clean);
+    try { localStorage.setItem(`gemelo_thresholds_${orgUnitId}`, JSON.stringify(clean)); } catch { /* ignore */ }
+  };
+  const resetThresholds = () => {
+    setThresholdsOverride(null);
+    try { localStorage.removeItem(`gemelo_thresholds_${orgUnitId}`); } catch { /* ignore */ }
+  };
 
   const riskData = useMemo(() => {
     // Calculado desde notas reales (no globalRiskDistribution del backend que puede ser por RA)
@@ -5207,13 +4972,29 @@ const weakestAssignment = useMemo(() => {
       };
     };
 
+    // Lookup de nombres desde studentRows (classlist) para enriquecer
+    // cuando el backend devuelve displayName == String(userId) (DB sin sync de classlist aún)
+    const nameByUserId = new Map();
+    for (const s of studentRows) {
+      if (s.userId != null && s.displayName) {
+        nameByUserId.set(String(s.userId), s.displayName);
+      }
+    }
+    const resolveName = (userId, fallbackName) => {
+      const richer = nameByUserId.get(String(userId));
+      if (richer) return richer;
+      // Si el "name" backend es solo el userId (sin sincronizar), no mostrar dígitos
+      if (fallbackName && String(fallbackName) !== String(userId)) return fallbackName;
+      return `Estudiante ${userId}`;
+    };
+
     // Fuente 1: overview.studentsAtRisk (backend)
     const backendRisk = Array.isArray(overview?.studentsAtRisk) ? overview.studentsAtRisk : [];
     let candidates = [];
     if (backendRisk.length > 0) {
       candidates = backendRisk.map((s) =>
         toItem(
-          { userId: s.userId, name: s.displayName },
+          { userId: s.userId, name: resolveName(s.userId, s.displayName) },
           s.currentPerformancePct,
           Number(s.overdueUnscoredWeightPct ?? s.notSubmittedWeightPct ?? 0),
           Number(s.pendingUngradedWeightPct ?? s.pendingSubmittedWeightPct ?? 0),
@@ -5630,7 +5411,7 @@ const contentKpis = useMemo(() => {
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
             <div style={{ width: 40, height: 40, borderRadius: 10, background: "var(--brand)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 13, fontWeight: 900 }}>CESA</div>
             <div>
-              <div style={{ fontSize: 15, fontWeight: 900, color: "var(--text)" }}>Gemelo Digital</div>
+              <div style={{ fontSize: 15, fontWeight: 900, color: "var(--text)" }}>G.D</div>
               <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600 }}>
                 Hola, {authUser?.user_name?.split(" ")[0] || "docente"} — selecciona tu curso
               </div>
@@ -5693,8 +5474,6 @@ const contentKpis = useMemo(() => {
               )}
             </div>
           ) : (() => {
-            const STUDENT_ROLES = ["estudiante ef", "student", "estudiante"];
-            const isStudentRole = (rn) => STUDENT_ROLES.some(sr => String(rn || "").toLowerCase().includes(sr));
             const instructorCourses = courseList.filter(c => !isStudentRole(c.roleName));
             const studentCourses = courseList.filter(c => isStudentRole(c.roleName));
 
@@ -5804,7 +5583,7 @@ const contentKpis = useMemo(() => {
           {/* Description */}
           <p style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.6, margin: "0 0 24px" }}>
             {isNoAccess
-              ? `No tienes rol de instructor o coordinador en el curso ${orgUnitId}. Solo los docentes asignados pueden ver el Gemelo Digital de un curso.`
+              ? `No tienes rol de instructor o coordinador en el curso ${orgUnitId}. Solo los docentes asignados pueden ver el G.D de un curso.`
               : isNotFound
               ? `El curso con ID ${orgUnitId} no existe en Brightspace o fue eliminado.`
               : err
@@ -5883,6 +5662,9 @@ const contentKpis = useMemo(() => {
         onOpenCoordinator={() => setShowCoordinator(true)}
         locale={locale}
         toggleLocale={toggleLocale}
+        isSuperAdmin={isSuperAdmin}
+        studentRows={studentRows}
+        onImpersonate={setImpersonateStudent}
       />
 
       {/* ── Main content ── */}
@@ -5908,7 +5690,7 @@ const contentKpis = useMemo(() => {
           <div className="fade-up tab-enter">
             <div style={{ marginBottom: 16 }}>
               <div style={{ fontSize: 10, fontWeight: 800, color: "var(--brand)", textTransform: "uppercase", letterSpacing: "0.12em", marginBottom: 4 }}>
-                Gemelo Digital · Predicciones
+                G.D · Predicciones
               </div>
               <h1 style={{ fontSize: isMobile ? 20 : 26, fontWeight: 900, color: "var(--text)", letterSpacing: "-0.02em", lineHeight: 1.1, marginBottom: 4 }}>
                 Predicción de notas finales
@@ -5933,7 +5715,7 @@ const contentKpis = useMemo(() => {
           <div className="fade-up tab-enter">
             <div style={{ marginBottom: 16 }}>
               <div style={{ fontSize: 10, fontWeight: 800, color: "var(--brand)", textTransform: "uppercase", letterSpacing: "0.12em", marginBottom: 4 }}>
-                Gemelo Digital · Informes de evidencias
+                G.D · Informes de evidencias
               </div>
               <h1 style={{ fontSize: isMobile ? 20 : 26, fontWeight: 900, color: "var(--text)", letterSpacing: "-0.02em", lineHeight: 1.1, marginBottom: 4 }}>
                 Evidencias por banda de desempeño
@@ -5980,7 +5762,7 @@ const contentKpis = useMemo(() => {
           <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
             <div>
               <div style={{ fontSize: 10, fontWeight: 800, color: "var(--brand)", textTransform: "uppercase", letterSpacing: "0.12em", marginBottom: 4 }}>
-                Gemelo Digital · Vista Docente
+                G.D · Vista Docente
               </div>
               <h1 style={{ fontSize: isMobile ? 22 : 28, fontWeight: 900, color: "var(--text)", letterSpacing: "-0.03em", lineHeight: 1.1 }}>
                 {courseInfo?.Name || (orgUnitId ? `Curso ${orgUnitId}` : "Selecciona un curso")}
@@ -6374,14 +6156,28 @@ const contentKpis = useMemo(() => {
                         <StatusBadge status={computeRiskFromPct(item.currentPerformancePct)} />
                       </div>
 
-                      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                        {grade10 != null && (
-                          <div style={{ flexShrink: 0, textAlign: "center", minWidth: 38, padding: "3px 7px", borderRadius: 8, background: "rgba(255,255,255,0.6)", border: `1px solid ${gradeColor}30` }}>
-                            <div style={{ fontSize: 9, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>Nota</div>
-                            <div style={{ fontSize: 14, fontWeight: 900, fontFamily: "var(--font-mono)", color: gradeColor, lineHeight: 1.1 }}>{grade10}</div>
-                          </div>
-                        )}
-                        <div style={{ flex: 1 }}>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                          {grade10 != null && (
+                            <div style={{ flex: 1, textAlign: "center", padding: "3px 7px", borderRadius: 8, background: "rgba(255,255,255,0.6)", border: `1px solid ${gradeColor}30` }}>
+                              <div style={{ fontSize: 9, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>Nota</div>
+                              <div style={{ fontSize: 14, fontWeight: 900, fontFamily: "var(--font-mono)", color: gradeColor, lineHeight: 1.1 }}>{grade10}</div>
+                            </div>
+                          )}
+                          {item.pendingSubmittedWeightPct > 0 && (
+                            <div style={{ flex: 1, textAlign: "center", padding: "3px 7px", borderRadius: 8, background: "rgba(255,255,255,0.6)", border: "1px solid #FED7AA" }}>
+                              <div style={{ fontSize: 9, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>Pendiente</div>
+                              <div style={{ fontSize: 12, fontWeight: 900, fontFamily: "var(--font-mono)", color: COLORS.watch }}>{fmtPct(item.pendingSubmittedWeightPct)}</div>
+                            </div>
+                          )}
+                          {hasOverdue && (
+                            <div style={{ flex: 1, textAlign: "center", padding: "3px 7px", borderRadius: 8, background: "rgba(255,255,255,0.6)", border: "1px solid #FECDCA" }}>
+                              <div style={{ fontSize: 9, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>Vencido</div>
+                              <div style={{ fontSize: 12, fontWeight: 900, fontFamily: "var(--font-mono)", color: COLORS.critical }}>{fmtPct(item.notSubmittedWeightPct)}</div>
+                            </div>
+                          )}
+                        </div>
+                        <div style={{ width: "100%" }}>
                           <div style={{ fontSize: 10, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", marginBottom: 3 }}>Cobertura</div>
                           <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
                             <div style={{ flex: 1, height: 5, borderRadius: 999, background: "rgba(148,163,184,0.2)", overflow: "hidden" }}>
@@ -6392,18 +6188,6 @@ const contentKpis = useMemo(() => {
                             </span>
                           </div>
                         </div>
-                        {item.pendingSubmittedWeightPct > 0 && (
-                          <div style={{ flexShrink: 0, textAlign: "center", padding: "3px 7px", borderRadius: 8, background: "rgba(255,255,255,0.6)", border: "1px solid #FED7AA" }}>
-                            <div style={{ fontSize: 9, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>Pendiente</div>
-                            <div style={{ fontSize: 12, fontWeight: 900, fontFamily: "var(--font-mono)", color: COLORS.watch }}>{fmtPct(item.pendingSubmittedWeightPct)}</div>
-                          </div>
-                        )}
-                        {hasOverdue && (
-                          <div style={{ flexShrink: 0, textAlign: "center", padding: "3px 7px", borderRadius: 8, background: "rgba(255,255,255,0.6)", border: "1px solid #FECDCA" }}>
-                            <div style={{ fontSize: 9, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>Vencido</div>
-                            <div style={{ fontSize: 12, fontWeight: 900, fontFamily: "var(--font-mono)", color: COLORS.critical }}>{fmtPct(item.notSubmittedWeightPct)}</div>
-                          </div>
-                        )}
                       </div>
                     </div>
                   );
@@ -6550,15 +6334,92 @@ const contentKpis = useMemo(() => {
             }
             right={
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                <button
-                  className="btn"
-                  onClick={() => exportStudentsCsv(studentRows, courseInfo)}
-                  title="Exportar a CSV (abre en Excel)"
-                  aria-label="Exportar estudiantes a CSV"
-                  style={{ fontSize: 11, padding: "6px 10px" }}
-                >
-                  📥 CSV
-                </button>
+                <div style={{ position: "relative" }}>
+                  <div style={{ display: "flex", gap: 4 }}>
+                    <button
+                      className="btn"
+                      onClick={() => {
+                        const activeFilters = [];
+                        if (onlyRisk) activeFilters.push("solo-riesgo");
+                        if (quickFilter) activeFilters.push(quickFilter);
+                        if (advancedQuery?.mode) activeFilters.push(advancedQuery.mode);
+                        if (query.trim()) activeFilters.push("buscar");
+                        const filterDescription = activeFilters.join("-");
+                        exportStudentsCsv(filteredStudents, courseInfo, {
+                          columns: csvColumns,
+                          filterDescription,
+                        });
+                      }}
+                      title={`Exportar ${filteredStudents.length} estudiantes (filtro activo) a CSV`}
+                      aria-label="Exportar estudiantes a CSV"
+                      style={{ fontSize: 11, padding: "6px 10px" }}
+                    >
+                      📥 CSV ({filteredStudents.length})
+                    </button>
+                    <button
+                      className="btn"
+                      onClick={() => setCsvOpen((o) => !o)}
+                      aria-label="Configurar columnas del CSV"
+                      aria-expanded={csvOpen}
+                      title="Elegir columnas a exportar"
+                      style={{ fontSize: 11, padding: "6px 8px" }}
+                    >
+                      ▾
+                    </button>
+                  </div>
+                  {csvOpen && (
+                    <div
+                      role="menu"
+                      style={{
+                        position: "absolute", top: "calc(100% + 4px)", right: 0,
+                        background: "var(--card)", border: "1px solid var(--border)",
+                        borderRadius: 8, boxShadow: "var(--shadow)",
+                        padding: 10, minWidth: 200, zIndex: 50,
+                      }}
+                    >
+                      <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
+                        Columnas a exportar
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 260, overflowY: "auto" }}>
+                        {STUDENT_CSV_COLUMNS.map((col) => {
+                          const checked = csvColumns.includes(col.key);
+                          return (
+                            <label key={col.key} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, cursor: "pointer", padding: "2px 0" }}>
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={(e) => {
+                                  setCsvColumns((prev) =>
+                                    e.target.checked
+                                      ? STUDENT_CSV_COLUMNS.map((c) => c.key).filter((k) => prev.includes(k) || k === col.key)
+                                      : prev.filter((k) => k !== col.key)
+                                  );
+                                }}
+                              />
+                              {col.label}
+                            </label>
+                          );
+                        })}
+                      </div>
+                      <div style={{ display: "flex", gap: 6, marginTop: 8, borderTop: "1px solid var(--border)", paddingTop: 8 }}>
+                        <button
+                          className="btn"
+                          onClick={() => setCsvColumns(STUDENT_CSV_COLUMNS.map((c) => c.key))}
+                          style={{ fontSize: 10, padding: "4px 8px", flex: 1 }}
+                        >
+                          Todas
+                        </button>
+                        <button
+                          className="btn"
+                          onClick={() => setCsvOpen(false)}
+                          style={{ fontSize: 10, padding: "4px 8px", flex: 1 }}
+                        >
+                          Cerrar
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
                 <button
                   className="btn"
                   onClick={() => exportCourseReport(studentRows, courseInfo, overview)}
@@ -7031,14 +6892,22 @@ const contentKpis = useMemo(() => {
         commands={paletteCommands}
       />
 
+      {/* ── #13 Configurable risk thresholds ── */}
+      {showThresholdsModal && (
+        <ThresholdsModal
+          current={thresholds}
+          base={baseThresholds}
+          isOverridden={!!thresholdsOverride}
+          onSave={(v) => { saveThresholds(v); setShowThresholdsModal(false); }}
+          onReset={() => { resetThresholds(); setShowThresholdsModal(false); }}
+          onClose={() => setShowThresholdsModal(false)}
+        />
+      )}
+
       {/* ── Floating AI button ── */}
       {overview && (
         <FloatingAI
-          studentRows={studentRows}
-          overview={overview}
-          raDashboard={raDashboard}
-          courseInfo={courseInfo}
-          thresholds={thresholds}
+          onOpenTutorial={() => setShowTutorial(true)}
           onOpenAssistant={() => setActiveTab("assistant")}
         />
       )}
@@ -7063,7 +6932,7 @@ const contentKpis = useMemo(() => {
           setStudentLoading(false);
         }}
         title={selectedStudent ? `${selectedStudent.displayName}` : "Estudiante"}
-        subtitle={`ID ${selectedStudent?.userId ?? "—"} · Gemelo Digital · Vista docente`}
+        subtitle={`ID ${selectedStudent?.userId ?? "—"} · G.D · Vista docente`}
         extraHeader={isSuperAdmin && selectedStudent && (
           <button
             onClick={() => setImpersonateStudent({
@@ -7257,13 +7126,24 @@ const contentKpis = useMemo(() => {
                       </div>
                     )}
                     {/* Legend */}
-                    <div style={{ display: "flex", gap: 14, fontSize: 10, color: "var(--muted)", justifyContent: "center" }}>
+                    <div style={{ display: "flex", gap: 14, fontSize: 10, color: "var(--muted)", justifyContent: "center", alignItems: "center", flexWrap: "wrap" }}>
                       <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
                         <span style={{ width: 10, height: 2, background: COLORS.critical, display: "inline-block", borderRadius: 1 }} /> Crítico ({thresholds?.critical ?? 50}%)
                       </span>
                       <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
                         <span style={{ width: 10, height: 2, background: COLORS.watch, display: "inline-block", borderRadius: 1 }} /> Observación ({thresholds?.watch ?? 70}%)
                       </span>
+                      <button
+                        onClick={() => setShowThresholdsModal(true)}
+                        title="Configurar umbrales de riesgo para este curso"
+                        style={{
+                          marginLeft: 6, padding: "3px 8px", fontSize: 10, fontWeight: 700,
+                          border: "1px solid var(--border)", background: "var(--card)",
+                          color: "var(--brand)", borderRadius: 6, cursor: "pointer",
+                        }}
+                      >
+                        ⚙ Ajustar{thresholdsOverride ? " ●" : ""}
+                      </button>
                     </div>
                   </Card>
                 ) : learningOutcomesData.length > 0 ? (
@@ -7810,6 +7690,7 @@ const contentKpis = useMemo(() => {
             <StudentPortal
               orgUnitIdOverride={orgUnitId}
               userIdOverride={impersonateStudent.userId}
+              allowOverviewPanel={isSuperAdmin}
             />
           </React.Suspense>
         </div>

@@ -5,14 +5,12 @@ KEYWORDS_LOW = ["insuficiente", "bajo", "incipiente", "inicial", "deficiente"]
 
 def detect_rubric_inconsistency(rubric_detail: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
-    Heurística simple: si el nivel más bajo contiene lenguaje de excelencia repetido,
-    o si niveles se contradicen de forma obvia.
-    Devuelve lista de señales.
+    STUB — Called from gemelo_service.py during QC flag generation.
+    Currently returns an empty list (no inconsistencies detected).
+
+    Future implementation should:
+    - Identify lowest-level criteria by points or order
+    - Read criterion descriptors
+    - Count excellence/low keywords to flag contradictions
     """
-    signals = []
-    # TODO: adaptar a la estructura real del payload.
-    # Ejemplo de enfoque:
-    # - identificar "lowest level" por puntos o por orden
-    # - leer descriptores de criterios
-    # - contar keywords
-    return signals
+    return []

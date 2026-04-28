@@ -6,6 +6,7 @@ import hmac
 import hashlib
 import secrets
 import urllib.parse
+import asyncio
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -93,6 +94,21 @@ CLIENT_SECRET = os.getenv("BRIGHTSPACE_CLIENT_SECRET", "")
 REDIRECT_URI  = os.getenv("BRIGHTSPACE_REDIRECT_URI",  "")
 SCOPE         = os.getenv("BRIGHTSPACE_SCOPE",         "core:*:* enrollment:orgunit:read users:profile:read")
 FRONTEND_BASE = os.getenv("FRONTEND_BASE_URL",         "").rstrip("/")
+
+# Validate critical env vars at startup
+_REQUIRED_ENV = {
+    "BRIGHTSPACE_BASE_URL": BRIGHTSPACE_BASE_URL,
+    "BRIGHTSPACE_CLIENT_ID": CLIENT_ID,
+    "BRIGHTSPACE_CLIENT_SECRET": CLIENT_SECRET,
+    "BRIGHTSPACE_REDIRECT_URI": REDIRECT_URI,
+}
+_missing_env = [k for k, v in _REQUIRED_ENV.items() if not v]
+if _missing_env:
+    logger.warning(
+        "Variables de entorno faltantes: %s — "
+        "el login OAuth no funcionará hasta configurarlas.",
+        ", ".join(_missing_env),
+    )
 
 # Cookie config
 SESSION_COOKIE   = "gemelo_session_id"
@@ -389,6 +405,28 @@ async def brightspace_callback(request: Request):
     except Exception as e:
         logger.warning("whoami falló al crear sesión: %s", e)
 
+    # Detect system-level role (e.g. Super Administrator) from /users/{uid}
+    system_role = None
+    if uid:
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.get(
+                    f"{BRIGHTSPACE_BASE_URL}/d2l/api/lp/{LP_VERSION}/users/{uid}",
+                    headers=headers,
+                )
+                if r.status_code == 200:
+                    u = r.json()
+                    # RoleId maps to the roles list — we store the raw role ID
+                    # and check against known Super Admin role IDs
+                    role_id = str(u.get("RoleId") or "")
+                    # Super Administrator = 105, Administrator = 116
+                    if role_id in ("105",):
+                        system_role = "Super Administrator"
+                    elif role_id in ("116",):
+                        system_role = "Administrator"
+        except Exception as e:
+            logger.warning("user role detection failed: %s", e)
+
     # Crear sesión
     session_id = secrets.token_urlsafe(32)
     save_session(session_id, {
@@ -396,9 +434,8 @@ async def brightspace_callback(request: Request):
         "user_id":    uid,
         "user_name":  (user_name or "").strip(),
         "user_email": user_email,
-        # role se enriquece después del primer /my-course-offerings
-        # pero lo inicializamos vacío para que /auth/me lo pueda devolver
-        "role": None,
+        "role": system_role,
+        "all_roles": [system_role] if system_role else [],
     })
     logger.info("Sesión creada para user_id=%s name=%s", uid, user_name)
 
@@ -447,6 +484,7 @@ async def auth_me(request: Request, sid: str | None = Query(default=None)):
             "user_name":  session.get("user_name"),
             "user_email": session.get("user_email"),
             "role":       session.get("role"),
+            "all_roles":  session.get("all_roles", []),
             "iat":        session.get("iat"),
             "auth_method": method,
         })
@@ -778,20 +816,70 @@ async def brightspace_courses_enrolled(
     request: Request,
     active_only: bool = Query(default=True),
     limit:       int  = Query(default=200),
+    user_id:     int  = Query(default=None),
 ):
     token, err = _require_token_from_request(request)
     if err:
         return err
     headers = _auth_headers(token)
-    user_id, err = await _get_whoami_id(headers)
+    auth_user_id, err = await _get_whoami_id(headers)
     if err:
         return err
-    items = await _fetch_all_enrollments(headers, user_id, org_unit_type_id=3, limit=limit)
+
+    # If user_id is provided AND differs from auth user → SuperAdmin querying
+    # another user's enrollments. Brightspace's /enrollments/users/{uid}/orgUnits/
+    # endpoint silently returns the auth user's data when the OAuth scope is
+    # `enrollment:own_enrollment:read`, so we have to find the target user's
+    # courses by iterating the SuperAdmin's accessible courses and checking
+    # each course's classlist for the target user.
+    if user_id and str(user_id) != str(auth_user_id):
+        target_user_id = str(user_id)
+        logger.info(f"[enrolled] SuperAdmin {auth_user_id} querying user {target_user_id} via classlist iteration")
+
+        # Get SuperAdmin's accessible courses
+        accessible = await _fetch_all_enrollments(headers, auth_user_id, org_unit_type_id=3, limit=limit)
+        logger.info(f"[enrolled] SuperAdmin has {len(accessible)} accessible courses to check")
+
+        # Concurrent classlist lookups (semaphore to avoid overwhelming Brightspace)
+        sem = asyncio.Semaphore(10)
+
+        async def check_course(item):
+            async with sem:
+                ou = item.get("OrgUnit") or {}
+                org_id = ou.get("Id")
+                if not org_id:
+                    return None
+                url = (
+                    f"{BRIGHTSPACE_BASE_URL}/d2l/api/le/{LE_VERSION}"
+                    f"/{org_id}/classlist/{target_user_id}"
+                )
+                try:
+                    status, data = await _bs_get(url, headers)
+                    if status == 200 and data:
+                        offering = _normalize_offering(ou)
+                        # classlist returns RoleId (numeric); we just store it
+                        # as a hint. Frontend doesn't strictly need it.
+                        role_id = data.get("RoleId") if isinstance(data, dict) else None
+                        offering["roleName"] = f"Role {role_id}" if role_id else ""
+                        offering["roleId"] = role_id
+                        return offering
+                except Exception as e:
+                    logger.debug(f"[enrolled] classlist check failed for org {org_id}: {e}")
+                return None
+
+        results = await asyncio.gather(*[check_course(i) for i in accessible])
+        offerings = [r for r in results if r is not None]
+        logger.info(f"[enrolled] target {target_user_id} found in {len(offerings)} courses")
+        if active_only:
+            offerings = [o for o in offerings if o.get("isActive")]
+        return {"count": len(offerings), "items": offerings}
+
+    # Default: query auth user's own enrollments
+    items = await _fetch_all_enrollments(headers, auth_user_id, org_unit_type_id=3, limit=limit)
     offerings = []
     for i in items:
         ou = i.get("OrgUnit") or {}
         offering = _normalize_offering(ou)
-        # Include the role for this specific enrollment
         access = i.get("Access") or {}
         offering["roleName"] = access.get("ClasslistRoleName") or ""
         offerings.append(offering)

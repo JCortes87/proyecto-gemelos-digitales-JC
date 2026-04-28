@@ -6,6 +6,7 @@ import hmac
 import hashlib
 import secrets
 import urllib.parse
+import asyncio
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -399,6 +400,25 @@ async def brightspace_callback(request: Request):
     except Exception as e:
         logger.warning("whoami falló al crear sesión: %s", e)
 
+    # Detect system-level role (e.g. Super Administrator) from /users/{uid}
+    system_role = None
+    if uid:
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.get(
+                    f"{BRIGHTSPACE_BASE_URL}/d2l/api/lp/{LP_VERSION}/users/{uid}",
+                    headers=headers,
+                )
+                if r.status_code == 200:
+                    u = r.json()
+                    role_id = str(u.get("RoleId") or "")
+                    if role_id == "105":
+                        system_role = "Super Administrator"
+                    elif role_id == "116":
+                        system_role = "Administrator"
+        except Exception as e:
+            logger.warning("user role detection failed: %s", e)
+
     # Crear sesión
     session_id = secrets.token_urlsafe(32)
     save_session(session_id, {
@@ -406,9 +426,8 @@ async def brightspace_callback(request: Request):
         "user_id":    uid,
         "user_name":  (user_name or "").strip(),
         "user_email": user_email,
-        # role se enriquece después del primer /my-course-offerings
-        # pero lo inicializamos vacío para que /auth/me lo pueda devolver
-        "role": None,
+        "role": system_role,
+        "all_roles": [system_role] if system_role else [],
     })
     logger.info("Sesión creada para user_id=%s name=%s", uid, user_name)
 
@@ -533,6 +552,66 @@ async def brightspace_whoami(request: Request):
     url = f"{BRIGHTSPACE_BASE_URL}/d2l/api/lp/{LP_VERSION}/users/whoami"
     status, data = await _bs_get(url, _auth_headers(token))
     return JSONResponse(status_code=status, content=data)
+
+
+@app.get("/brightspace/semesters")
+async def brightspace_semesters(
+    request: Request,
+    min_year: int = Query(default=2025),
+):
+    """List all semesters (orgUnitType=5) with code >= min_year.
+    Used for the period dropdown in SuperAdmin / CoordinatorDashboard.
+    """
+    token, err = _require_token_from_request(request)
+    if err:
+        return err
+    headers = _auth_headers(token)
+
+    semesters = []
+    url = f"{BRIGHTSPACE_BASE_URL}/d2l/api/lp/{LP_VERSION}/orgstructure/"
+    bookmark = None
+    pages = 0
+    try:
+        while pages < 50:
+            params: dict = {"orgUnitType": "5"}
+            if bookmark:
+                params["bookmark"] = bookmark
+            status, data = await _bs_get(url, headers, params)
+            if status != 200:
+                break
+            items = data if isinstance(data, list) else (data.get("Items") or data.get("items") or [])
+            if not items:
+                break
+            semesters.extend(items)
+            pages += 1
+            paging = data.get("PagingInfo") if isinstance(data, dict) else None
+            if not paging or not paging.get("HasMoreItems"):
+                break
+            new_bm = paging.get("Bookmark")
+            if not new_bm or new_bm == bookmark:
+                break
+            bookmark = new_bm
+    except Exception as e:
+        logger.warning("semesters fetch failed: %s", str(e)[:200])
+
+    # Normalize and filter by min_year
+    out = []
+    for s in semesters:
+        code = str(s.get("Code") or "").strip()
+        name = str(s.get("Name") or "").strip()
+        sem_id = s.get("Identifier") or s.get("Id") or s.get("id")
+        if not code and not name:
+            continue
+        # Filter by year prefix in code (YYYYTT format)
+        try:
+            if code[:4].isdigit() and int(code[:4]) >= min_year:
+                out.append({"id": sem_id, "code": code, "name": name})
+        except Exception:
+            pass
+
+    # Sort newest first: by code descending (202610 > 202520 > 202510)
+    out.sort(key=lambda s: s["code"], reverse=True)
+    return {"count": len(out), "items": out}
 
 
 async def _fetch_all_enrollments(
@@ -830,6 +909,8 @@ async def brightspace_courses_enrolled(
     request: Request,
     active_only: bool = Query(default=True),
     limit:       int  = Query(default=200),
+    user_id:     int  = Query(default=None),
+    period:      str  = Query(default=None, description="Filter by period code prefix, e.g. '202610'"),
 ):
     """Returns the authenticated user's enrollments merged from TWO endpoints:
     1. /enrollments/myenrollments/ (requires enrollment:own_enrollment:read)
@@ -838,17 +919,220 @@ async def brightspace_courses_enrolled(
        — admin-level lookup that may return additional courses for Super Admins
        who have global access without explicit per-course enrollment.
 
-    The two results are merged by OrgUnit ID. For overlapping courses,
-    myenrollments data wins (it has the canonical user-specific Access.roleName).
-    This ensures:
-    - Students see their student courses (via myenrollments)
-    - Instructors see their courses (via either)
-    - Super Admins see ALL accessible courses (via admin endpoint fallback)"""
+    SuperAdmin case: When `user_id` query param is provided and differs from
+    the auth user, Brightspace's own-enrollment endpoints silently return the
+    auth user's data. We fall back to iterating over the SuperAdmin's accessible
+    courses and checking each course's classlist for the target user."""
     token, err = _require_token_from_request(request)
     if err:
         return err
     headers = _auth_headers(token)
+    auth_user_id, err_uid = await _get_whoami_id(headers)
 
+    # SuperAdmin querying ANOTHER user's enrollments
+    if user_id and auth_user_id and str(user_id) != str(auth_user_id):
+        target_user_id = str(user_id)
+        logger.info(
+            "courses/enrolled: SuperAdmin %s querying user %s",
+            auth_user_id, target_user_id,
+        )
+        # Build a search space of course offerings. We combine:
+        # 1. SuperAdmin's own enrollments (admin endpoint)
+        # 2. orgstructure endpoint (ALL course offerings in the org)
+        # Then deduplicate by OrgUnit ID.
+        accessible_list: list = []
+        try:
+            admin_enrollments = await _fetch_all_enrollments(headers, auth_user_id, org_unit_type_id=3, limit=limit)
+            for it in admin_enrollments:
+                ou = it.get("OrgUnit") or {}
+                ou_id = ou.get("Id") or ou.get("id")
+                if ou_id:
+                    accessible_list.append({"id": ou_id, "name": ou.get("Name", ""), "code": ou.get("Code", "")})
+        except Exception as _e:
+            logger.warning("admin enrollments failed: %s", str(_e)[:200])
+
+        # Use Brightspace semesters (orgUnitType=5) to efficiently scope the
+        # search space. We fetch all semesters, filter them, then get the
+        # descendant course offerings for each relevant semester.
+        # This avoids scanning ALL courses in the system (historical unused
+        # courses from pre-2025 have inconsistent metadata).
+        try:
+            semesters = []
+            sem_url = f"{BRIGHTSPACE_BASE_URL}/d2l/api/lp/{LP_VERSION}/orgstructure/"
+            bookmark = None
+            max_pages = 50
+            pages = 0
+            while pages < max_pages:
+                params: dict = {"orgUnitType": "5"}
+                if bookmark:
+                    params["bookmark"] = bookmark
+                _status, _data = await _bs_get(sem_url, headers, params)
+                if _status != 200:
+                    break
+                _items = _data if isinstance(_data, list) else (_data.get("Items") or _data.get("items") or [])
+                if not _items:
+                    break
+                semesters.extend(_items)
+                pages += 1
+                paging = _data.get("PagingInfo") if isinstance(_data, dict) else None
+                if not paging or not paging.get("HasMoreItems"):
+                    break
+                new_bm = paging.get("Bookmark")
+                if not new_bm or new_bm == bookmark:
+                    break
+                bookmark = new_bm
+
+            # Filter semesters. If user provided a period, match it as prefix
+            # in code or name. Otherwise default to semesters from 2025+.
+            def _sem_matches(sem):
+                code = str(sem.get("Code") or "").strip()
+                name = str(sem.get("Name") or "").strip()
+                if period and period.strip():
+                    p = period.strip().lower()
+                    return p in code.lower() or p in name.lower()
+                # Default: only semesters whose code starts with "2025" or later.
+                # Semester codes follow "YYYYTT" format (e.g., 202510, 202610).
+                if code[:4].isdigit():
+                    return int(code[:4]) >= 2025
+                return False
+
+            relevant_semesters = [s for s in semesters if _sem_matches(s)]
+            logger.info(
+                "courses/enrolled: %d total semesters, %d relevant%s",
+                len(semesters), len(relevant_semesters),
+                f" (period='{period}')" if period and period.strip() else " (default >= 2025)",
+            )
+
+            # For each relevant semester, get descendant course offerings
+            async def _fetch_semester_courses(sem):
+                sem_id = sem.get("Identifier") or sem.get("Id") or sem.get("id")
+                if not sem_id:
+                    return []
+                url = (
+                    f"{BRIGHTSPACE_BASE_URL}/d2l/api/lp/{LP_VERSION}"
+                    f"/orgstructure/{sem_id}/descendants/"
+                )
+                out = []
+                bm = None
+                pg = 0
+                while pg < 20:
+                    p: dict = {"ouTypeId": "3"}
+                    if bm:
+                        p["bookmark"] = bm
+                    st, dt = await _bs_get(url, headers, p)
+                    if st != 200:
+                        break
+                    items = dt if isinstance(dt, list) else (dt.get("Items") or dt.get("items") or [])
+                    if not items:
+                        break
+                    for it in items:
+                        ou_id = it.get("Identifier") or it.get("Id") or it.get("id")
+                        if ou_id:
+                            out.append({
+                                "id": ou_id,
+                                "name": it.get("Name", ""),
+                                "code": it.get("Code", ""),
+                                "semesterCode": str(sem.get("Code") or ""),
+                                "semesterName": str(sem.get("Name") or ""),
+                            })
+                    pg += 1
+                    paging = dt.get("PagingInfo") if isinstance(dt, dict) else None
+                    if not paging or not paging.get("HasMoreItems"):
+                        break
+                    new_bm = paging.get("Bookmark")
+                    if not new_bm or new_bm == bm:
+                        break
+                    bm = new_bm
+                return out
+
+            # Fetch courses from all relevant semesters in parallel
+            sem_courses_lists = await asyncio.gather(*[
+                _fetch_semester_courses(s) for s in relevant_semesters
+            ])
+            for lst in sem_courses_lists:
+                for c in lst:
+                    accessible_list.append(c)
+
+            logger.info(
+                "courses/enrolled: gathered %d courses from %d semesters",
+                sum(len(l) for l in sem_courses_lists), len(relevant_semesters),
+            )
+        except Exception as _e:
+            logger.warning("semester-based search failed: %s", str(_e)[:200])
+
+        # Deduplicate by id
+        seen = set()
+        search_space = []
+        for item in accessible_list:
+            sid = str(item["id"])
+            if sid in seen:
+                continue
+            seen.add(sid)
+            search_space.append(item)
+
+        logger.info("courses/enrolled: search space = %d course offerings", len(search_space))
+
+        sem = asyncio.Semaphore(25)
+
+        async def _check_course(item):
+            async with sem:
+                org_id = item.get("id")
+                if not org_id:
+                    return None
+                # Use enrollments endpoint to check if target user has an
+                # enrollment in this org unit. Returns 200 with enrollment
+                # data if enrolled, 404 if not.
+                url = (
+                    f"{BRIGHTSPACE_BASE_URL}/d2l/api/lp/{LP_VERSION}"
+                    f"/enrollments/orgUnits/{org_id}/users/{target_user_id}"
+                )
+                try:
+                    status, data = await _bs_get(url, headers)
+                    if status == 200 and isinstance(data, dict):
+                        role_id = data.get("RoleId")
+                        ou_info = data.get("OrgUnit") or {}
+                        name = ou_info.get("Name") or item.get("name") or ""
+                        code = ou_info.get("Code") or item.get("code") or ""
+                        role_name_map = {
+                            105: "Super Administrator",
+                            109: "Instructor",
+                            110: "Estudiante EF",
+                            113: "Designer",
+                            116: "Administrator",
+                            120: "Profesor Asistente",
+                            126: "Diseñador Pedagógico",
+                            128: "Monitor",
+                            129: "Estudiante EC",
+                            130: "Coordinador Administrativo",
+                            131: "Diseñador Instruccional",
+                            133: "Tutor Virtual",
+                        }
+                        role_name = role_name_map.get(int(role_id), f"Role {role_id}") if role_id else ""
+                        return {
+                            "id": org_id,
+                            "name": name,
+                            "code": code,
+                            "isActive": True,
+                            "roleName": role_name,
+                            "roleId": role_id,
+                            "semesterCode": item.get("semesterCode") or "",
+                            "semesterName": item.get("semesterName") or "",
+                        }
+                except Exception as _e:
+                    logger.debug("enrollment check failed for org %s: %s", org_id, str(_e)[:100])
+                return None
+
+        results = await asyncio.gather(*[_check_course(i) for i in search_space])
+        offerings = [r for r in results if r is not None]
+        logger.info(
+            "courses/enrolled: target %s found in %d of %d courses",
+            target_user_id, len(offerings), len(search_space),
+        )
+        if active_only:
+            offerings = [o for o in offerings if o.get("isActive")]
+        return {"count": len(offerings), "items": offerings}
+
+    # Default flow: auth user's own enrollments (merged from my + admin endpoints)
     # 1. myenrollments — user's own explicit enrollments
     items_my = await _fetch_my_enrollments(headers, limit=limit)
 
@@ -856,9 +1140,8 @@ async def brightspace_courses_enrolled(
     #    additional courses for global admins
     items_admin = []
     try:
-        user_id, err_uid = await _get_whoami_id(headers)
-        if not err_uid and user_id:
-            items_admin = await _fetch_all_enrollments(headers, user_id, org_unit_type_id=3, limit=limit)
+        if not err_uid and auth_user_id:
+            items_admin = await _fetch_all_enrollments(headers, auth_user_id, org_unit_type_id=3, limit=limit)
     except Exception as _e:
         logger.warning("_fetch_all_enrollments failed: %s", str(_e)[:200])
         items_admin = []
@@ -1218,15 +1501,21 @@ async def brightspace_dropbox_feedback(
         f"{BRIGHTSPACE_BASE_URL}/d2l/api/le/{LE_VERSION}"
         f"/{org_unit_id}/dropbox/folders/{folder_id}/feedback/{user_id}"
     )
-    # 2. Folder info (for rubric IDs + name)
+    # 2. Folder info (for rubric IDs + name + instructions)
     folder_url = (
         f"{BRIGHTSPACE_BASE_URL}/d2l/api/le/{LE_VERSION}"
         f"/{org_unit_id}/dropbox/folders/{folder_id}"
     )
+    # 3. Submissions (for the student's own comment when uploading)
+    subs_url = (
+        f"{BRIGHTSPACE_BASE_URL}/d2l/api/le/{LE_VERSION}"
+        f"/{org_unit_id}/dropbox/folders/{folder_id}/submissions/"
+    )
 
-    (fb_status, fb_data), (_, folder_data) = await asyncio.gather(
+    (fb_status, fb_data), (_, folder_data), (_, subs_data) = await asyncio.gather(
         _bs_get(feedback_url, headers),
         _bs_get(folder_url, headers),
+        _bs_get(subs_url, headers),
     )
 
     # If feedback fetch failed, still return whatever we have
@@ -1645,17 +1934,141 @@ async def brightspace_dropbox_feedback(
     fb_obj = fb_data.get("Feedback") if isinstance(fb_data.get("Feedback"), dict) else {}
     feedback_text = fb_obj.get("Html") or fb_obj.get("Text") or ""
 
+    # Assignment-level instructions (lo que el docente escribió al crear la tarea)
+    instr_obj = folder_data.get("Instructions") or folder_data.get("CustomInstructions") or {}
+    assignment_instructions = ""
+    if isinstance(instr_obj, dict):
+        assignment_instructions = instr_obj.get("Html") or instr_obj.get("Text") or ""
+    elif isinstance(instr_obj, str):
+        assignment_instructions = instr_obj
+
+    # Student's submission comment (lo que el estudiante escribió al subir su entrega)
+    submission_comment = ""
+    submitted_at = None
+    subs_list = subs_data if isinstance(subs_data, list) else (
+        (subs_data or {}).get("Items") or (subs_data or {}).get("items") or []
+    )
+    user_subs_match = []
+    for s in subs_list:
+        if not isinstance(s, dict):
+            continue
+        eid = (
+            s.get("EntityId")
+            or s.get("UserId")
+            or (s.get("Entity") or {}).get("EntityId")
+        )
+        if str(eid) == str(user_id):
+            user_subs_match.append(s)
+
+    # Fallback: si /feedback/{userId} no devolvió Feedback.Text, sacarlo del bulk
+    if not feedback_text and user_subs_match:
+        for entry in user_subs_match:
+            fb_outer = entry.get("Feedback") or {}
+            fb_inner = fb_outer.get("Feedback") if isinstance(fb_outer, dict) else None
+            if isinstance(fb_inner, dict):
+                feedback_text = fb_inner.get("Html") or fb_inner.get("Text") or ""
+                if feedback_text:
+                    break
+    # Comment is per-submission; pick the most recent
+    if user_subs_match:
+        # Try to flatten submissions inside grouped entries (Brightspace returns
+        # one entry per user with a Submissions[] array)
+        flat = []
+        for entry in user_subs_match:
+            inner = entry.get("Submissions") or entry.get("submissions") or []
+            if isinstance(inner, list) and inner:
+                flat.extend([sub for sub in inner if isinstance(sub, dict)])
+            else:
+                flat.append(entry)
+        # Pick most recent by SubmissionDate
+        def _sub_date(x):
+            return x.get("SubmissionDate") or x.get("submissionDate") or ""
+        flat.sort(key=_sub_date, reverse=True)
+        if flat:
+            top = flat[0]
+            submitted_at = _sub_date(top) or None
+            cmt = top.get("Comment") or {}
+            if isinstance(cmt, dict):
+                submission_comment = cmt.get("Html") or cmt.get("Text") or ""
+            elif isinstance(cmt, str):
+                submission_comment = cmt
+
+    # Fallback: si /feedback/{userId} no trae Score/OutOf (caso de calificación
+    # cargada directamente al gradebook), consultar el grade item asociado al folder.
+    final_score = fb_data.get("Score")
+    final_out_of = fb_data.get("OutOf")
+    if final_score is None or final_out_of is None:
+        # GradeItemId puede estar en Assessment.GradeItemId o GradeItemId top-level
+        assess = folder_data.get("Assessment") or {}
+        grade_item_id = (
+            assess.get("GradeItemId")
+            or folder_data.get("GradeItemId")
+            or assess.get("GradeItem")
+        )
+        logger.info(
+            "grades fallback folder=%s user=%s gradeItemId=%s feedbackScore=%s feedbackOutOf=%s",
+            folder_id, user_id, grade_item_id, final_score, final_out_of,
+        )
+        if grade_item_id:
+            try:
+                gv_url = (
+                    f"{BRIGHTSPACE_BASE_URL}/d2l/api/le/{LE_VERSION}"
+                    f"/{org_unit_id}/grades/{grade_item_id}/values/{user_id}"
+                )
+                gi_url = (
+                    f"{BRIGHTSPACE_BASE_URL}/d2l/api/le/{LE_VERSION}"
+                    f"/{org_unit_id}/grades/{grade_item_id}"
+                )
+                (gv_status, gv_data), (gi_status, gi_data) = await asyncio.gather(
+                    _bs_get(gv_url, headers),
+                    _bs_get(gi_url, headers),
+                )
+                logger.info(
+                    "grades fallback resp gv_status=%s gv_keys=%s gi_status=%s gi_keys=%s",
+                    gv_status,
+                    list(gv_data.keys()) if isinstance(gv_data, dict) else type(gv_data).__name__,
+                    gi_status,
+                    list(gi_data.keys()) if isinstance(gi_data, dict) else type(gi_data).__name__,
+                )
+                if isinstance(gv_data, dict):
+                    pv = (
+                        gv_data.get("PointsNumerator")
+                        or (gv_data.get("GradeValue") or {}).get("PointsNumerator")
+                        or gv_data.get("WeightedNumerator")
+                    )
+                    # DisplayedGrade puede ser string como "25" o "25/100"
+                    if pv is None:
+                        dg = gv_data.get("DisplayedGrade")
+                        if dg:
+                            try:
+                                pv = float(str(dg).split("/")[0].strip())
+                            except Exception:
+                                pv = None
+                    if pv is not None and final_score is None:
+                        final_score = pv
+                if isinstance(gi_data, dict) and final_out_of is None:
+                    final_out_of = gi_data.get("MaxPoints") or gi_data.get("PointsDenominator")
+                logger.info(
+                    "grades fallback final folder=%s user=%s score=%s outOf=%s",
+                    folder_id, user_id, final_score, final_out_of,
+                )
+            except Exception as e:
+                logger.warning("grades fallback failed folder=%s user=%s: %s", folder_id, user_id, e)
+
     return JSONResponse(content={
-        "folderId":    folder_id,
-        "folderName":  folder_name,
-        "userId":      user_id,
-        "score":       fb_data.get("Score"),
-        "outOf":       fb_data.get("OutOf"),
-        "isGraded":    fb_data.get("IsGraded"),
-        "feedbackText": feedback_text,
-        "files":       fb_data.get("Files") or [],
-        "rubrics":     rubrics_out,
-        "raw":         fb_data,
+        "folderId":               folder_id,
+        "folderName":             folder_name,
+        "userId":                 user_id,
+        "score":                  final_score,
+        "outOf":                  final_out_of,
+        "isGraded":               fb_data.get("IsGraded"),
+        "feedbackText":           feedback_text,
+        "files":                  fb_data.get("Files") or [],
+        "rubrics":                rubrics_out,
+        "assignmentInstructions": assignment_instructions,
+        "submissionComment":      submission_comment,
+        "submittedAt":            submitted_at,
+        "raw":                    fb_data,
     })
 
 

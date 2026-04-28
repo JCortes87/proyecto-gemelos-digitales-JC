@@ -22,7 +22,7 @@ import { COLORS, colorForPct } from "../../utils/colors";
  *   courseInfo: { Name, StartDate, EndDate }
  *   variant: "compact" | "full"
  */
-export default function GradePredictions({
+function GradePredictions({
   studentRows = [],
   onStudentClick = () => {},
   courseInfo = null,
@@ -330,3 +330,5 @@ export default function GradePredictions({
     </div>
   );
 }
+
+export default React.memo(GradePredictions);

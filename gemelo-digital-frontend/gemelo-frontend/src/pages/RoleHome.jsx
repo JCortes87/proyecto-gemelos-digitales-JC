@@ -1,8 +1,11 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, lazy, Suspense } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { apiGet } from "../utils/api";
 import { injectStyles } from "../styles/global";
+import { isStudentRole } from "../utils/roles";
+
+const StudentOverviewPanel = lazy(() => import("./StudentOverviewPanel"));
 
 export default function RoleHome() {
   useEffect(() => { injectStyles(); }, []);
@@ -18,6 +21,27 @@ export default function RoleHome() {
   // SuperAdmin: global course search results from /brightspace/all-courses
   const [globalResults, setGlobalResults] = useState([]);
   const [globalLoading, setGlobalLoading] = useState(false);
+
+  // SuperAdmin: impersonation
+  const [impersonateOrgId, setImpersonateOrgId] = useState("");
+  const [impersonateUserId, setImpersonateUserId] = useState("");
+  const [impersonateRole, setImpersonateRole] = useState("instructor"); // default professor
+  const [impersonatePeriod, setImpersonatePeriod] = useState("");
+  const [overviewUserId, setOverviewUserId] = useState(null);
+  const [overviewPeriod, setOverviewPeriod] = useState("");
+  const [overviewStudentSearchId, setOverviewStudentSearchId] = useState(""); // for "ver rendimiento" card
+
+  // SuperAdmin: semesters list for dropdown
+  const [semesters, setSemesters] = useState([]);
+  useEffect(() => {
+    if (!isSuperAdmin) return;
+    (async () => {
+      try {
+        const data = await apiGet("/brightspace/semesters?min_year=2025");
+        setSemesters(Array.isArray(data?.items) ? data.items : []);
+      } catch { /* silent */ }
+    })();
+  }, [isSuperAdmin]);
 
   useEffect(() => {
     if (!isSuperAdmin || search.trim().length < 3) {
@@ -61,13 +85,12 @@ export default function RoleHome() {
 
   // Classify courses by role
   const { instructorCourses, studentCourses } = useMemo(() => {
-    const STUDENT_ROLES = ["estudiante ef", "student", "estudiante"];
     const inst = [];
     const stud = [];
 
     for (const c of courses) {
       const rn = String(c.roleName || "").toLowerCase().trim();
-      if (STUDENT_ROLES.some(sr => rn.includes(sr))) {
+      if (isStudentRole(rn)) {
         stud.push(c);
       } else if (rn) {
         inst.push(c);
@@ -103,9 +126,24 @@ export default function RoleHome() {
   const filteredStud = filterCourses(studentCourses);
 
   const handleSelectCourse = (courseId, asRole) => {
+    // Detect actual role in this course based on enrollments — this prevents
+    // opening a course as instructor when the user is only enrolled as student
+    // (and vice versa).
+    const idStr = String(courseId);
+    const isStudentInCourse = studentCourses.some(c => String(c.id) === idStr);
+    const isInstructorInCourse = instructorCourses.some(c => String(c.id) === idStr);
+
+    let targetRole = asRole;
+    if (isStudentInCourse && !isInstructorInCourse) {
+      targetRole = "student";
+    } else if (isInstructorInCourse && !isStudentInCourse) {
+      targetRole = "instructor";
+    }
+    // If user is in BOTH (rare), respect the asRole hint passed in.
+    // If user is in NEITHER (e.g. SuperAdmin opening any course), use asRole as fallback.
+
     sessionStorage.setItem("gemelo_pending_org", String(courseId));
-    // Navigate with full page load so the target page picks up the new orgUnitId
-    const target = asRole === "student" ? "/portal" : "/dashboard";
+    const target = targetRole === "student" ? "/portal" : "/dashboard";
     window.location.href = window.location.origin + target;
   };
 
@@ -158,7 +196,7 @@ export default function RoleHome() {
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{ width: 32, height: 32, borderRadius: 8, background: "var(--brand)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 10, fontWeight: 900 }}>CESA</div>
           <div>
-            <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)" }}>Gemelo Digital</div>
+            <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)" }}>G.D</div>
             <div style={{ fontSize: 9, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Selecciona tu vista</div>
           </div>
         </div>
@@ -177,7 +215,7 @@ export default function RoleHome() {
       <main style={{ maxWidth: 720, margin: "0 auto", padding: "32px 20px" }}>
         {/* Welcome */}
         <div style={{ textAlign: "center", marginBottom: 28 }}>
-          <div style={{ fontSize: 10, fontWeight: 800, color: "var(--brand)", textTransform: "uppercase", letterSpacing: "0.12em", marginBottom: 6 }}>Gemelo Digital</div>
+          <div style={{ fontSize: 10, fontWeight: 800, color: "var(--brand)", textTransform: "uppercase", letterSpacing: "0.12em", marginBottom: 6 }}>G.D</div>
           <h1 style={{ fontSize: 26, fontWeight: 900, color: "var(--text)", letterSpacing: "-0.03em", margin: "0 0 6px" }}>
             Hola, {firstName}
           </h1>
@@ -240,19 +278,148 @@ export default function RoleHome() {
               </div>
             )}
 
-            {/* ── SuperAdmin: global course search results ── */}
+            {/* ═══ SUPER ADMIN CARDS (order: Overview → Impersonate → Global Search) ═══ */}
+
+            {/* 1. Rendimiento general del estudiante */}
+            {isSuperAdmin && (
+              <div style={{ background: "var(--card)", border: "1px solid var(--brand)", borderRadius: 16, padding: "20px 20px 16px", boxShadow: "var(--shadow)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                  <span style={{ fontSize: 16 }}>📊</span>
+                  <span style={{ fontSize: 14, fontWeight: 800, color: "var(--text)" }}>
+                    Rendimiento general de un estudiante
+                  </span>
+                </div>
+                <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 12, padding: "6px 10px", background: "var(--brand-light)", borderRadius: 8, borderLeft: "3px solid var(--brand)" }}>
+                  Busca todas las asignaturas donde está inscrito un estudiante y su promedio por curso. Selecciona un período para acelerar la búsqueda.
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+                  <input
+                    type="number"
+                    placeholder="ID del estudiante"
+                    value={overviewStudentSearchId}
+                    onChange={e => setOverviewStudentSearchId(e.target.value)}
+                    style={{ flex: "1 1 180px", padding: "9px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 12, fontFamily: "var(--font)", outline: "none" }}
+                  />
+                  <select
+                    value={impersonatePeriod}
+                    onChange={e => setImpersonatePeriod(e.target.value)}
+                    style={{ flex: "1 1 220px", padding: "9px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 12, fontFamily: "var(--font)", outline: "none", cursor: "pointer" }}
+                  >
+                    <option value="">Todos los periodos (2025+)</option>
+                    {semesters.map(s => (
+                      <option key={s.id} value={s.code}>{s.code} — {s.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <button
+                  onClick={() => {
+                    const uid = Number(overviewStudentSearchId);
+                    if (!uid || uid <= 0) { alert("Ingresa un ID de estudiante válido"); return; }
+                    setOverviewPeriod(impersonatePeriod.trim());
+                    setOverviewUserId(uid);
+                  }}
+                  disabled={!overviewStudentSearchId || Number(overviewStudentSearchId) <= 0}
+                  style={{
+                    width: "100%", padding: "10px 16px", borderRadius: 10,
+                    border: "none", cursor: overviewStudentSearchId ? "pointer" : "not-allowed",
+                    background: overviewStudentSearchId ? "var(--brand)" : "var(--bg)",
+                    color: overviewStudentSearchId ? "#fff" : "var(--muted)",
+                    fontSize: 13, fontWeight: 800, fontFamily: "var(--font)",
+                  }}
+                >
+                  📊 Ver rendimiento general del estudiante
+                </button>
+              </div>
+            )}
+
+            {/* 2. Suplantar usuario */}
+            {isSuperAdmin && (
+              <div style={{ background: "var(--card)", border: "1px solid rgba(255, 170, 0, 0.3)", borderRadius: 16, padding: "20px 20px 16px", boxShadow: "var(--shadow)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                  <span style={{ fontSize: 16 }}>👁</span>
+                  <span style={{ fontSize: 14, fontWeight: 800, color: "var(--text)" }}>
+                    Suplantar usuario (Super Admin)
+                  </span>
+                </div>
+                <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 12, padding: "6px 10px", background: "rgba(255, 170, 0, 0.06)", borderRadius: 8, borderLeft: "3px solid #f59e0b" }}>
+                  Abre un curso como si fueras un profesor o estudiante específico. Para "Como Estudiante" debes ingresar el ID del estudiante.
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+                  <input
+                    type="number"
+                    placeholder="ID del curso"
+                    value={impersonateOrgId}
+                    onChange={e => setImpersonateOrgId(e.target.value)}
+                    style={{ flex: "1 1 120px", padding: "9px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 12, fontFamily: "var(--font)", outline: "none" }}
+                  />
+                  <select
+                    value={impersonateRole}
+                    onChange={e => setImpersonateRole(e.target.value)}
+                    style={{ padding: "9px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 12, fontFamily: "var(--font)", outline: "none", cursor: "pointer" }}
+                  >
+                    <option value="instructor">Como Profesor</option>
+                    <option value="student">Como Estudiante</option>
+                  </select>
+                  {impersonateRole === "student" && (
+                    <input
+                      type="number"
+                      placeholder="ID del estudiante"
+                      value={impersonateUserId}
+                      onChange={e => setImpersonateUserId(e.target.value)}
+                      style={{ flex: "1 1 140px", padding: "9px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 12, fontFamily: "var(--font)", outline: "none" }}
+                    />
+                  )}
+                </div>
+                {(() => {
+                  const orgValid = impersonateOrgId && Number(impersonateOrgId) > 0;
+                  const studentValid = impersonateUserId && Number(impersonateUserId) > 0;
+                  const canSubmit = impersonateRole === "instructor"
+                    ? orgValid
+                    : (orgValid && studentValid);
+                  return (
+                    <button
+                      onClick={() => {
+                        if (!canSubmit) return;
+                        const org = Number(impersonateOrgId);
+                        const uid = Number(impersonateUserId);
+                        sessionStorage.setItem("gemelo_pending_org", String(org));
+                        if (impersonateRole === "student") {
+                          sessionStorage.setItem("gemelo_impersonate_user", String(uid));
+                          window.location.href = window.location.origin + "/portal";
+                        } else {
+                          sessionStorage.removeItem("gemelo_impersonate_user");
+                          window.location.href = window.location.origin + "/dashboard";
+                        }
+                      }}
+                      disabled={!canSubmit}
+                      style={{
+                        width: "100%", padding: "10px 16px", borderRadius: 10,
+                        border: "none", cursor: canSubmit ? "pointer" : "not-allowed",
+                        background: canSubmit ? "linear-gradient(90deg, #fbbf24 0%, #f59e0b 100%)" : "var(--bg)",
+                        color: canSubmit ? "#000" : "var(--muted)",
+                        fontSize: 13, fontWeight: 800, fontFamily: "var(--font)",
+                      }}
+                    >
+                      👁 {impersonateRole === "student" ? "Ver como estudiante" : "Ver como profesor"}
+                    </button>
+                  );
+                })()}
+              </div>
+            )}
+
+            {/* 3. Búsqueda global de cursos (SuperAdmin) */}
             {isSuperAdmin && search.trim().length >= 3 && (
               <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 16, padding: "20px 20px 16px", boxShadow: "var(--shadow)" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
                   <span style={{ fontSize: 16 }}>🔍</span>
                   <span style={{ fontSize: 14, fontWeight: 800, color: "var(--text)" }}>
-                    Búsqueda global (Super Admin)
+                    Búsqueda global de cursos (Super Admin)
                   </span>
                   {globalLoading && <span style={{ fontSize: 11, color: "var(--muted)" }}>Buscando...</span>}
                   {!globalLoading && <span className="tag">{globalResults.length}</span>}
                 </div>
                 <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 10, padding: "6px 10px", background: "var(--bg)", borderRadius: 8, borderLeft: "3px solid var(--brand)" }}>
-                  Esta búsqueda consulta <strong>todos los cursos</strong> de Brightspace, no solo tus inscripciones. Escribe al menos 3 caracteres.
+                  Esta búsqueda consulta <strong>todos los cursos</strong> de Brightspace, no solo tus inscripciones. Usa el buscador arriba (mín. 3 caracteres).
                 </div>
                 {globalResults.length > 0 ? (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 400, overflowY: "auto" }}>
@@ -296,29 +463,38 @@ export default function RoleHome() {
               <div style={{ textAlign: "center", padding: "40px 20px", color: "var(--muted)", border: "1px dashed var(--border)", borderRadius: 16, background: "var(--card)" }}>
                 <div style={{ fontSize: 36, opacity: 0.35, marginBottom: 8 }}>🎓</div>
                 <div style={{ fontSize: 14, fontWeight: 700 }}>Sin cursos encontrados</div>
-                <div style={{ fontSize: 12, marginTop: 4 }}>Accede desde Brightspace usando el enlace de Gemelo Digital en tu curso.</div>
+                <div style={{ fontSize: 12, marginTop: 4 }}>Accede desde Brightspace usando el enlace de G.D en tu curso.</div>
               </div>
             )}
 
             {/* ── No results for search ── */}
             {!loading && search && filteredInst.length === 0 && filteredStud.length === 0 && (
               <div style={{ textAlign: "center", padding: "30px 20px", color: "var(--muted)" }}>
-                <div style={{ fontSize: 14, marginBottom: 8 }}>Sin resultados para "{search}"</div>
-                {/* Escape hatch: if the search looks like a numeric course ID, allow
-                    opening it directly. Useful for admins/coordinators who have
-                    access to courses that don't appear in their enrollment list. */}
-                {/^\d{3,}$/.test(search.trim()) && (
-                  <div style={{ marginBottom: 10, padding: "10px 12px", background: "var(--brand-light)", border: "1px solid var(--brand-light2, #D6E4FF)", borderRadius: 10, fontSize: 12, color: "var(--text)" }}>
-                    <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 6 }}>
-                      Parece que buscas por ID de curso. Si tienes permisos de acceso directo, puedes abrirlo:
+                {/^\d{3,}$/.test(search.trim()) ? (
+                  <>
+                    <div style={{ fontSize: 32, opacity: 0.5, marginBottom: 8 }}>🚫</div>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: "var(--text)", marginBottom: 4 }}>
+                      No estás inscrito en el curso #{search.trim()}
                     </div>
-                    <button
-                      onClick={() => handleSelectCourse(parseInt(search.trim(), 10), isStudent && !isInstructor ? "student" : "instructor")}
-                      style={{ background: "var(--brand)", color: "#fff", border: "none", borderRadius: 8, padding: "8px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer", marginRight: 6 }}
-                    >
-                      🔗 Abrir curso #{search.trim()} →
-                    </button>
-                  </div>
+                    <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 16, maxWidth: 480, margin: "0 auto 16px" }}>
+                      Verifica el ID del curso o solicita al docente/administrador que te inscriba en Brightspace.
+                    </div>
+                    {isSuperAdmin && (
+                      <div style={{ marginBottom: 12, padding: "10px 12px", background: "rgba(255, 170, 0, 0.08)", border: "1px solid rgba(255, 170, 0, 0.3)", borderRadius: 10, fontSize: 12, color: "var(--text)", maxWidth: 480, margin: "0 auto 12px" }}>
+                        <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 6 }}>
+                          👑 Super Admin: puedes abrir cualquier curso aunque no estés inscrito.
+                        </div>
+                        <button
+                          onClick={() => handleSelectCourse(parseInt(search.trim(), 10), "instructor")}
+                          style={{ background: "linear-gradient(90deg, #fbbf24 0%, #f59e0b 100%)", color: "#000", border: "none", borderRadius: 8, padding: "8px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+                        >
+                          🔗 Abrir curso #{search.trim()} →
+                        </button>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div style={{ fontSize: 14, marginBottom: 8 }}>Sin resultados para "{search}"</div>
                 )}
                 <button onClick={() => setSearch("")} style={{ background: "var(--brand)", color: "#fff", border: "none", borderRadius: 8, padding: "7px 16px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
                   Limpiar búsqueda
@@ -342,9 +518,24 @@ export default function RoleHome() {
 
         {/* Footer */}
         <div style={{ textAlign: "center", padding: "24px 0", fontSize: 11, color: "var(--muted)" }}>
-          CESA · Gemelo Digital v2.0
+          CESA · G.D V.260428
         </div>
       </main>
+
+      {/* StudentOverviewPanel overlay */}
+      {overviewUserId && (
+        <Suspense fallback={
+          <div style={{ position: "fixed", inset: 0, zIndex: 300, background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, color: "var(--muted)" }}>
+            Cargando panel del estudiante...
+          </div>
+        }>
+          <StudentOverviewPanel
+            userId={overviewUserId}
+            period={overviewPeriod}
+            onClose={() => setOverviewUserId(null)}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

@@ -24,7 +24,7 @@ function localDateKey(d) {
   return `${y}-${m}-${day}`;
 }
 
-export default function DueDateCalendar({ orgUnitId, studentRows }) {
+function DueDateCalendar({ orgUnitId, studentRows, studentEvidences }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -70,6 +70,24 @@ export default function DueDateCalendar({ orgUnitId, studentRows }) {
     return stats;
   }, [studentRows]);
 
+  // Student view: map gradeObjectId → submission state
+  // "graded" = professor has scored it, "overdue" = past due and not graded,
+  // null = pending (can't determine submission status without dropbox API)
+  const studentSubmissionMap = useMemo(() => {
+    const evs = Array.isArray(studentEvidences) ? studentEvidences : [];
+    if (evs.length === 0) return null;
+    const map = new Map();
+    for (const ev of evs) {
+      if (ev.isGraded || ev.scorePct != null || ev.status === "graded") {
+        map.set(String(ev.gradeObjectId), "graded");
+      } else if (ev.status === "overdue_unscored" || ev.isOverdue) {
+        map.set(String(ev.gradeObjectId), "overdue");
+      }
+      // "pending" items are not added — we can't tell if submitted
+    }
+    return map;
+  }, [studentEvidences]);
+
   // Extract each assignment individually (not grouped by date)
   const assignments = useMemo(() => {
     const now = new Date();
@@ -87,6 +105,9 @@ export default function DueDateCalendar({ orgUnitId, studentRows }) {
       const daysUntil = Math.floor(msDiff / 86400000);
       const hoursUntil = Math.floor(msDiff / 3600000);
       const stats = submissionStats?.get(String(it.id)) || null;
+      const studentState = studentSubmissionMap?.get(String(it.id)) ?? null;
+      // "graded" → ✓, "overdue" → ✗, null → no icon (unknown)
+      const didSubmit = studentState === "graded" ? true : (studentState === "overdue" ? false : null);
       list.push({
         id: it.id,
         name: it.name || `Ítem ${it.id}`,
@@ -103,6 +124,7 @@ export default function DueDateCalendar({ orgUnitId, studentRows }) {
         source: it.source,
         gradedCount: stats?.graded ?? null,
         totalStudents: stats?.total ?? null,
+        didSubmit,
       });
     }
     list.sort((a, b) => a.due - b.due);
@@ -249,6 +271,18 @@ export default function DueDateCalendar({ orgUnitId, studentRows }) {
           </div>
         </div>
 
+        {a.didSubmit != null && (
+          <span style={{
+            flexShrink: 0, fontSize: 12, fontWeight: 900,
+            width: 22, height: 22, borderRadius: "50%",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            background: a.didSubmit ? "var(--ok-bg)" : "var(--critical-bg)",
+            color: a.didSubmit ? "var(--ok)" : "var(--critical)",
+            border: `1px solid ${a.didSubmit ? "var(--ok)" : "var(--critical)"}33`,
+          }}>
+            {a.didSubmit ? "✓" : "✗"}
+          </span>
+        )}
         {a.totalStudents != null && a.totalStudents > 0 && (
           <span style={{
             flexShrink: 0, fontSize: 10, fontWeight: 700,
@@ -616,7 +650,18 @@ function MonthGrid({ assignments, hoverId, onHoverChange }) {
                   transition: "all 0.12s",
                 }}>
                   {day.getDate()}
-                  {primary?.isUrgent && (
+                  {primary?.didSubmit === true && (
+                    <span style={{
+                      position: "absolute",
+                      top: -3, right: -3,
+                      width: 12, height: 12, borderRadius: "50%",
+                      background: "#12B76A", color: "#fff",
+                      fontSize: 8, fontWeight: 900,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      border: "1.5px solid #fff",
+                    }}>✓</span>
+                  )}
+                  {primary?.isUrgent && primary?.didSubmit !== true && (
                     <span style={{
                       position: "absolute",
                       top: -3, right: -3,
@@ -695,3 +740,5 @@ function MonthGrid({ assignments, hoverId, onHoverChange }) {
     </div>
   );
 }
+
+export default React.memo(DueDateCalendar);

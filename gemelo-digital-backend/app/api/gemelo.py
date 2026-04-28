@@ -5,14 +5,52 @@ from typing import Any, Dict, List, Optional
 import asyncio
 from collections import defaultdict
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 
 from app.config_loader import load_course_bundle
-from app.services.brightspace_client import get_brightspace_client
-from typing import TYPE_CHECKING
-if TYPE_CHECKING:
-    from app.services.brightspace_client import BrightspaceClient
+from app.services.brightspace_client import BrightspaceClient, get_brightspace_client
 from app.services.gemelo_service import GemeloService
+from app.services.sync_service import SyncService
+
+# L2 read-path: lectura DB-first y chequeo de edad
+from app.services.gemelo_db_service import build_course_overview_from_db
+from app.services.db_freshness import is_fresh
+
+
+async def _refresh_overview_db_bg(orgUnitId: int, access_token: str) -> None:
+    """
+    Tarea de background ejecutada DESPUÉS de devolver la respuesta al cliente.
+    Usa el access_token capturado en el momento del request.
+    """
+    try:
+        bs = BrightspaceClient(tokens={"access_token": access_token})
+        sync_svc = SyncService(bs)
+        # sync_classlist primero para que la tabla students tenga display_name
+        # (de lo contrario studentsAtRisk muestra el userId en vez del nombre)
+        try:
+            await sync_svc.sync_classlist(orgUnitId)
+        except Exception as e:
+            logger.warning("B-1 sync_classlist ou=%s FAILED: %s", orgUnitId, e)
+        result = await sync_svc.sync_student_metric_snapshots(orgUnitId)
+        logger.info("B-1 background refresh ou=%s OK: %s", orgUnitId, str(result)[:200])
+    except Exception as e:
+        logger.warning("B-1 background refresh ou=%s FAILED: %s", orgUnitId, e)
+
+
+def _extract_access_token_from_client(bs: BrightspaceClient) -> Optional[str]:
+    """Obtiene el access_token del BrightspaceClient activo para pasarlo a background tasks."""
+    if bs._tokens:
+        t = bs._tokens.get("access_token")
+        if t:
+            return t
+    try:
+        headers = bs._auth_headers()
+        auth = headers.get("Authorization", "")
+        if auth.startswith("Bearer "):
+            return auth[7:].strip() or None
+    except Exception:
+        return None
+    return None
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -129,10 +167,57 @@ async def gemelo_course_student(
 @router.get("/course/{orgUnitId}/overview")
 async def gemelo_course_overview(
     orgUnitId: int,
+    background_tasks: BackgroundTasks,
+    fresh_max_minutes: int = Query(
+        30,
+        ge=0,
+        le=525600,
+        description="Edad máxima (minutos) para servir desde DB. 0 = forzar Brightspace.",
+    ),
     svc: GemeloService = Depends(get_service),
 ):
+    """
+    Estrategia DB-first con fallback a Brightspace y write-through lazy (B-1):
+
+    1. Intenta leer desde Postgres. Si tiene datos frescos, responde con source="db".
+    2. Si la DB no tiene datos frescos, llama Brightspace (source="brightspace").
+    3. Tras fallback exitoso, programa background sync para refrescar la DB.
+
+    Forzar bypass: ?fresh_max_minutes=0
+    """
+    # Intento 1: DB-first
     try:
-        return await svc.build_course_overview(orgUnitId)
+        db_result = await build_course_overview_from_db(orgUnitId)
+        if db_result.get("hasData") and is_fresh(db_result.get("lastSyncAt"), fresh_max_minutes):
+            db_result["source"] = "db"
+            logger.info("overview ou=%s served from DB (lastSyncAt=%s)",
+                        orgUnitId, db_result.get("lastSyncAt"))
+            return db_result
+    except Exception as e:
+        logger.warning("DB-first lookup failed for overview ou=%s: %s — falling back to Brightspace",
+                       orgUnitId, e)
+
+    # Fallback: Brightspace (path original)
+    logger.info("overview ou=%s falling back to Brightspace", orgUnitId)
+    try:
+        bs_result = await svc.build_course_overview(orgUnitId)
+        if isinstance(bs_result, dict):
+            bs_result.setdefault("source", "brightspace")
+
+        # B-1: programa refresh de snapshots en background para la próxima visita
+        try:
+            access_token = _extract_access_token_from_client(svc.bs)
+            if access_token:
+                background_tasks.add_task(_refresh_overview_db_bg, orgUnitId, access_token)
+                logger.info("B-1 scheduled background DB refresh for ou=%s", orgUnitId)
+            else:
+                logger.warning("B-1 no access_token para ou=%s; skip refresh", orgUnitId)
+        except Exception as e:
+            logger.warning("B-1 could not schedule background refresh ou=%s: %s", orgUnitId, e)
+
+        return bs_result
+    except HTTPException:
+        raise
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:

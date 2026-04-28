@@ -7,6 +7,20 @@ export function elStop() {
   if ("speechSynthesis" in window) window.speechSynthesis.cancel();
 }
 
+// Auto-stop on navigation / tab hide so audio never overlaps across screens.
+if (typeof window !== "undefined" && !window.__elNavHooked) {
+  window.__elNavHooked = true;
+  window.addEventListener("popstate", elStop);
+  window.addEventListener("pagehide", elStop);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) elStop();
+  });
+  const _origPush = history.pushState;
+  const _origReplace = history.replaceState;
+  history.pushState = function (...args) { elStop(); return _origPush.apply(this, args); };
+  history.replaceState = function (...args) { elStop(); return _origReplace.apply(this, args); };
+}
+
 export async function elSpeak(rawText, onStart, onEnd) {
   if (!rawText || !rawText.trim()) return;
   elStop();

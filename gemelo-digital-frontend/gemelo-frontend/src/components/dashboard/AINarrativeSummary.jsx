@@ -7,7 +7,7 @@ import { elSpeak, elStop } from "../../utils/speech";
  * course state. Pure client-side heuristic generation — no external AI call.
  * Can optionally be read aloud using the existing TTS utility.
  */
-export default function AINarrativeSummary({ studentRows = [], overview = null, courseInfo = null, raDashboard = null, contentKpis = null }) {
+function AINarrativeSummary({ studentRows = [], overview = null, courseInfo = null, raDashboard = null, contentKpis = null }) {
   const [speaking, setSpeaking] = useState(false);
 
   const narrative = useMemo(() => {
@@ -145,3 +145,5 @@ export default function AINarrativeSummary({ studentRows = [], overview = null, 
     </div>
   );
 }
+
+export default React.memo(AINarrativeSummary);

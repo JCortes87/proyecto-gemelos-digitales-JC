@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { apiGet } from "../../utils/api";
 import { COLORS, colorForPct } from "../../utils/colors";
 import { fmtPct, fmtGrade10FromPct, computeRiskFromPct } from "../../utils/helpers";
+import { isStudentRole } from "../../utils/roles";
 
 /**
  * CoursesComparison: lists the teacher's other courses side-by-side
@@ -22,12 +23,8 @@ export default function CoursesComparison({ currentOrgUnitId, onSelectCourse }) 
       try {
         const data = await apiGet("/brightspace/courses/enrolled?active_only=true&limit=50");
         if (!alive) return;
-        const STUDENT_ROLES = ["estudiante ef", "student", "estudiante"];
         const items = Array.isArray(data?.items) ? data.items : [];
-        const teacherCourses = items.filter((c) => {
-          const rn = String(c.roleName || "").toLowerCase();
-          return !STUDENT_ROLES.some((sr) => rn.includes(sr));
-        });
+        const teacherCourses = items.filter((c) => !isStudentRole(c.roleName));
         setCourses(teacherCourses);
       } catch {
         // silent

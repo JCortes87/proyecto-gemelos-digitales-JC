@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { apiGet, apiDownloadUrl } from "../../utils/api";
+import { exportInstitutionalFeedbackPdf } from "../../utils/export";
 import { COLORS, colorForPct } from "../../utils/colors";
 import { fmtPct, fmtGrade10FromPct, computeRiskFromPct } from "../../utils/helpers";
 import StudentAvatar from "../ui/StudentAvatar";
@@ -26,9 +27,14 @@ export default function EvidenceReports({
 
   const openFeedback = async (student, evidence) => {
     if (!evidence.linkedDropboxId) return;
+    const downloadUrl = apiDownloadUrl(
+      `/brightspace/course/${orgUnitId}/dropbox/folder/${evidence.linkedDropboxId}/student/${student.userId}/download`
+    );
     setFeedbackModal({
       studentName: student.displayName,
+      studentId: student.userId,
       evidenceName: evidence.name || `Ítem ${evidence.gradeObjectId}`,
+      downloadUrl,
       loading: true,
       data: null,
       error: null,
@@ -371,11 +377,12 @@ export default function EvidenceReports({
               background: "var(--card)",
               borderRadius: 14,
               border: "1px solid var(--border)",
-              maxWidth: 640, width: "100%", maxHeight: "85vh",
+              maxWidth: 660, width: "100%", maxHeight: "88vh",
               overflow: "auto",
               boxShadow: "0 24px 64px rgba(0,0,0,0.25)",
             }}
           >
+            {/* Sticky header */}
             <div style={{
               padding: "14px 18px",
               borderBottom: "1px solid var(--border)",
@@ -383,47 +390,85 @@ export default function EvidenceReports({
               position: "sticky", top: 0, background: "var(--card)", zIndex: 2,
             }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                <div style={{ fontSize: 10, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
                   Retroalimentación del docente
                 </div>
-                <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text)", marginTop: 2 }}>
+                <div style={{ fontSize: 15, fontWeight: 800, color: "var(--text)", marginTop: 3, lineHeight: 1.2 }}>
                   {feedbackModal.evidenceName}
                 </div>
-                <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
+                <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>
                   {feedbackModal.studentName}
                 </div>
               </div>
-              <button
-                onClick={() => {
-                  // Print only the modal body: add a class to body, print, then remove
-                  document.body.classList.add("print-feedback-modal");
-                  setTimeout(() => {
-                    window.print();
-                    setTimeout(() => document.body.classList.remove("print-feedback-modal"), 500);
-                  }, 100);
-                }}
-                title="Imprimir / Guardar como PDF"
-                style={{
-                  background: "var(--brand-light)", border: "1px solid var(--brand-light2, #D6E4FF)",
-                  color: "var(--brand)", borderRadius: 8,
-                  fontSize: 11, fontWeight: 700,
-                  padding: "6px 10px", cursor: "pointer",
-                  fontFamily: "var(--font)",
-                }}
-              >🖨 Imprimir</button>
-              <button
-                onClick={() => setFeedbackModal(null)}
-                style={{
-                  background: "transparent", border: "none",
-                  fontSize: 20, cursor: "pointer", color: "var(--muted)",
-                  padding: 4, lineHeight: 1,
-                }}
-                aria-label="Cerrar"
-              >✕</button>
+              <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                {feedbackModal.downloadUrl && (
+                  <a
+                    href={feedbackModal.downloadUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="Descargar entrega del estudiante"
+                    style={{
+                      background: "rgba(52,120,246,0.08)", border: "1px solid rgba(52,120,246,0.25)",
+                      color: "var(--brand)", borderRadius: 8,
+                      fontSize: 11, fontWeight: 700,
+                      padding: "6px 10px", cursor: "pointer",
+                      fontFamily: "var(--font)", textDecoration: "none",
+                      display: "flex", alignItems: "center", gap: 4,
+                    }}
+                  >⬇ Entrega</a>
+                )}
+                <button
+                  onClick={() => {
+                    if (feedbackModal.loading || !feedbackModal.data) return;
+                    exportInstitutionalFeedbackPdf({
+                      feedback: feedbackModal.data,
+                      evidenceName: feedbackModal.evidenceName,
+                      studentName: feedbackModal.studentName,
+                      studentId: feedbackModal.studentId,
+                      courseInfo,
+                      downloadUrl: feedbackModal.downloadUrl,
+                    });
+                  }}
+                  disabled={feedbackModal.loading || !feedbackModal.data}
+                  title="Generar PDF institucional CESA con la entrega completa"
+                  style={{
+                    background: "linear-gradient(135deg, #0B2D5C 0%, #0B5FFF 100%)",
+                    border: "1px solid #0B2D5C",
+                    color: "#fff", borderRadius: 8,
+                    fontSize: 11, fontWeight: 800,
+                    padding: "6px 10px",
+                    cursor: (feedbackModal.loading || !feedbackModal.data) ? "not-allowed" : "pointer",
+                    opacity: (feedbackModal.loading || !feedbackModal.data) ? 0.5 : 1,
+                    fontFamily: "var(--font)",
+                  }}
+                >📄 Descargar informe</button>
+                <button
+                  onClick={() => setFeedbackModal(null)}
+                  style={{ background: "transparent", border: "none", fontSize: 20, cursor: "pointer", color: "var(--muted)", padding: 4, lineHeight: 1 }}
+                  aria-label="Cerrar"
+                >✕</button>
+              </div>
             </div>
+
+            {/* Print-only header (hidden on screen) */}
+            <div className="print-only" style={{ padding: "16px 18px 0", borderBottom: "2px solid #000" }}>
+              <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em", color: "#555" }}>
+                CESA · G.D · Retroalimentación del Docente
+              </div>
+              <div style={{ fontSize: 16, fontWeight: 800, margin: "4px 0 2px" }}>{feedbackModal.evidenceName}</div>
+              <div style={{ fontSize: 12, color: "#555" }}>
+                Estudiante: {feedbackModal.studentName} · Fecha: {new Date().toLocaleDateString("es-CO", { year: "numeric", month: "long", day: "numeric" })}
+              </div>
+              {feedbackModal.downloadUrl && (
+                <div style={{ fontSize: 10, color: "#555", marginTop: 4 }}>
+                  Entrega disponible en: {feedbackModal.downloadUrl}
+                </div>
+              )}
+            </div>
+
             <div style={{ padding: 18 }}>
               {feedbackModal.loading ? (
-                <div style={{ fontSize: 12, color: "var(--muted)", textAlign: "center", padding: 24 }}>
+                <div style={{ fontSize: 12, color: "var(--muted)", textAlign: "center", padding: 32 }}>
                   Cargando retroalimentación...
                 </div>
               ) : feedbackModal.error ? (
@@ -437,121 +482,189 @@ export default function EvidenceReports({
                 const outOf = fb.outOf;
                 const files = Array.isArray(fb.files) ? fb.files : [];
                 const rubrics = Array.isArray(fb.rubrics) ? fb.rubrics : [];
-                const hasContent =
-                  text || score != null || files.length > 0 || rubrics.length > 0;
+                const hasContent = text || score != null || files.length > 0 || rubrics.length > 0;
+
+                const levelColor = (level) => {
+                  if (!level) return "var(--muted)";
+                  const l = level.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                  if (l.includes("sobresali") || l.includes("avanz") || l.includes("excelent") || l.includes("superior") || l.includes("logrado")) return "#16a34a";
+                  if (l.includes("interm") || l.includes("satisf") || l.includes("aceptable") || l.includes("proficien")) return "var(--brand)";
+                  if (l.includes("basi") || l.includes("elemental") || l.includes("suficiente") || l.includes("developing")) return "#d97706";
+                  if (l.includes("inicial") || l.includes("no cumple") || l.includes("deficiente") || l.includes("insuficiente") || l.includes("beginning")) return "var(--critical)";
+                  return "var(--muted)";
+                };
+                // Deriva el nivel overall de la rúbrica a partir del % real,
+                // ignorando la etiqueta holística de Brightspace cuando es
+                // inconsistente con la suma de criterios.
+                const levelFromPct = (s, o) => {
+                  if (s == null || o == null || !(o > 0)) return null;
+                  const p = (s / o) * 100;
+                  if (p >= 80) return "Sobresaliente";
+                  if (p >= 60) return "Satisfactoria";
+                  if (p >= 40) return "Básica";
+                  return "Insuficiente";
+                };
+
                 return (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                    {/* Global score header */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+
+                    {/* Global score */}
                     {(score != null || outOf != null) && (
                       <div style={{
-                        display: "flex", alignItems: "baseline", gap: 10,
-                        padding: "10px 14px", borderRadius: 10,
-                        background: "var(--brand-light)",
+                        padding: "14px 16px", borderRadius: 12,
+                        background: "linear-gradient(135deg, var(--brand-light) 0%, rgba(255,255,255,0) 100%)",
                         border: "1px solid var(--brand-light2, #D6E4FF)",
+                        display: "flex", alignItems: "center", gap: 14,
                       }}>
-                        <span style={{ fontSize: 11, fontWeight: 800, color: "var(--brand)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                          Calificación
-                        </span>
-                        <span style={{
-                          fontSize: 22, fontWeight: 900,
-                          fontFamily: "var(--font-mono)", color: "var(--brand)",
-                          marginLeft: "auto",
-                        }}>
-                          {score != null ? score : "—"}
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 10, fontWeight: 800, color: "var(--brand)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>
+                            Calificación total
+                          </div>
+                          {score != null && outOf != null && (
+                            <div style={{ height: 6, background: "rgba(52,120,246,0.15)", borderRadius: 99, overflow: "hidden" }}>
+                              <div style={{ height: "100%", width: `${Math.min(100, (score / outOf) * 100)}%`, background: "var(--brand)", borderRadius: 99, transition: "width 0.6s ease" }} />
+                            </div>
+                          )}
+                        </div>
+                        <div style={{ textAlign: "right", flexShrink: 0 }}>
+                          <span style={{ fontSize: 32, fontWeight: 900, fontFamily: "var(--font-mono)", color: "var(--brand)", lineHeight: 1 }}>
+                            {score != null ? score : "—"}
+                          </span>
                           {outOf != null && (
-                            <span style={{ fontSize: 13, color: "var(--muted)", fontWeight: 600 }}>
-                              {" "}/ {outOf}
+                            <span style={{ fontSize: 14, color: "var(--muted)", fontWeight: 600, marginLeft: 2 }}>
+                              / {outOf}
                             </span>
                           )}
-                        </span>
+                        </div>
                       </div>
                     )}
 
                     {/* Teacher's general comment */}
                     {text && (
                       <div>
-                        <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
-                          💬 Comentario general del docente
+                        <div style={{ fontSize: 10, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
+                          💬 Comentario del docente
                         </div>
                         <div
                           style={{
-                            fontSize: 13, lineHeight: 1.6, color: "var(--text)",
-                            padding: "12px 14px", borderRadius: 10,
+                            fontSize: 13, lineHeight: 1.65, color: "var(--text)",
+                            padding: "12px 16px", borderRadius: 10,
                             background: "var(--bg)", border: "1px solid var(--border)",
+                            borderLeft: "3px solid var(--brand)",
                           }}
                           dangerouslySetInnerHTML={{ __html: text }}
                         />
                       </div>
                     )}
 
-                    {/* Rubrics (per criterion level + comments) */}
+                    {/* Rubrics */}
                     {rubrics.length > 0 && rubrics.map((r, ri) => (
-                      <div key={ri}>
+                      <div key={ri} style={{ border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
+                        {/* Rubric header */}
                         <div style={{
-                          display: "flex", alignItems: "baseline", gap: 8,
-                          marginBottom: 8,
+                          padding: "12px 16px",
+                          background: "var(--bg)",
+                          borderBottom: "1px solid var(--border)",
+                          display: "flex", alignItems: "center", gap: 10,
                         }}>
-                          <span style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                            📋 Rúbrica: {r.name || "Sin nombre"}
-                          </span>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 10, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                              📋 Rúbrica
+                            </div>
+                            <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)", marginTop: 2 }}>
+                              {r.name || "Sin nombre"}
+                            </div>
+                          </div>
                           {r.score != null && (
-                            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--brand)", marginLeft: "auto" }}>
-                              {r.score}{r.outOf != null ? ` / ${r.outOf}` : ""}
-                              {r.level && ` · ${r.level}`}
-                            </span>
+                            <div style={{ textAlign: "right", flexShrink: 0 }}>
+                              <div style={{ fontSize: 20, fontWeight: 900, fontFamily: "var(--font-mono)", color: "var(--brand)", lineHeight: 1 }}>
+                                {r.score}
+                                {r.outOf != null && <span style={{ fontSize: 12, color: "var(--muted)", fontWeight: 600 }}> / {r.outOf}</span>}
+                              </div>
+                              {(() => {
+                                const computedLevel = levelFromPct(r.score, r.outOf) || r.level;
+                                return computedLevel ? (
+                                  <div style={{
+                                    fontSize: 10, fontWeight: 800, marginTop: 3,
+                                    padding: "2px 8px", borderRadius: 99, display: "inline-block",
+                                    background: levelColor(computedLevel) + "18",
+                                    color: levelColor(computedLevel),
+                                    border: "1px solid " + levelColor(computedLevel) + "40",
+                                  }}>
+                                    {computedLevel}
+                                  </div>
+                                ) : null;
+                              })()}
+                              {r.score != null && r.outOf != null && (
+                                <div style={{ height: 4, background: "var(--border)", borderRadius: 99, overflow: "hidden", marginTop: 6, width: 80 }}>
+                                  <div style={{ height: "100%", width: `${Math.min(100, (r.score / r.outOf) * 100)}%`, background: levelColor(r.level) || "var(--brand)", borderRadius: 99 }} />
+                                </div>
+                              )}
+                            </div>
                           )}
                         </div>
+
+                        {/* Criteria list */}
                         {Array.isArray(r.criteria) && r.criteria.length > 0 ? (
-                          <div style={{
-                            border: "1px solid var(--border)", borderRadius: 10,
-                            overflow: "hidden",
-                          }}>
-                            {r.criteria.map((c, ci) => (
+                          r.criteria.map((c, ci) => {
+                            const cColor = levelColor(c.level);
+                            return (
                               <div key={ci} style={{
-                                padding: "10px 14px",
+                                padding: "12px 16px",
                                 borderTop: ci === 0 ? "none" : "1px solid var(--border)",
-                                background: ci % 2 === 0 ? "var(--bg)" : "var(--card)",
-                                display: "flex", flexDirection: "column", gap: 4,
+                                background: "var(--card)",
+                                display: "flex", gap: 12,
                               }}>
-                                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                                  <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", flex: 1 }}>
-                                    {c.name}
-                                  </span>
-                                  {c.level && (
-                                    <span className="tag" style={{
-                                      background: "rgba(52, 120, 246, 0.12)",
-                                      color: "var(--brand)",
-                                      fontSize: 10, fontWeight: 700,
-                                      padding: "2px 8px", borderRadius: 10,
-                                    }}>
-                                      {c.level}
+                                {/* Left accent bar */}
+                                <div style={{ width: 3, borderRadius: 99, background: cColor, flexShrink: 0, alignSelf: "stretch", minHeight: 24, opacity: 0.7 }} />
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: c.comment ? 6 : 0 }}>
+                                    <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", flex: 1, lineHeight: 1.35 }}>
+                                      {c.name}
                                     </span>
-                                  )}
-                                  {c.points != null && (
-                                    <span style={{
-                                      fontSize: 11, fontWeight: 800,
-                                      fontFamily: "var(--font-mono)", color: "var(--muted)",
-                                      minWidth: 30, textAlign: "right",
-                                    }}>
-                                      {c.points}
-                                    </span>
+                                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                                      {c.level && (
+                                        <span style={{
+                                          fontSize: 10, fontWeight: 800,
+                                          padding: "2px 8px", borderRadius: 99,
+                                          background: cColor + "18",
+                                          color: cColor,
+                                          border: "1px solid " + cColor + "40",
+                                          whiteSpace: "nowrap",
+                                        }}>
+                                          {c.level}
+                                        </span>
+                                      )}
+                                      {c.points != null && (
+                                        <span style={{
+                                          fontSize: 14, fontWeight: 900,
+                                          fontFamily: "var(--font-mono)", color: cColor,
+                                          minWidth: 28, textAlign: "right",
+                                        }}>
+                                          {c.points}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                  {c.comment && (
+                                    <div
+                                      style={{
+                                        fontSize: 12, color: "var(--muted)",
+                                        lineHeight: 1.55,
+                                        padding: "7px 10px",
+                                        background: "var(--bg)",
+                                        borderRadius: 7,
+                                        borderLeft: "2px solid " + cColor + "60",
+                                      }}
+                                      dangerouslySetInnerHTML={{ __html: c.comment }}
+                                    />
                                   )}
                                 </div>
-                                {c.comment && (
-                                  <div
-                                    style={{
-                                      fontSize: 11, color: "var(--muted)",
-                                      lineHeight: 1.5, paddingLeft: 2,
-                                      fontStyle: "italic",
-                                    }}
-                                    dangerouslySetInnerHTML={{ __html: c.comment }}
-                                  />
-                                )}
                               </div>
-                            ))}
-                          </div>
+                            );
+                          })
                         ) : (
-                          <div style={{ fontSize: 11, color: "var(--muted)", fontStyle: "italic", padding: "8px 0" }}>
+                          <div style={{ fontSize: 11, color: "var(--muted)", fontStyle: "italic", padding: "12px 16px" }}>
                             Rúbrica sin criterios evaluados
                           </div>
                         )}
@@ -561,13 +674,21 @@ export default function EvidenceReports({
                     {/* Teacher's attached files */}
                     {files.length > 0 && (
                       <div>
-                        <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
-                          📎 Archivos del docente ({files.length})
+                        <div style={{ fontSize: 10, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
+                          📎 Archivos adjuntos del docente ({files.length})
                         </div>
                         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                           {files.map((f, idx) => (
-                            <div key={idx} style={{ fontSize: 12, padding: "6px 10px", background: "var(--bg)", borderRadius: 6, border: "1px solid var(--border)" }}>
-                              {f.FileName || f.Name || `Archivo ${idx + 1}`}
+                            <div key={idx} style={{
+                              fontSize: 12, padding: "8px 12px",
+                              background: "var(--bg)", borderRadius: 8,
+                              border: "1px solid var(--border)",
+                              display: "flex", alignItems: "center", gap: 8,
+                            }}>
+                              <span style={{ fontSize: 14, flexShrink: 0 }}>📄</span>
+                              <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {f.FileName || f.Name || `Archivo ${idx + 1}`}
+                              </span>
                             </div>
                           ))}
                         </div>
@@ -575,7 +696,7 @@ export default function EvidenceReports({
                     )}
 
                     {!hasContent && (
-                      <div style={{ fontSize: 12, color: "var(--muted)", fontStyle: "italic", textAlign: "center", padding: 20 }}>
+                      <div style={{ fontSize: 12, color: "var(--muted)", fontStyle: "italic", textAlign: "center", padding: 28 }}>
                         Sin retroalimentación registrada para esta entrega.
                       </div>
                     )}
