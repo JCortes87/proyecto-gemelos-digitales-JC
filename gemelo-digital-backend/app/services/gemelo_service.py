@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from app.config_loader import load_course_bundle
 from app.domain.rubric_quality import detect_rubric_inconsistency
 
-#|---------- Helpers extraidos a modulos dedicados (Fase 5 refactor Nivel 1) ----------|
+#|---------- Helpers extraidos a modulos dedicados por dominio ----------|
 # Estos imports reemplazan las definiciones que antes vivian aqui mismo.
 # Cada modulo tiene responsabilidad unica y esta documentado.
 # Ver app/services/{text_utils,common_utils,grade_filters,scale_utils,risk_utils,role_utils}.py

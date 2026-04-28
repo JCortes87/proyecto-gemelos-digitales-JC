@@ -11,8 +11,8 @@ Este módulo encapsula esa operación de mintada para que pueda ser
 reutilizada desde:
   - sesiones de usuario (BrightspaceClient cuando el access_token de
     SESSION_STORE está por expirar).
-  - jobs de fondo (scheduler, future Fase 5d) que usan un refresh_token
-    de cuenta de servicio almacenado en env.
+  - tareas programadas de sincronización automática que usan un
+    refresh_token de cuenta de servicio almacenado en env.
 """
 from __future__ import annotations
 
