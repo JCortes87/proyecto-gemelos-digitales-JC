@@ -35,6 +35,7 @@ from app.services.scale_utils import (
     _lookup_criterion_max_points,
 )
 from app.services.risk_utils import (
+    risk_from_pct,
     weighted_avg,
     _macro_code_from_unit,
     _get_unit_weight_from_cfg,
@@ -130,35 +131,12 @@ class GemeloService:
     def _risk_from_performance(
         self, pct: Optional[float], thresholds: Dict[str, float]
     ) -> str:
-        if pct is None:
-            return "pending"
-        critical = float(thresholds.get("critical", 50.0))
-        watch = float(thresholds.get("watch", 70.0))
-        if pct < critical:
-            return "alto"
-        if pct < watch:
-            return "medio"
-        return "bajo"
+        return risk_from_pct(pct, thresholds)
 
     def _risk_from_global(
         self, pct: Any, thresholds: Optional[Dict[str, float]] = None
     ) -> str:
-        try:
-            if pct is None:
-                return "pending"
-            pct_f = float(pct)
-        except Exception:
-            return "pending"
-
-        thr = thresholds or {"critical": 50.0, "watch": 70.0}
-        critical = float(thr.get("critical", 50.0))
-        watch = float(thr.get("watch", 70.0))
-
-        if pct_f < critical:
-            return "alto"
-        if pct_f < watch:
-            return "medio"
-        return "bajo"
+        return risk_from_pct(pct, thresholds)
 
     def _pct_from_outcome(
         self,

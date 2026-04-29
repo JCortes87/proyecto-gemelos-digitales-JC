@@ -17,6 +17,40 @@ from app.services.common_utils import _num
 from app.services.scale_utils import status_from_pct
 
 
+#|---------- Nivel de riesgo estudiantil ----------|
+
+_DEFAULT_THRESHOLDS: Dict[str, float] = {"critical": 50.0, "watch": 70.0}
+
+
+def risk_from_pct(pct: Optional[float], thresholds: Optional[Dict[str, float]] = None) -> str:
+    """
+    Calcula el nivel de riesgo de un estudiante a partir de su porcentaje
+    de desempeño actual.
+
+    Retorna: "alto" | "medio" | "bajo" | "pending"
+
+    - "pending": no hay datos de calificación aún (pct es None).
+    - "alto":    pct < critical (default 50%)
+    - "medio":   pct < watch   (default 70%)
+    - "bajo":    pct >= watch
+
+    Unico punto de verdad para riesgo — usado tanto en build_gemelo (live)
+    como en sync_student_metric_snapshots (DB cache).
+    """
+    if pct is None:
+        return "pending"
+    try:
+        p = float(pct)
+    except Exception:
+        return "pending"
+    thr = thresholds or _DEFAULT_THRESHOLDS
+    if p < float(thr.get("critical", 50.0)):
+        return "alto"
+    if p < float(thr.get("watch", 70.0)):
+        return "medio"
+    return "bajo"
+
+
 #|---------- Promedios ponderados ----------|
 def weighted_avg(items: List[Tuple[float, float]]) -> float:
     """

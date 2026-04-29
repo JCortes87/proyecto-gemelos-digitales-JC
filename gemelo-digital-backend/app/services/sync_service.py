@@ -14,6 +14,7 @@ from app.services.sync_tracking_service import SyncTrackingService
 
 #|------------- Import gemelo service -----------------|
 from app.services.gemelo_service import GemeloService
+from app.services.risk_utils import risk_from_pct
 
 
 class SyncService:
@@ -533,10 +534,7 @@ class SyncService:
                     "overdue_count": int(summary.get("overdueCount") or 0),
                     "pending_submitted_count": int(summary.get("pendingSubmittedCount") or 0),
                     "open_count": int(summary.get("openCount") or 0),
-                    "risk_level": self.gemelo._risk_from_performance(
-                        summary.get("currentPerformancePct"),
-                        {"critical": 50.0, "watch": 70.0},
-                    ),
+                    "risk_level": risk_from_pct(summary.get("currentPerformancePct")),
                     "updated_at": datetime.utcnow(),
                 }
 
