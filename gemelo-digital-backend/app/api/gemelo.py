@@ -13,11 +13,24 @@ from app.services.gemelo_service import GemeloService
 from app.services.sync_service import SyncService
 
 #|---------- Lectura desde Postgres con chequeo de frescura de los datos ----------|
-from app.services.gemelo_db_service import build_course_overview_from_db
+from app.services.gemelo_db_service import (
+    build_course_overview_from_db,
+    upsert_course_metric_history,
+    get_course_metric_history,
+)
 from app.services.db_freshness import is_fresh
 from app.db.session import SessionLocal
 from app.db.models import GradeItem, DropboxFolder
 from sqlalchemy import select
+
+
+#|---------- Upsert snapshot diario de tendencias (background task) ----------|
+def _upsert_history_bg(orgUnitId: int, overview: dict) -> None:
+    """Guarda el snapshot diario de tendencias del curso. Silencia errores."""
+    try:
+        upsert_course_metric_history(orgUnitId, overview)
+    except Exception as e:
+        logger.warning("upsert_course_metric_history ou=%s fallo: %s", orgUnitId, e)
 
 
 #|---------- Persistir snapshots tras fallback a Brightspace (background task) ----------|
@@ -231,6 +244,8 @@ async def gemelo_course_overview(
                 "overview ou=%s servido desde Postgres (lastSyncAt=%s)",
                 orgUnitId, db_result.get("lastSyncAt"),
             )
+            # Upsert snapshot diario de tendencias en background
+            background_tasks.add_task(_upsert_history_bg, orgUnitId, db_result)
             return db_result
     except Exception as e:
         logger.warning(
@@ -270,15 +285,39 @@ async def gemelo_course_overview(
                 orgUnitId, e,
             )
 
+        # Upsert snapshot diario de tendencias en background
+        if isinstance(bs_result, dict) and bs_result.get("studentsCount"):
+            background_tasks.add_task(_upsert_history_bg, orgUnitId, bs_result)
+
         return bs_result
     except HTTPException:
-        # Propaga 401/403/etc. del fallback Brightspace tal cual,
-        # sin disfrazarlos como 500.
         raise
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         _http500(e, "gemelo_course_overview", orgUnitId=orgUnitId)
+
+
+@router.get("/course/{orgUnitId}/metric-history")
+async def gemelo_course_metric_history(
+    orgUnitId: int,
+    days: int = Query(90, ge=1, le=365, description="Número de días de historia a devolver"),
+):
+    """
+    Devuelve los snapshots diarios de tendencias del curso (últimos N días).
+    Usado por el gráfico CourseTrends del dashboard del profesor.
+    Fuente: DB — no llama a Brightspace.
+    """
+    try:
+        history = get_course_metric_history(orgUnitId, days=days)
+        return {
+            "orgUnitId": orgUnitId,
+            "days": days,
+            "count": len(history),
+            "snapshots": history,
+        }
+    except Exception as e:
+        _http500(e, "gemelo_course_metric_history", orgUnitId=orgUnitId)
 
 
 @router.get("/course/{orgUnitId}/ra/dashboard")

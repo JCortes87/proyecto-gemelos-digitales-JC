@@ -133,6 +133,24 @@ class SyncError(Base):
     error_message: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     
+class CourseMetricHistory(Base):
+    """Un snapshot diario de métricas agregadas del curso (tendencias)."""
+    __tablename__ = "course_metric_history"
+    __table_args__ = (
+        UniqueConstraint("org_unit_id", "snapshot_date", name="uq_course_metric_history_course_date"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    org_unit_id: Mapped[int] = mapped_column(Integer, index=True)
+    snapshot_date: Mapped[str] = mapped_column(String(10), index=True)  # YYYY-MM-DD
+    avg_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    at_risk_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    coverage_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    total_students: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class StudentCourseMetricSnapshot(Base):
     __tablename__ = "student_course_metric_snapshots"
     __table_args__ = (
