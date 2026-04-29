@@ -50,6 +50,12 @@ class GradeItem(Base):
     name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     max_points: Mapped[float | None] = mapped_column(Float, nullable=True)
     weight: Mapped[float | None] = mapped_column(Float, nullable=True)
+    due_date: Mapped[str | None] = mapped_column(Text, nullable=True)
+    end_date: Mapped[str | None] = mapped_column(Text, nullable=True)
+    grade_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    category_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    associated_tool_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    associated_tool_item_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -64,6 +70,11 @@ class DropboxFolder(Base):
     brightspace_folder_id: Mapped[int] = mapped_column(Integer, index=True)
     name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     category: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    due_date: Mapped[str | None] = mapped_column(Text, nullable=True)
+    start_date: Mapped[str | None] = mapped_column(Text, nullable=True)
+    end_date: Mapped[str | None] = mapped_column(Text, nullable=True)
+    grade_item_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    category_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 

@@ -15,6 +15,9 @@ from app.services.sync_service import SyncService
 #|---------- Lectura desde Postgres con chequeo de frescura de los datos ----------|
 from app.services.gemelo_db_service import build_course_overview_from_db
 from app.services.db_freshness import is_fresh
+from app.db.session import SessionLocal
+from app.db.models import GradeItem, DropboxFolder
+from sqlalchemy import select
 
 
 #|---------- Persistir snapshots tras fallback a Brightspace (background task) ----------|
@@ -553,11 +556,106 @@ async def gemelo_learning_outcomes(
 async def gemelo_grade_items(
     orgUnitId: int,
     svc: GemeloService = Depends(get_service),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
 ):
     """Devuelve grade items + dropbox folders del curso con sus due dates.
-    Usado por el frontend para construir el calendario de entregas y los cortes."""
-    import asyncio
+    Lee desde cache DB (sync de JC). Fallback a Brightspace si el cache está vacío,
+    y dispara re-sync en background para la próxima petición."""
 
+    def _build_items_from_db(db_grade_items, db_dropbox_folders):
+        dropbox_by_id: Dict[str, Any] = {}
+        dropbox_by_grade_item: Dict[str, Any] = {}
+        for df in db_dropbox_folders:
+            key = str(df.brightspace_folder_id)
+            dropbox_by_id[key] = df
+            if df.grade_item_id is not None:
+                dropbox_by_grade_item[str(df.grade_item_id)] = df
+
+        items = []
+        seen_dropbox_ids: set = set()
+
+        for gi in db_grade_items:
+            grade_id = gi.brightspace_grade_object_id
+            due_date = gi.due_date
+            end_date = gi.end_date
+            start_date = None
+            linked_dropbox_id = None
+
+            linked_df = None
+            if gi.associated_tool_id in (1, 2000) and gi.associated_tool_item_id is not None:
+                linked_df = dropbox_by_id.get(str(gi.associated_tool_item_id))
+            if not linked_df and grade_id is not None:
+                linked_df = dropbox_by_grade_item.get(str(grade_id))
+
+            if linked_df:
+                seen_dropbox_ids.add(str(linked_df.brightspace_folder_id))
+                if not due_date:
+                    due_date = linked_df.due_date
+                if not end_date:
+                    end_date = linked_df.due_date
+                start_date = linked_df.start_date
+                linked_dropbox_id = linked_df.brightspace_folder_id
+
+            items.append({
+                "id": grade_id,
+                "name": gi.name,
+                "weightPct": gi.weight,
+                "maxPoints": gi.max_points,
+                "startDate": start_date,
+                "dueDate": due_date,
+                "endDate": end_date,
+                "gradeType": gi.grade_type,
+                "categoryId": gi.category_id,
+                "source": "grade_item",
+                "linkedDropboxId": linked_dropbox_id,
+            })
+
+        for df in db_dropbox_folders:
+            if str(df.brightspace_folder_id) in seen_dropbox_ids:
+                continue
+            items.append({
+                "id": df.brightspace_folder_id,
+                "name": df.name,
+                "weightPct": None,
+                "maxPoints": None,
+                "startDate": df.start_date,
+                "dueDate": df.due_date,
+                "endDate": df.end_date or df.due_date,
+                "gradeType": "Dropbox",
+                "categoryId": df.category_id,
+                "source": "dropbox",
+                "linkedDropboxId": df.brightspace_folder_id,
+            })
+
+        return items
+
+    # --- Try DB cache first ---
+    try:
+        db = SessionLocal()
+        try:
+            db_grade_items = db.execute(
+                select(GradeItem).where(GradeItem.org_unit_id == orgUnitId)
+            ).scalars().all()
+            db_dropbox_folders = db.execute(
+                select(DropboxFolder).where(DropboxFolder.org_unit_id == orgUnitId)
+            ).scalars().all()
+        finally:
+            db.close()
+
+        if db_grade_items or db_dropbox_folders:
+            items = _build_items_from_db(db_grade_items, db_dropbox_folders)
+            return {
+                "orgUnitId": orgUnitId,
+                "count": len(items),
+                "gradeItemsCount": len(db_grade_items),
+                "dropboxFoldersCount": len(db_dropbox_folders),
+                "items": items,
+                "source": "cache",
+            }
+    except Exception as db_err:
+        logger.warning("grade-items DB cache miss for %s: %s", orgUnitId, db_err)
+
+    # --- Fallback: live Brightspace ---
     async def _safe_grade_items():
         try:
             raw = await svc.bs.list_grade_items(orgUnitId)
@@ -689,12 +787,24 @@ async def gemelo_grade_items(
                 "linkedDropboxId": df_id,
             })
 
+        # Trigger background sync so the next request hits the cache
+        async def _bg_sync():
+            try:
+                sync_svc = SyncService(svc.bs)
+                await sync_svc.sync_grade_items(orgUnitId)
+                await sync_svc.sync_dropbox_folders(orgUnitId)
+            except Exception as e:
+                logger.warning("grade-items bg sync failed for %s: %s", orgUnitId, e)
+
+        background_tasks.add_task(_bg_sync)
+
         return {
             "orgUnitId": orgUnitId,
             "count": len(items),
             "gradeItemsCount": len(grade_items),
             "dropboxFoldersCount": len(dropbox_folders),
             "items": items,
+            "source": "live",
         }
     except Exception as e:
         msg = str(e)
