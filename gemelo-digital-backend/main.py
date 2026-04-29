@@ -366,8 +366,12 @@ def brightspace_login(
         "response_type": "code",
         "scope":         SCOPE,
         "state":         state,
-        # Forzar redirect directo a Microsoft sin pasar por la pantalla de Brightspace
-        "prompt":        "login",
+        # NOTA: NO incluimos prompt=login aqui.
+        # Con prompt=login, Brightspace siempre fuerza SSO con Microsoft, lo que
+        # rompe el flujo cuando el usuario ya tiene sesion en Brightspace pero el
+        # SAML RelayState no preservo el estado OAuth en el primer intento
+        # (termina en d2l/home en lugar del callback). Sin el parametro, si ya
+        # hay sesion en Brightspace el OAuth completa instantaneamente sin SSO.
     }
     url = f"{BRIGHTSPACE_AUTH_URL}?{urllib.parse.urlencode(params)}"
     return RedirectResponse(url)

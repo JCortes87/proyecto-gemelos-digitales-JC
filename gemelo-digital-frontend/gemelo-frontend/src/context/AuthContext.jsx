@@ -49,10 +49,29 @@ export function AuthProvider({ children }) {
             if (_fl === "1") sessionStorage.setItem("gemelo_first_login", "1");
           }
           window.history.replaceState(null, "", window.location.pathname + window.location.search);
+
+          // Popup OAuth flow: si este tab fue abierto como popup por LoginScreen,
+          // le avisamos al padre con el token y cerramos. El padre (main window)
+          // almacena el SID y hace reload. De este modo el main window nunca sale
+          // de gemelo.cesa.edu.co durante el flujo OAuth.
+          if (_sid && window.opener && !window.opener.closed) {
+            try {
+              window.opener.postMessage(
+                { type: "gemelo-auth", sid: _sid, orgUnitId: _hashOu, firstLogin: parts[3] === "1" },
+                window.location.origin,
+              );
+            } catch {}
+            // Dar 300ms para que el mensaje llegue antes de cerrar
+            setTimeout(() => window.close(), 300);
+            return; // No seguir inicializando el contexto en la ventana popup
+          }
         }
 
         if (!_sid) _sid = localStorage.getItem("gemelo_sid");
-        if (_sid) localStorage.setItem("gemelo_sid", _sid);
+        if (_sid) {
+          localStorage.setItem("gemelo_sid", _sid);
+          localStorage.removeItem("gemelo_oauth_pending"); // limpiar bandera de retry
+        }
 
         if (_hashOu) {
           setInitialOrgUnitId(_hashOu);
