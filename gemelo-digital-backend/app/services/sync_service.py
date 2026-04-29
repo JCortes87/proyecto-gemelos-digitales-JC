@@ -30,6 +30,13 @@ class SyncService:
         run_id = self.tracking.start_run("classlist", orgUnitId)
         classlist = await self.bs.list_classlist(orgUnitId)
 
+        # Brightspace puede devolver dict con clave "Items" o lista directa.
+        # Normalizar siempre a lista para evitar iteración sobre claves de dict.
+        if isinstance(classlist, dict):
+            classlist = classlist.get("Items") or classlist.get("items") or []
+        if not isinstance(classlist, list):
+            classlist = []
+
         inserted_students = 0
         updated_students = 0
         inserted_enrollments = 0

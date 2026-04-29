@@ -92,8 +92,17 @@ router = APIRouter(prefix="/gemelo", tags=["gemelo"])
 
 # Cache simple en memoria para el RA dashboard (evita recalcular en cada refresh)
 import time as _time
+import asyncio as _asyncio
 _RA_DASHBOARD_CACHE: dict = {}
 _RA_DASHBOARD_TTL = 300  # 5 minutos
+_RA_DASHBOARD_LOCKS: dict = {}  # un Lock por orgUnitId para evitar stampede
+
+
+def _get_ra_lock(orgUnitId: int) -> _asyncio.Lock:
+    """Devuelve (creando si es necesario) el Lock para el cache de un curso."""
+    if orgUnitId not in _RA_DASHBOARD_LOCKS:
+        _RA_DASHBOARD_LOCKS[orgUnitId] = _asyncio.Lock()
+    return _RA_DASHBOARD_LOCKS[orgUnitId]
 
 
 
@@ -333,120 +342,129 @@ async def gemelo_course_ra_dashboard(
     por estudiante. Retorna promedio (%) y cobertura por RA.
     """
     try:
+        # Chequeo rápido fuera del lock — si hay cache válido lo devolvemos sin bloquear
         now_ts = _time.time()
         cached = _RA_DASHBOARD_CACHE.get(orgUnitId)
         if cached and (now_ts - cached["ts"] < _RA_DASHBOARD_TTL):
-            # Solo usar cache si tiene datos reales (al menos 1 RA con studentsWithData > 0)
             cached_ras = (cached["data"].get("ras") or [])
-            has_real_data = any(r.get("studentsWithData", 0) > 0 for r in cached_ras)
-            if has_real_data:
+            if any(r.get("studentsWithData", 0) > 0 for r in cached_ras):
                 return cached["data"]
-            # Cache vacío/inválido → recalcular
 
-        students_payload = await svc.list_course_students(orgUnitId)
-        items = (
-            students_payload.get("items") or []
-            if isinstance(students_payload, dict)
-            else []
-        )
+        # Adquirir lock por curso para evitar que requests concurrentes
+        # calculen el RA dashboard en paralelo (stampede / CPU duplicado)
+        async with _get_ra_lock(orgUnitId):
+            # Re-chequear dentro del lock: puede que otra coroutine ya calculó
+            now_ts = _time.time()
+            cached = _RA_DASHBOARD_CACHE.get(orgUnitId)
+            if cached and (now_ts - cached["ts"] < _RA_DASHBOARD_TTL):
+                cached_ras = (cached["data"].get("ras") or [])
+                if any(r.get("studentsWithData", 0) > 0 for r in cached_ras):
+                    return cached["data"]
 
-        if not items:
-            return {
-                "orgUnitId": orgUnitId,
-                "totalStudents": 0,
-                "ras": [],
-                "updatedAt": None,
-                "note": "Sin estudiantes en list_course_students()",
-            }
+            students_payload = await svc.list_course_students(orgUnitId)
+            items = (
+                students_payload.get("items") or []
+                if isinstance(students_payload, dict)
+                else []
+            )
 
-        if only_students:
-            items = [
-                s for s in items
-                if _is_student_role(s.get("roleName") or s.get("RoleName"))
-            ]
+            if not items:
+                return {
+                    "orgUnitId": orgUnitId,
+                    "totalStudents": 0,
+                    "ras": [],
+                    "updatedAt": None,
+                    "note": "Sin estudiantes en list_course_students()",
+                }
 
-        if limit:
-            items = items[:limit]
+            if only_students:
+                items = [
+                    s for s in items
+                    if _is_student_role(s.get("roleName") or s.get("RoleName"))
+                ]
 
-        user_ids: List[int] = []
-        for s in items:
-            uid = s.get("userId") or s.get("UserId") or s.get("UserID")
-            if uid is None:
-                continue
-            try:
-                user_ids.append(int(uid))
-            except Exception:
-                continue
+            if limit:
+                items = items[:limit]
 
-        total_students = len(user_ids)
-        if total_students == 0:
-            return {
-                "orgUnitId": orgUnitId,
-                "totalStudents": 0,
-                "ras": [],
-                "updatedAt": None,
-            }
-
-        coros = [svc.build_gemelo(orgUnitId, uid) for uid in user_ids]
-        results = await _gather_with_semaphore(coros, limit=concurrency)
-
-        agg: Dict[str, Dict[str, Any]] = defaultdict(
-            lambda: {"sum": 0.0, "count": 0}
-        )
-        last_updated_at: Optional[str] = None
-
-        for r in results:
-            if isinstance(r, Exception) or not isinstance(r, dict):
-                continue
-
-            try:
-                upd = (
-                    (r.get("summary") or {}).get("updatedAt")
-                    or (r.get("course") or {}).get("updatedAt")
-                )
-                if upd:
-                    last_updated_at = upd
-            except Exception:
-                pass
-
-            macro_units = (r.get("macro") or {}).get("units") or []
-            for u in macro_units:
-                code = u.get("code")
-                pct = u.get("pct")
-                if not code or pct is None:
+            user_ids: List[int] = []
+            for s in items:
+                uid = s.get("userId") or s.get("UserId") or s.get("UserID")
+                if uid is None:
                     continue
                 try:
-                    agg[code]["sum"] += float(pct)
-                    agg[code]["count"] += 1
+                    user_ids.append(int(uid))
                 except Exception:
                     continue
 
-        ras = []
-        for code in sorted(agg.keys()):
-            count = agg[code]["count"]
-            avg = round(agg[code]["sum"] / count, 1) if count else None
-            coverage_pct = (
-                round((count / total_students) * 100.0, 1)
-                if total_students else 0.0
+            total_students = len(user_ids)
+            if total_students == 0:
+                return {
+                    "orgUnitId": orgUnitId,
+                    "totalStudents": 0,
+                    "ras": [],
+                    "updatedAt": None,
+                }
+
+            coros = [svc.build_gemelo(orgUnitId, uid) for uid in user_ids]
+            results = await _gather_with_semaphore(coros, limit=concurrency)
+
+            agg: Dict[str, Dict[str, Any]] = defaultdict(
+                lambda: {"sum": 0.0, "count": 0}
             )
-            ras.append({
-                "code": code,
-                "label": code,
-                "avgPct": avg,
-                "coveragePct": coverage_pct,
-                "studentsWithData": count,
+            last_updated_at: Optional[str] = None
+
+            for r in results:
+                if isinstance(r, Exception) or not isinstance(r, dict):
+                    continue
+
+                try:
+                    upd = (
+                        (r.get("summary") or {}).get("updatedAt")
+                        or (r.get("course") or {}).get("updatedAt")
+                    )
+                    if upd:
+                        last_updated_at = upd
+                except Exception:
+                    pass
+
+                macro_units = (r.get("macro") or {}).get("units") or []
+                for u in macro_units:
+                    code = u.get("code")
+                    pct = u.get("pct")
+                    if not code or pct is None:
+                        continue
+                    try:
+                        agg[code]["sum"] += float(pct)
+                        agg[code]["count"] += 1
+                    except Exception:
+                        continue
+
+            ras = []
+            for code in sorted(agg.keys()):
+                count = agg[code]["count"]
+                avg = round(agg[code]["sum"] / count, 1) if count else None
+                coverage_pct = (
+                    round((count / total_students) * 100.0, 1)
+                    if total_students else 0.0
+                )
+                ras.append({
+                    "code": code,
+                    "label": code,
+                    "avgPct": avg,
+                    "coveragePct": coverage_pct,
+                    "studentsWithData": count,
+                    "totalStudents": total_students,
+                })
+
+            payload = {
+                "orgUnitId": orgUnitId,
                 "totalStudents": total_students,
-            })
+                "updatedAt": last_updated_at,
+                "ras": ras,
+            }
 
-        payload = {
-            "orgUnitId": orgUnitId,
-            "totalStudents": total_students,
-            "updatedAt": last_updated_at,
-            "ras": ras,
-        }
-
-        _RA_DASHBOARD_CACHE[orgUnitId] = {"ts": _time.time(), "data": payload}
-        return payload
+            _RA_DASHBOARD_CACHE[orgUnitId] = {"ts": _time.time(), "data": payload}
+            return payload
 
     except Exception as e:
         _http500(e, "gemelo_course_ra_dashboard", orgUnitId=orgUnitId)
