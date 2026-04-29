@@ -38,6 +38,7 @@ import useCourseSnapshots from "../hooks/useCourseSnapshots";
 import useStudentChat from "../hooks/useStudentChat";
 import { exportStudentsCsv, exportCourseReport, STUDENT_CSV_COLUMNS } from "../utils/export";
 import { apiUrl, apiGet, mapLimit, API_BASE_URL } from "../utils/api";
+import { sanitizeHtml } from "../utils/sanitize";
 import { elSpeak, elStop, elListen } from "../utils/speech";
 import { COLORS, STATUS_CONFIG, colorForRisk, colorForPct, colorForLearningOutcome } from "../utils/colors";
 import {
@@ -2762,7 +2763,7 @@ function VoiceAssistant({ studentRows, overview, raDashboard, courseInfo, thresh
               {m.role === "bot" ? "Asistente" : "Tú"}
               {m.fromVoice && <span className="ai-voice-badge">🎙️ voz</span>}
             </div>
-            <div className={`ai-bubble ${m.role}`} dangerouslySetInnerHTML={{ __html: m.text }} />
+            <div className={`ai-bubble ${m.role}`} dangerouslySetInnerHTML={{ __html: sanitizeHtml(m.text) }} />
             {m.role === "bot" && (
               <button
                 className={`ai-speak-btn${activeSpeakId === m.id ? " active" : ""}`}

@@ -23,6 +23,23 @@ from typing import Any, Dict, Optional, List, Union
 import httpx
 from fastapi import Request, HTTPException
 
+#|---------- Cliente HTTP compartido (connection pooling) ----------|
+# Un AsyncClient por proceso evita abrir/cerrar conexiones TCP en cada request.
+# limits: max 20 conexiones totales, 10 por host (Brightspace).
+# timeout: 30s por defecto, sobrescribible en _request_json.
+_HTTP_CLIENT: httpx.AsyncClient | None = None
+
+
+def get_http_client() -> httpx.AsyncClient:
+    """Devuelve el cliente httpx singleton, creándolo si no existe."""
+    global _HTTP_CLIENT
+    if _HTTP_CLIENT is None or _HTTP_CLIENT.is_closed:
+        _HTTP_CLIENT = httpx.AsyncClient(
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+            timeout=httpx.Timeout(30.0),
+        )
+    return _HTTP_CLIENT
+
 from app.state import (
     get_access_token,
     get_session,
@@ -236,8 +253,11 @@ class BrightspaceClient:
         las llamadas con `tokens` dict explicito siguen como antes.
         """
         headers = await self._auth_headers_with_refresh()
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            r = await client.request(method, url, headers=headers, params=params)
+        client = get_http_client()
+        r = await client.request(
+            method, url, headers=headers, params=params,
+            timeout=httpx.Timeout(float(timeout)),
+        )
         self._ensure_json(r, url)
         return r.json()
 

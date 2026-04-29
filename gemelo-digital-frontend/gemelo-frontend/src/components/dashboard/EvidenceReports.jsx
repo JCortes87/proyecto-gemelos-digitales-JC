@@ -3,6 +3,7 @@ import { apiGet, apiDownloadUrl } from "../../utils/api";
 import { exportInstitutionalFeedbackPdf } from "../../utils/export";
 import { COLORS, colorForPct } from "../../utils/colors";
 import { fmtPct, fmtGrade10FromPct, computeRiskFromPct } from "../../utils/helpers";
+import { sanitizeHtml } from "../../utils/sanitize";
 import StudentAvatar from "../ui/StudentAvatar";
 
 /**
@@ -552,7 +553,7 @@ export default function EvidenceReports({
                             background: "var(--bg)", border: "1px solid var(--border)",
                             borderLeft: "3px solid var(--brand)",
                           }}
-                          dangerouslySetInnerHTML={{ __html: text }}
+                          dangerouslySetInnerHTML={{ __html: sanitizeHtml(text) }}
                         />
                       </div>
                     )}
@@ -656,7 +657,7 @@ export default function EvidenceReports({
                                         borderRadius: 7,
                                         borderLeft: "2px solid " + cColor + "60",
                                       }}
-                                      dangerouslySetInnerHTML={{ __html: c.comment }}
+                                      dangerouslySetInnerHTML={{ __html: sanitizeHtml(c.comment) }}
                                     />
                                   )}
                                 </div>
