@@ -39,7 +39,7 @@ permissions:
 env:
   AWS_REGION: us-east-1
   AWS_ACCOUNT_ID: '718624265053'
-  ECR_REPOSITORY: gemelo-digital/gemelo-digital-backend
+  ECR_REPOSITORY: gemelo-backend
   ECS_CLUSTER: default
   ECS_SERVICE: gemelo-digital-api
   IAM_ROLE_ARN: arn:aws:iam::718624265053:role/GemeloDigitalDeployerRole
