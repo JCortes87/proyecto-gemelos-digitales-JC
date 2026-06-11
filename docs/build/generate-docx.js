@@ -836,6 +836,135 @@ children.push(P("En todos los casos: el deploy fallido NO afecta producción. Lo
 children.push(new Paragraph({ children: [new PageBreak()] }));
 
 // ── 10. VARIABLES DE ENTORNO ──
+children.push(H2("9.9 Push manual a producción — procedimiento clic a clic (fallback de emergencia)"));
+
+children.push(P("Esta sección documenta CÓMO HACER UN DEPLOY MANUALMENTE en caso de que el CI/CD esté roto, no esté disponible, o necesites hacer algo que los workflows no contemplan. Es un procedimiento de respaldo, NO el modo normal de operación."));
+
+// Warning box
+children.push(new Paragraph({
+  shading: { fill: "FFE4B5", type: ShadingType.CLEAR },
+  border: { top: { color: "FF8C00", space: 1, style: BorderStyle.SINGLE, size: 12 },
+            bottom: { color: "FF8C00", space: 1, style: BorderStyle.SINGLE, size: 12 },
+            left: { color: "FF8C00", space: 1, style: BorderStyle.SINGLE, size: 12 },
+            right: { color: "FF8C00", space: 1, style: BorderStyle.SINGLE, size: 12 } },
+  spacing: { before: 200, after: 200 },
+  children: [new TextRun({
+    text: "USAR SOLO EN EMERGENCIA: en condiciones normales SIEMPRE prefiere el deploy automático vía GitHub Actions. El deploy manual es más propenso a errores humanos y rompe la trazabilidad del historial.",
+    bold: true,
+    size: 22,
+    color: "8B0000",
+  })],
+}));
+
+children.push(H3("Cuándo usar este procedimiento"));
+children.push(bullet("GitHub Actions está caído (down) y no puedes mergear ni disparar workflows."));
+children.push(bullet("El rol IAM de GitHub Actions tiene un problema y los deploys fallan en autenticarse contra AWS."));
+children.push(bullet("Necesitas deployar URGENTE algo crítico y no quieres esperar los 10 min del workflow."));
+children.push(bullet("Estás validando algo localmente y quieres subir esa imagen específica sin pasar por git."));
+children.push(bullet("Caso normal: NUNCA. Siempre usa el CI/CD."));
+
+children.push(H3("Pre-requisitos antes de empezar"));
+children.push(P("Necesitas tener instalado y configurado en tu PC:"));
+children.push(table2col([
+  ["AWS CLI v2", "Descargar desde https://awscli.amazonaws.com/AWSCLIV2.msi e instalar"],
+  ["AWS CLI configurado", "Correr aws configure con tus Access Keys (las generas en IAM Console)"],
+  ["Docker Desktop", "Instalado y corriendo (verás el ícono de ballena en la barra de tareas)"],
+  ["Node.js 20", "Descargado desde https://nodejs.org (solo necesario para deploy de frontend)"],
+  ["Permisos IAM correctos", "Tu usuario IAM debe tener permisos para ECR push, ECS update, S3 sync, CloudFront invalidate"],
+]));
+children.push(P("Si no tienes alguno de estos, configurarlos toma ~1 hora. En ese caso, evaluar si el CI/CD puede esperar."));
+
+children.push(H3("PROCEDIMIENTO PASO A PASO — Deploy MANUAL del BACKEND"));
+
+children.push(H4("Paso 1: Posicionarte en la carpeta correcta"));
+children.push(P("Abre PowerShell y navega a la carpeta del proyecto:"));
+children.push(code(`cd "C:\\Users\\jose.cortesh\\OneDrive - Colegio de Estudios Superiores de Administracion\\Escritorio\\Gemelo digital\\GEMELO-DIGITAL-V2\\gemelo-digital-backend"`));
+children.push(P("Verifica que estás en la carpeta correcta — debe contener archivos como main.py, Dockerfile, requirements.txt, start.sh."));
+
+children.push(H4("Paso 2: Verificar que Docker Desktop está corriendo"));
+children.push(P("Mirar el ícono de ballena en la barra de tareas — debe estar quieto (corriendo), no parpadeando (iniciando)."));
+children.push(P("Confirmar desde terminal:"));
+children.push(code("docker info"));
+children.push(P("Si responde con info del servidor, está OK. Si dice \"cannot connect\", abre Docker Desktop y espera a que arranque."));
+
+children.push(H4("Paso 3: Hacer login en ECR"));
+children.push(P("El siguiente comando obtiene una contraseña temporal y la usa para autenticarse contra ECR. Tarda ~3 segundos:"));
+children.push(code("aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 718624265053.dkr.ecr.us-east-1.amazonaws.com"));
+children.push(P("Esperado: \"Login Succeeded\"."));
+
+children.push(H4("Paso 4: Construir la imagen Docker"));
+children.push(P("Desde la carpeta gemelo-digital-backend, construye la imagen con un tag descriptivo (puedes usar la fecha actual o un nombre que recuerdes):"));
+children.push(code("docker build -t gemelo-backend:manual-2026-06-15 ."));
+children.push(P("Tarda 2-3 minutos. Verás logs de cada paso del Dockerfile (instalar dependencias, copiar archivos, etc.)."));
+children.push(P("Esperado: termina con \"Successfully tagged gemelo-backend:manual-2026-06-15\"."));
+
+children.push(H4("Paso 5: Taggear la imagen para ECR"));
+children.push(P("La imagen local necesita un tag adicional con la URL completa del registry:"));
+children.push(code(`docker tag gemelo-backend:manual-2026-06-15 718624265053.dkr.ecr.us-east-1.amazonaws.com/gemelo-backend:latest
+
+docker tag gemelo-backend:manual-2026-06-15 718624265053.dkr.ecr.us-east-1.amazonaws.com/gemelo-backend:manual-2026-06-15`));
+children.push(P("El primero sobreescribe el tag :latest (lo que ECS pulleará automáticamente). El segundo guarda con el tag de fecha por si necesitas rollback después."));
+
+children.push(H4("Paso 6: Push de la imagen a ECR"));
+children.push(P("Sube ambos tags a ECR. Tarda 1-2 minutos dependiendo de tu velocidad de internet:"));
+children.push(code(`docker push 718624265053.dkr.ecr.us-east-1.amazonaws.com/gemelo-backend:latest
+
+docker push 718624265053.dkr.ecr.us-east-1.amazonaws.com/gemelo-backend:manual-2026-06-15`));
+children.push(P("Verás progreso por cada layer de la imagen. Esperado: terminar con la línea \"digest: sha256:...\" para cada push."));
+
+children.push(H4("Paso 7: Forzar el redeploy en ECS"));
+children.push(P("Decirle a ECS que pulle la nueva imagen y reinicie el container:"));
+children.push(code("aws ecs update-service --cluster default --service gemelo-digital-api --force-new-deployment --region us-east-1"));
+children.push(P("ECS responde inmediatamente con el JSON del servicio actualizado. El redeploy real toma 3-5 minutos."));
+
+children.push(H4("Paso 8: Esperar a que el deploy quede estable"));
+children.push(P("Este comando bloquea hasta que ECS confirma que el deploy se completó:"));
+children.push(code("aws ecs wait services-stable --cluster default --services gemelo-digital-api --region us-east-1"));
+children.push(P("Si todo sale bien, vuelve al prompt sin imprimir nada (deploy exitoso). Si falla, ECS revierte automáticamente al container viejo."));
+
+children.push(H4("Paso 9: Verificar que el deploy funcionó"));
+children.push(P("Tres formas de confirmar (haz al menos una):"));
+children.push(bullet("Visitar https://ge-9d9d0220a8704eeabada1b951f3f2d37.ecs.us-east-1.on.aws/health en el navegador — debe responder con timestamp actual.", 0));
+children.push(bullet("ECS Console → service → pestaña Implementaciones — debe aparecer un deploy reciente marcado como completado.", 0));
+children.push(bullet("CloudWatch Logs → log group del backend — buscar líneas recientes con \"Application startup complete\".", 0));
+
+children.push(H3("PROCEDIMIENTO PASO A PASO — Deploy MANUAL del FRONTEND"));
+
+children.push(H4("Paso 1: Posicionarte en la carpeta del frontend"));
+children.push(code(`cd "C:\\Users\\jose.cortesh\\OneDrive - Colegio de Estudios Superiores de Administracion\\Escritorio\\Gemelo digital\\GEMELO-DIGITAL-V2\\gemelo-digital-frontend\\gemelo-frontend"`));
+
+children.push(H4("Paso 2: Instalar dependencias (solo si es primera vez o cambió package.json)"));
+children.push(code("npm install"));
+children.push(P("Tarda 2-5 minutos la primera vez. Las siguientes es más rápido."));
+
+children.push(H4("Paso 3: Construir la SPA"));
+children.push(code("npm run build"));
+children.push(P("Vite construye los archivos optimizados en la carpeta dist/. Tarda 30-60 segundos."));
+children.push(P("Esperado: \"✓ built in X.XXs\" al final, sin errores rojos."));
+
+children.push(H4("Paso 4: Subir los archivos a S3"));
+children.push(P("Sincroniza la carpeta dist/ con el bucket S3. La opción --delete borra del bucket archivos que ya no existen en dist/:"));
+children.push(code("aws s3 sync ./dist/ s3://gemelo-frontend-prod --delete --region us-east-1"));
+children.push(P("Verás líneas como \"upload: dist/index.html to s3://...\". Tarda 30-60 segundos."));
+
+children.push(H4("Paso 5: Invalidar el caché de CloudFront"));
+children.push(P("Esto fuerza a CloudFront a pedir los archivos nuevos a S3 inmediatamente. Sin esto, los usuarios verían la versión vieja hasta que el caché expire (~24h):"));
+children.push(code("aws cloudfront create-invalidation --distribution-id E32WDBCT7SFCRD --paths \"/*\" --region us-east-1"));
+children.push(P("Responde con un JSON que incluye el ID de la invalidation. Toma 5-10 minutos en propagarse globalmente."));
+
+children.push(H4("Paso 6: Verificar"));
+children.push(bullet("Abrir https://gemelo.cesa.edu.co en modo incógnito (para evitar caché del browser).", 0));
+children.push(bullet("Verificar que los cambios se ven (puede tomar hasta 10 min mientras CloudFront propaga).", 0));
+children.push(bullet("Si no se ven, recargar con Ctrl+Shift+R (hard reload).", 0));
+
+children.push(H3("Recordatorio importante"));
+children.push(P("Si haces un deploy manual:"));
+children.push(bullet("El estado de git en tu PC NO se sincroniza automáticamente con producción. Si haces cambios manualmente, también haz commit + push de esos cambios al repo de GitHub para que queden registrados."));
+children.push(bullet("El próximo deploy automático sobreescribirá tu deploy manual con lo que esté en main. Asegúrate de que main tenga el código correcto."));
+children.push(bullet("Documenta en el chat / wiki / equipo que hiciste un deploy manual y por qué."));
+
+children.push(new Paragraph({ children: [new PageBreak()] }));
+
 children.push(H1("10. Variables de entorno (producción)"));
 children.push(P("Definidas en el taskdef de ECS, sección environment. Cuando cambias una, hay que registrar una nueva revisión del taskdef y forzar redeploy."));
 
