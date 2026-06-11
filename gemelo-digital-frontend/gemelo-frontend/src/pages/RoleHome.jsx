@@ -1,0 +1,541 @@
+import React, { useState, useEffect, useMemo, useCallback, lazy, Suspense } from "react";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
+import { apiGet } from "../utils/api";
+import { injectStyles } from "../styles/global";
+import { isStudentRole } from "../utils/roles";
+
+const StudentOverviewPanel = lazy(() => import("./StudentOverviewPanel"));
+
+export default function RoleHome() {
+  useEffect(() => { injectStyles(); }, []);
+
+  const { authUser, logout, isInstructor, isStudent, isDualRole, isSuperAdmin } = useAuth();
+  const navigate = useNavigate();
+  const firstName = (authUser?.user_name || "").split(" ")[0] || "Usuario";
+
+  const [courses, setCourses] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+
+  // SuperAdmin: global course search results from /brightspace/all-courses
+  const [globalResults, setGlobalResults] = useState([]);
+  const [globalLoading, setGlobalLoading] = useState(false);
+
+  // SuperAdmin: impersonation
+  const [impersonateOrgId, setImpersonateOrgId] = useState("");
+  const [impersonateUserId, setImpersonateUserId] = useState("");
+  const [impersonateRole, setImpersonateRole] = useState("instructor"); // default professor
+  const [impersonatePeriod, setImpersonatePeriod] = useState("");
+  const [overviewUserId, setOverviewUserId] = useState(null);
+  const [overviewPeriod, setOverviewPeriod] = useState("");
+  const [overviewStudentSearchId, setOverviewStudentSearchId] = useState(""); // for "ver rendimiento" card
+
+  // SuperAdmin: semesters list for dropdown
+  const [semesters, setSemesters] = useState([]);
+  useEffect(() => {
+    if (!isSuperAdmin) return;
+    (async () => {
+      try {
+        const data = await apiGet("/brightspace/semesters?min_year=2025");
+        setSemesters(Array.isArray(data?.items) ? data.items : []);
+      } catch { /* silent */ }
+    })();
+  }, [isSuperAdmin]);
+
+  useEffect(() => {
+    if (!isSuperAdmin || search.trim().length < 3) {
+      setGlobalResults([]);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      setGlobalLoading(true);
+      try {
+        const data = await apiGet(`/brightspace/all-courses?search=${encodeURIComponent(search.trim())}&limit=30`);
+        setGlobalResults(Array.isArray(data?.items) ? data.items : []);
+      } catch {
+        setGlobalResults([]);
+      } finally {
+        setGlobalLoading(false);
+      }
+    }, 500); // debounce 500ms
+    return () => clearTimeout(timer);
+  }, [search, isSuperAdmin]);
+
+  // Load all enrolled courses with roleName
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      setLoading(true);
+      try {
+        const data = await apiGet("/brightspace/courses/enrolled?active_only=false&limit=500");
+        if (alive) setCourses(Array.isArray(data?.items) ? data.items : []);
+      } catch {
+        // fallback: try my-course-offerings
+        try {
+          const data = await apiGet("/brightspace/my-course-offerings?active_only=false&limit=50");
+          if (alive) setCourses((Array.isArray(data?.items) ? data.items : []).map(c => ({ ...c, roleName: "Instructor" })));
+        } catch {}
+      } finally {
+        if (alive) setLoading(false);
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  // Classify courses by role
+  const { instructorCourses, studentCourses } = useMemo(() => {
+    const inst = [];
+    const stud = [];
+
+    for (const c of courses) {
+      const rn = String(c.roleName || "").toLowerCase().trim();
+      if (isStudentRole(rn)) {
+        stud.push(c);
+      } else if (rn) {
+        inst.push(c);
+      } else {
+        // No role info — put in instructor (default)
+        inst.push(c);
+      }
+    }
+
+    // Sort: active first, then alphabetically
+    const sorter = (a, b) => {
+      if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
+      return String(a.name || "").localeCompare(String(b.name || ""), "es", { sensitivity: "base" });
+    };
+    inst.sort(sorter);
+    stud.sort(sorter);
+
+    return { instructorCourses: inst, studentCourses: stud };
+  }, [courses]);
+
+  // Filter
+  const filterCourses = useCallback((list) => {
+    const q = search.trim().toLowerCase();
+    if (!q) return list;
+    return list.filter(c =>
+      String(c.name || "").toLowerCase().includes(q) ||
+      String(c.code || "").toLowerCase().includes(q) ||
+      String(c.id || "").includes(q)
+    );
+  }, [search]);
+
+  const filteredInst = filterCourses(instructorCourses);
+  const filteredStud = filterCourses(studentCourses);
+
+  const handleSelectCourse = (courseId, asRole) => {
+    // Detect actual role in this course based on enrollments — this prevents
+    // opening a course as instructor when the user is only enrolled as student
+    // (and vice versa).
+    const idStr = String(courseId);
+    const isStudentInCourse = studentCourses.some(c => String(c.id) === idStr);
+    const isInstructorInCourse = instructorCourses.some(c => String(c.id) === idStr);
+
+    let targetRole = asRole;
+    if (isStudentInCourse && !isInstructorInCourse) {
+      targetRole = "student";
+    } else if (isInstructorInCourse && !isStudentInCourse) {
+      targetRole = "instructor";
+    }
+    // If user is in BOTH (rare), respect the asRole hint passed in.
+    // If user is in NEITHER (e.g. SuperAdmin opening any course), use asRole as fallback.
+
+    sessionStorage.setItem("gemelo_pending_org", String(courseId));
+    const target = targetRole === "student" ? "/portal" : "/dashboard";
+    window.location.href = window.location.origin + target;
+  };
+
+  const CourseCard = ({ course, role }) => {
+    const isActive = course.isActive !== false;
+    return (
+      <button
+        onClick={() => handleSelectCourse(course.id, role)}
+        style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "12px 14px", borderRadius: 10, border: "1.5px solid var(--border)",
+          background: "var(--bg)", cursor: "pointer", textAlign: "left",
+          transition: "all 0.15s", fontFamily: "var(--font)", width: "100%",
+        }}
+        onMouseEnter={e => { e.currentTarget.style.borderColor = role === "student" ? "var(--ok)" : "var(--brand)"; e.currentTarget.style.background = role === "student" ? "var(--ok-bg)" : "var(--brand-light)"; }}
+        onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.background = "var(--bg)"; }}
+      >
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{course.name}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ fontSize: 11, color: "var(--muted)" }}>ID {course.id}{course.code ? ` · ${course.code}` : ""}</span>
+            {!isActive && <span style={{ fontSize: 9, fontWeight: 800, color: "var(--muted)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 99, padding: "1px 6px", textTransform: "uppercase" }}>Inactivo</span>}
+          </div>
+        </div>
+        <span style={{ color: role === "student" ? "var(--ok)" : "var(--brand)", fontSize: 16, flexShrink: 0 }}>→</span>
+      </button>
+    );
+  };
+
+  const SectionHeader = ({ icon, title, count, color }) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+      <div style={{ width: 36, height: 36, borderRadius: 10, background: color + "18", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>{icon}</div>
+      <div>
+        <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text)" }}>{title}</div>
+        <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600 }}>{count} curso{count !== 1 ? "s" : ""}</div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ minHeight: "100vh", background: "var(--bg)", fontFamily: "var(--font)" }}>
+      {/* Top bar */}
+      <header style={{
+        position: "sticky", top: 0, zIndex: 50,
+        background: "rgba(255,255,255,0.9)", backdropFilter: "blur(16px) saturate(180%)",
+        borderBottom: "1px solid var(--border)",
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "0 24px", height: 56,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ width: 32, height: 32, borderRadius: 8, background: "var(--brand)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 10, fontWeight: 900 }}>CESA</div>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)" }}>G.D</div>
+            <div style={{ fontSize: 9, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Selecciona tu vista</div>
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ width: 32, height: 32, borderRadius: "50%", background: "var(--brand)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800 }}>
+            {firstName.charAt(0).toUpperCase()}
+          </div>
+          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)" }}>
+            {authUser?.user_name?.split(" ").slice(0, 2).join(" ")}
+          </span>
+          <button onClick={logout} style={{ background: "none", border: "1px solid var(--border)", borderRadius: 7, padding: "4px 8px", fontSize: 10, fontWeight: 700, color: "var(--muted)", cursor: "pointer" }}>Salir</button>
+        </div>
+      </header>
+
+      {/* Content */}
+      <main style={{ maxWidth: 720, margin: "0 auto", padding: "32px 20px" }}>
+        {/* Welcome */}
+        <div style={{ textAlign: "center", marginBottom: 28 }}>
+          <div style={{ fontSize: 10, fontWeight: 800, color: "var(--brand)", textTransform: "uppercase", letterSpacing: "0.12em", marginBottom: 6 }}>G.D</div>
+          <h1 style={{ fontSize: 26, fontWeight: 900, color: "var(--text)", letterSpacing: "-0.03em", margin: "0 0 6px" }}>
+            Hola, {firstName}
+          </h1>
+          <p style={{ fontSize: 14, color: "var(--muted)", margin: 0 }}>
+            {isDualRole
+              ? "Tienes acceso como docente y como estudiante. Selecciona un curso para continuar."
+              : isStudent
+                ? "Selecciona un curso para ver tu información académica."
+                : "Selecciona un curso para ver el tablero docente."
+            }
+          </p>
+          {isDualRole && (
+            <div style={{ display: "inline-flex", gap: 6, marginTop: 12 }}>
+              <span style={{ fontSize: 10, fontWeight: 800, padding: "3px 10px", borderRadius: 99, background: "var(--brand-light)", color: "var(--brand)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Docente</span>
+              <span style={{ fontSize: 10, fontWeight: 800, padding: "3px 10px", borderRadius: 99, background: "var(--ok-bg)", color: "var(--ok)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Estudiante</span>
+            </div>
+          )}
+        </div>
+
+        {/* Search */}
+        {!loading && courses.length > 0 && (
+          <div style={{ position: "relative", marginBottom: 20 }}>
+            <input
+              type="text"
+              placeholder="Buscar por nombre, código o ID..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              style={{ width: "100%", padding: "10px 14px 10px 36px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--card)", color: "var(--text)", fontSize: 13, fontFamily: "var(--font)", outline: "none" }}
+              onFocus={e => e.target.style.borderColor = "var(--brand)"}
+              onBlur={e => e.target.style.borderColor = "var(--border)"}
+            />
+            <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", fontSize: 14, color: "var(--muted)" }}>🔍</span>
+          </div>
+        )}
+
+        {loading ? (
+          <div style={{ textAlign: "center", padding: "40px 0", color: "var(--muted)", fontSize: 13 }}>
+            <div style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: "var(--brand)", animation: "pulse 1.4s ease infinite", marginBottom: 12 }} />
+            <div>Cargando tus cursos...</div>
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+            {/* ── Cursos como Profesor ── */}
+            {isInstructor && filteredInst.length > 0 && (
+              <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 16, padding: "20px 20px 16px", boxShadow: "var(--shadow)" }}>
+                <SectionHeader icon="📊" title="Mis Cursos como Profesor" count={filteredInst.length} color="var(--brand)" />
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 320, overflowY: "auto" }}>
+                  {filteredInst.map(c => <CourseCard key={`inst-${c.id}`} course={c} role="instructor" />)}
+                </div>
+              </div>
+            )}
+
+            {/* ── Cursos como Estudiante ── */}
+            {isStudent && filteredStud.length > 0 && (
+              <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 16, padding: "20px 20px 16px", boxShadow: "var(--shadow)" }}>
+                <SectionHeader icon="🎓" title="Mis Cursos como Estudiante" count={filteredStud.length} color="var(--ok)" />
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 320, overflowY: "auto" }}>
+                  {filteredStud.map(c => <CourseCard key={`stud-${c.id}`} course={c} role="student" />)}
+                </div>
+              </div>
+            )}
+
+            {/* ═══ SUPER ADMIN CARDS (order: Overview → Impersonate → Global Search) ═══ */}
+
+            {/* 1. Rendimiento general del estudiante */}
+            {isSuperAdmin && (
+              <div style={{ background: "var(--card)", border: "1px solid var(--brand)", borderRadius: 16, padding: "20px 20px 16px", boxShadow: "var(--shadow)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                  <span style={{ fontSize: 16 }}>📊</span>
+                  <span style={{ fontSize: 14, fontWeight: 800, color: "var(--text)" }}>
+                    Rendimiento general de un estudiante
+                  </span>
+                </div>
+                <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 12, padding: "6px 10px", background: "var(--brand-light)", borderRadius: 8, borderLeft: "3px solid var(--brand)" }}>
+                  Busca todas las asignaturas donde está inscrito un estudiante y su promedio por curso. Selecciona un período para acelerar la búsqueda.
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+                  <input
+                    type="number"
+                    placeholder="ID del estudiante"
+                    value={overviewStudentSearchId}
+                    onChange={e => setOverviewStudentSearchId(e.target.value)}
+                    style={{ flex: "1 1 180px", padding: "9px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 12, fontFamily: "var(--font)", outline: "none" }}
+                  />
+                  <select
+                    value={impersonatePeriod}
+                    onChange={e => setImpersonatePeriod(e.target.value)}
+                    style={{ flex: "1 1 220px", padding: "9px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 12, fontFamily: "var(--font)", outline: "none", cursor: "pointer" }}
+                  >
+                    <option value="">Todos los periodos (2025+)</option>
+                    {semesters.map(s => (
+                      <option key={s.id} value={s.code}>{s.code} — {s.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <button
+                  onClick={() => {
+                    const uid = Number(overviewStudentSearchId);
+                    if (!uid || uid <= 0) { alert("Ingresa un ID de estudiante válido"); return; }
+                    setOverviewPeriod(impersonatePeriod.trim());
+                    setOverviewUserId(uid);
+                  }}
+                  disabled={!overviewStudentSearchId || Number(overviewStudentSearchId) <= 0}
+                  style={{
+                    width: "100%", padding: "10px 16px", borderRadius: 10,
+                    border: "none", cursor: overviewStudentSearchId ? "pointer" : "not-allowed",
+                    background: overviewStudentSearchId ? "var(--brand)" : "var(--bg)",
+                    color: overviewStudentSearchId ? "#fff" : "var(--muted)",
+                    fontSize: 13, fontWeight: 800, fontFamily: "var(--font)",
+                  }}
+                >
+                  📊 Ver rendimiento general del estudiante
+                </button>
+              </div>
+            )}
+
+            {/* 2. Suplantar usuario */}
+            {isSuperAdmin && (
+              <div style={{ background: "var(--card)", border: "1px solid rgba(255, 170, 0, 0.3)", borderRadius: 16, padding: "20px 20px 16px", boxShadow: "var(--shadow)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                  <span style={{ fontSize: 16 }}>👁</span>
+                  <span style={{ fontSize: 14, fontWeight: 800, color: "var(--text)" }}>
+                    Suplantar usuario (Super Admin)
+                  </span>
+                </div>
+                <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 12, padding: "6px 10px", background: "rgba(255, 170, 0, 0.06)", borderRadius: 8, borderLeft: "3px solid #f59e0b" }}>
+                  Abre un curso como si fueras un profesor o estudiante específico. Para "Como Estudiante" debes ingresar el ID del estudiante.
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+                  <input
+                    type="number"
+                    placeholder="ID del curso"
+                    value={impersonateOrgId}
+                    onChange={e => setImpersonateOrgId(e.target.value)}
+                    style={{ flex: "1 1 120px", padding: "9px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 12, fontFamily: "var(--font)", outline: "none" }}
+                  />
+                  <select
+                    value={impersonateRole}
+                    onChange={e => setImpersonateRole(e.target.value)}
+                    style={{ padding: "9px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 12, fontFamily: "var(--font)", outline: "none", cursor: "pointer" }}
+                  >
+                    <option value="instructor">Como Profesor</option>
+                    <option value="student">Como Estudiante</option>
+                  </select>
+                  {impersonateRole === "student" && (
+                    <input
+                      type="number"
+                      placeholder="ID del estudiante"
+                      value={impersonateUserId}
+                      onChange={e => setImpersonateUserId(e.target.value)}
+                      style={{ flex: "1 1 140px", padding: "9px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 12, fontFamily: "var(--font)", outline: "none" }}
+                    />
+                  )}
+                </div>
+                {(() => {
+                  const orgValid = impersonateOrgId && Number(impersonateOrgId) > 0;
+                  const studentValid = impersonateUserId && Number(impersonateUserId) > 0;
+                  const canSubmit = impersonateRole === "instructor"
+                    ? orgValid
+                    : (orgValid && studentValid);
+                  return (
+                    <button
+                      onClick={() => {
+                        if (!canSubmit) return;
+                        const org = Number(impersonateOrgId);
+                        const uid = Number(impersonateUserId);
+                        sessionStorage.setItem("gemelo_pending_org", String(org));
+                        if (impersonateRole === "student") {
+                          sessionStorage.setItem("gemelo_impersonate_user", String(uid));
+                          window.location.href = window.location.origin + "/portal";
+                        } else {
+                          sessionStorage.removeItem("gemelo_impersonate_user");
+                          window.location.href = window.location.origin + "/dashboard";
+                        }
+                      }}
+                      disabled={!canSubmit}
+                      style={{
+                        width: "100%", padding: "10px 16px", borderRadius: 10,
+                        border: "none", cursor: canSubmit ? "pointer" : "not-allowed",
+                        background: canSubmit ? "linear-gradient(90deg, #fbbf24 0%, #f59e0b 100%)" : "var(--bg)",
+                        color: canSubmit ? "#000" : "var(--muted)",
+                        fontSize: 13, fontWeight: 800, fontFamily: "var(--font)",
+                      }}
+                    >
+                      👁 {impersonateRole === "student" ? "Ver como estudiante" : "Ver como profesor"}
+                    </button>
+                  );
+                })()}
+              </div>
+            )}
+
+            {/* 3. Búsqueda global de cursos (SuperAdmin) */}
+            {isSuperAdmin && search.trim().length >= 3 && (
+              <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 16, padding: "20px 20px 16px", boxShadow: "var(--shadow)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                  <span style={{ fontSize: 16 }}>🔍</span>
+                  <span style={{ fontSize: 14, fontWeight: 800, color: "var(--text)" }}>
+                    Búsqueda global de cursos (Super Admin)
+                  </span>
+                  {globalLoading && <span style={{ fontSize: 11, color: "var(--muted)" }}>Buscando...</span>}
+                  {!globalLoading && <span className="tag">{globalResults.length}</span>}
+                </div>
+                <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 10, padding: "6px 10px", background: "var(--bg)", borderRadius: 8, borderLeft: "3px solid var(--brand)" }}>
+                  Esta búsqueda consulta <strong>todos los cursos</strong> de Brightspace, no solo tus inscripciones. Usa el buscador arriba (mín. 3 caracteres).
+                </div>
+                {globalResults.length > 0 ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 400, overflowY: "auto" }}>
+                    {globalResults.map(c => (
+                      <button
+                        key={`global-${c.id || c.Identifier}`}
+                        onClick={() => handleSelectCourse(c.id || c.Identifier, "instructor")}
+                        style={{
+                          display: "flex", alignItems: "center", gap: 12,
+                          padding: "12px 14px", borderRadius: 12,
+                          border: "1px solid var(--border)", background: "var(--bg)",
+                          cursor: "pointer", textAlign: "left", fontFamily: "var(--font)",
+                          width: "100%",
+                        }}
+                      >
+                        <div style={{ width: 36, height: 36, borderRadius: 8, background: "var(--brand)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 900, flexShrink: 0 }}>
+                          {String(c.id || c.Identifier || "").slice(-3)}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {c.name || c.Name || `Curso ${c.id || c.Identifier}`}
+                          </div>
+                          <div style={{ fontSize: 11, color: "var(--muted)" }}>
+                            ID: {c.id || c.Identifier} · {c.code || c.Code || ""}
+                          </div>
+                        </div>
+                        <span style={{ fontSize: 16, color: "var(--muted)" }}>→</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : !globalLoading ? (
+                  <div style={{ textAlign: "center", padding: "12px 0", color: "var(--muted)", fontSize: 12 }}>
+                    Sin resultados en Brightspace para "{search}"
+                  </div>
+                ) : null}
+              </div>
+            )}
+
+            {/* ── Solo estudiante sin doble rol ── */}
+            {isStudent && !isInstructor && filteredStud.length === 0 && !search && (
+              <div style={{ textAlign: "center", padding: "40px 20px", color: "var(--muted)", border: "1px dashed var(--border)", borderRadius: 16, background: "var(--card)" }}>
+                <div style={{ fontSize: 36, opacity: 0.35, marginBottom: 8 }}>🎓</div>
+                <div style={{ fontSize: 14, fontWeight: 700 }}>Sin cursos encontrados</div>
+                <div style={{ fontSize: 12, marginTop: 4 }}>Accede desde Brightspace usando el enlace de G.D en tu curso.</div>
+              </div>
+            )}
+
+            {/* ── No results for search ── */}
+            {!loading && search && filteredInst.length === 0 && filteredStud.length === 0 && (
+              <div style={{ textAlign: "center", padding: "30px 20px", color: "var(--muted)" }}>
+                {/^\d{3,}$/.test(search.trim()) ? (
+                  <>
+                    <div style={{ fontSize: 32, opacity: 0.5, marginBottom: 8 }}>🚫</div>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: "var(--text)", marginBottom: 4 }}>
+                      No estás inscrito en el curso #{search.trim()}
+                    </div>
+                    <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 16, maxWidth: 480, margin: "0 auto 16px" }}>
+                      Verifica el ID del curso o solicita al docente/administrador que te inscriba en Brightspace.
+                    </div>
+                    {isSuperAdmin && (
+                      <div style={{ marginBottom: 12, padding: "10px 12px", background: "rgba(255, 170, 0, 0.08)", border: "1px solid rgba(255, 170, 0, 0.3)", borderRadius: 10, fontSize: 12, color: "var(--text)", maxWidth: 480, margin: "0 auto 12px" }}>
+                        <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 6 }}>
+                          👑 Super Admin: puedes abrir cualquier curso aunque no estés inscrito.
+                        </div>
+                        <button
+                          onClick={() => handleSelectCourse(parseInt(search.trim(), 10), "instructor")}
+                          style={{ background: "linear-gradient(90deg, #fbbf24 0%, #f59e0b 100%)", color: "#000", border: "none", borderRadius: 8, padding: "8px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+                        >
+                          🔗 Abrir curso #{search.trim()} →
+                        </button>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div style={{ fontSize: 14, marginBottom: 8 }}>Sin resultados para "{search}"</div>
+                )}
+                <button onClick={() => setSearch("")} style={{ background: "var(--brand)", color: "#fff", border: "none", borderRadius: 8, padding: "7px 16px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                  Limpiar búsqueda
+                </button>
+              </div>
+            )}
+
+            {/* Quick access buttons for single-role users who have courses */}
+            {!isDualRole && !loading && courses.length > 0 && (
+              <div style={{ textAlign: "center", paddingTop: 8 }}>
+                <button
+                  onClick={() => navigate(isStudent ? "/portal" : "/dashboard")}
+                  style={{ background: "none", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 16px", fontSize: 12, fontWeight: 700, color: "var(--muted)", cursor: "pointer" }}
+                >
+                  Ir al {isStudent ? "portal de estudiante" : "dashboard docente"} →
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Footer */}
+        <div style={{ textAlign: "center", padding: "24px 0", fontSize: 11, color: "var(--muted)" }}>
+          CESA · G.D V.260428
+        </div>
+      </main>
+
+      {/* StudentOverviewPanel overlay */}
+      {overviewUserId && (
+        <Suspense fallback={
+          <div style={{ position: "fixed", inset: 0, zIndex: 300, background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, color: "var(--muted)" }}>
+            Cargando panel del estudiante...
+          </div>
+        }>
+          <StudentOverviewPanel
+            userId={overviewUserId}
+            period={overviewPeriod}
+            onClose={() => setOverviewUserId(null)}
+          />
+        </Suspense>
+      )}
+    </div>
+  );
+}

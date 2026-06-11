@@ -13,8 +13,24 @@ from app.services.gemelo_service import GemeloService
 from app.services.sync_service import SyncService
 
 #|---------- Lectura desde Postgres con chequeo de frescura de los datos ----------|
-from app.services.gemelo_db_service import build_course_overview_from_db
+from app.services.gemelo_db_service import (
+    build_course_overview_from_db,
+    upsert_course_metric_history,
+    get_course_metric_history,
+)
 from app.services.db_freshness import is_fresh
+from app.db.session import SessionLocal
+from app.db.models import GradeItem, DropboxFolder
+from sqlalchemy import select
+
+
+#|---------- Upsert snapshot diario de tendencias (background task) ----------|
+def _upsert_history_bg(orgUnitId: int, overview: dict) -> None:
+    """Guarda el snapshot diario de tendencias del curso. Silencia errores."""
+    try:
+        upsert_course_metric_history(orgUnitId, overview)
+    except Exception as e:
+        logger.warning("upsert_course_metric_history ou=%s fallo: %s", orgUnitId, e)
 
 
 #|---------- Persistir snapshots tras fallback a Brightspace (background task) ----------|
@@ -86,8 +102,17 @@ router = APIRouter(prefix="/gemelo", tags=["gemelo"])
 
 # Cache simple en memoria para el RA dashboard (evita recalcular en cada refresh)
 import time as _time
+import asyncio as _asyncio
 _RA_DASHBOARD_CACHE: dict = {}
 _RA_DASHBOARD_TTL = 300  # 5 minutos
+_RA_DASHBOARD_LOCKS: dict = {}  # un Lock por orgUnitId para evitar stampede
+
+
+def _get_ra_lock(orgUnitId: int) -> _asyncio.Lock:
+    """Devuelve (creando si es necesario) el Lock para el cache de un curso."""
+    if orgUnitId not in _RA_DASHBOARD_LOCKS:
+        _RA_DASHBOARD_LOCKS[orgUnitId] = _asyncio.Lock()
+    return _RA_DASHBOARD_LOCKS[orgUnitId]
 
 
 
@@ -238,6 +263,8 @@ async def gemelo_course_overview(
                 "overview ou=%s servido desde Postgres (lastSyncAt=%s)",
                 orgUnitId, db_result.get("lastSyncAt"),
             )
+            # Upsert snapshot diario de tendencias en background
+            background_tasks.add_task(_upsert_history_bg, orgUnitId, db_result)
             return db_result
     except Exception as e:
         logger.warning(
@@ -277,15 +304,39 @@ async def gemelo_course_overview(
                 orgUnitId, e,
             )
 
+        # Upsert snapshot diario de tendencias en background
+        if isinstance(bs_result, dict) and bs_result.get("studentsCount"):
+            background_tasks.add_task(_upsert_history_bg, orgUnitId, bs_result)
+
         return bs_result
     except HTTPException:
-        # Propaga 401/403/etc. del fallback Brightspace tal cual,
-        # sin disfrazarlos como 500.
         raise
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         _http500(e, "gemelo_course_overview", orgUnitId=orgUnitId)
+
+
+@router.get("/course/{orgUnitId}/metric-history")
+async def gemelo_course_metric_history(
+    orgUnitId: int,
+    days: int = Query(90, ge=1, le=365, description="Número de días de historia a devolver"),
+):
+    """
+    Devuelve los snapshots diarios de tendencias del curso (últimos N días).
+    Usado por el gráfico CourseTrends del dashboard del profesor.
+    Fuente: DB — no llama a Brightspace.
+    """
+    try:
+        history = get_course_metric_history(orgUnitId, days=days)
+        return {
+            "orgUnitId": orgUnitId,
+            "days": days,
+            "count": len(history),
+            "snapshots": history,
+        }
+    except Exception as e:
+        _http500(e, "gemelo_course_metric_history", orgUnitId=orgUnitId)
 
 
 @router.get("/course/{orgUnitId}/ra/dashboard")
@@ -301,120 +352,129 @@ async def gemelo_course_ra_dashboard(
     por estudiante. Retorna promedio (%) y cobertura por RA.
     """
     try:
+        # Chequeo rápido fuera del lock — si hay cache válido lo devolvemos sin bloquear
         now_ts = _time.time()
         cached = _RA_DASHBOARD_CACHE.get(orgUnitId)
         if cached and (now_ts - cached["ts"] < _RA_DASHBOARD_TTL):
-            # Solo usar cache si tiene datos reales (al menos 1 RA con studentsWithData > 0)
             cached_ras = (cached["data"].get("ras") or [])
-            has_real_data = any(r.get("studentsWithData", 0) > 0 for r in cached_ras)
-            if has_real_data:
+            if any(r.get("studentsWithData", 0) > 0 for r in cached_ras):
                 return cached["data"]
-            # Cache vacío/inválido → recalcular
 
-        students_payload = await svc.list_course_students(orgUnitId)
-        items = (
-            students_payload.get("items") or []
-            if isinstance(students_payload, dict)
-            else []
-        )
+        # Adquirir lock por curso para evitar que requests concurrentes
+        # calculen el RA dashboard en paralelo (stampede / CPU duplicado)
+        async with _get_ra_lock(orgUnitId):
+            # Re-chequear dentro del lock: puede que otra coroutine ya calculó
+            now_ts = _time.time()
+            cached = _RA_DASHBOARD_CACHE.get(orgUnitId)
+            if cached and (now_ts - cached["ts"] < _RA_DASHBOARD_TTL):
+                cached_ras = (cached["data"].get("ras") or [])
+                if any(r.get("studentsWithData", 0) > 0 for r in cached_ras):
+                    return cached["data"]
 
-        if not items:
-            return {
-                "orgUnitId": orgUnitId,
-                "totalStudents": 0,
-                "ras": [],
-                "updatedAt": None,
-                "note": "Sin estudiantes en list_course_students()",
-            }
+            students_payload = await svc.list_course_students(orgUnitId)
+            items = (
+                students_payload.get("items") or []
+                if isinstance(students_payload, dict)
+                else []
+            )
 
-        if only_students:
-            items = [
-                s for s in items
-                if _is_student_role(s.get("roleName") or s.get("RoleName"))
-            ]
+            if not items:
+                return {
+                    "orgUnitId": orgUnitId,
+                    "totalStudents": 0,
+                    "ras": [],
+                    "updatedAt": None,
+                    "note": "Sin estudiantes en list_course_students()",
+                }
 
-        if limit:
-            items = items[:limit]
+            if only_students:
+                items = [
+                    s for s in items
+                    if _is_student_role(s.get("roleName") or s.get("RoleName"))
+                ]
 
-        user_ids: List[int] = []
-        for s in items:
-            uid = s.get("userId") or s.get("UserId") or s.get("UserID")
-            if uid is None:
-                continue
-            try:
-                user_ids.append(int(uid))
-            except Exception:
-                continue
+            if limit:
+                items = items[:limit]
 
-        total_students = len(user_ids)
-        if total_students == 0:
-            return {
-                "orgUnitId": orgUnitId,
-                "totalStudents": 0,
-                "ras": [],
-                "updatedAt": None,
-            }
-
-        coros = [svc.build_gemelo(orgUnitId, uid) for uid in user_ids]
-        results = await _gather_with_semaphore(coros, limit=concurrency)
-
-        agg: Dict[str, Dict[str, Any]] = defaultdict(
-            lambda: {"sum": 0.0, "count": 0}
-        )
-        last_updated_at: Optional[str] = None
-
-        for r in results:
-            if isinstance(r, Exception) or not isinstance(r, dict):
-                continue
-
-            try:
-                upd = (
-                    (r.get("summary") or {}).get("updatedAt")
-                    or (r.get("course") or {}).get("updatedAt")
-                )
-                if upd:
-                    last_updated_at = upd
-            except Exception:
-                pass
-
-            macro_units = (r.get("macro") or {}).get("units") or []
-            for u in macro_units:
-                code = u.get("code")
-                pct = u.get("pct")
-                if not code or pct is None:
+            user_ids: List[int] = []
+            for s in items:
+                uid = s.get("userId") or s.get("UserId") or s.get("UserID")
+                if uid is None:
                     continue
                 try:
-                    agg[code]["sum"] += float(pct)
-                    agg[code]["count"] += 1
+                    user_ids.append(int(uid))
                 except Exception:
                     continue
 
-        ras = []
-        for code in sorted(agg.keys()):
-            count = agg[code]["count"]
-            avg = round(agg[code]["sum"] / count, 1) if count else None
-            coverage_pct = (
-                round((count / total_students) * 100.0, 1)
-                if total_students else 0.0
+            total_students = len(user_ids)
+            if total_students == 0:
+                return {
+                    "orgUnitId": orgUnitId,
+                    "totalStudents": 0,
+                    "ras": [],
+                    "updatedAt": None,
+                }
+
+            coros = [svc.build_gemelo(orgUnitId, uid) for uid in user_ids]
+            results = await _gather_with_semaphore(coros, limit=concurrency)
+
+            agg: Dict[str, Dict[str, Any]] = defaultdict(
+                lambda: {"sum": 0.0, "count": 0}
             )
-            ras.append({
-                "code": code,
-                "label": code,
-                "avgPct": avg,
-                "coveragePct": coverage_pct,
-                "studentsWithData": count,
+            last_updated_at: Optional[str] = None
+
+            for r in results:
+                if isinstance(r, Exception) or not isinstance(r, dict):
+                    continue
+
+                try:
+                    upd = (
+                        (r.get("summary") or {}).get("updatedAt")
+                        or (r.get("course") or {}).get("updatedAt")
+                    )
+                    if upd:
+                        last_updated_at = upd
+                except Exception:
+                    pass
+
+                macro_units = (r.get("macro") or {}).get("units") or []
+                for u in macro_units:
+                    code = u.get("code")
+                    pct = u.get("pct")
+                    if not code or pct is None:
+                        continue
+                    try:
+                        agg[code]["sum"] += float(pct)
+                        agg[code]["count"] += 1
+                    except Exception:
+                        continue
+
+            ras = []
+            for code in sorted(agg.keys()):
+                count = agg[code]["count"]
+                avg = round(agg[code]["sum"] / count, 1) if count else None
+                coverage_pct = (
+                    round((count / total_students) * 100.0, 1)
+                    if total_students else 0.0
+                )
+                ras.append({
+                    "code": code,
+                    "label": code,
+                    "avgPct": avg,
+                    "coveragePct": coverage_pct,
+                    "studentsWithData": count,
+                    "totalStudents": total_students,
+                })
+
+            payload = {
+                "orgUnitId": orgUnitId,
                 "totalStudents": total_students,
-            })
+                "updatedAt": last_updated_at,
+                "ras": ras,
+            }
 
-        payload = {
-            "orgUnitId": orgUnitId,
-            "totalStudents": total_students,
-            "updatedAt": last_updated_at,
-            "ras": ras,
-        }
-
-        _RA_DASHBOARD_CACHE[orgUnitId] = {"ts": _time.time(), "data": payload}
-        return payload
+            _RA_DASHBOARD_CACHE[orgUnitId] = {"ts": _time.time(), "data": payload}
+            return payload
 
     except Exception as e:
         _http500(e, "gemelo_course_ra_dashboard", orgUnitId=orgUnitId)
@@ -557,6 +617,267 @@ async def gemelo_learning_outcomes(
         return {"orgUnitId": orgUnitId, "outcomeSets": data}
     except Exception as e:
         _http500(e, "gemelo_learning_outcomes", orgUnitId=orgUnitId)
+
+
+@router.get("/course/{orgUnitId}/grade-items")
+async def gemelo_grade_items(
+    orgUnitId: int,
+    svc: GemeloService = Depends(get_service),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+):
+    """Devuelve grade items + dropbox folders del curso con sus due dates.
+    Lee desde cache DB (sync de JC). Fallback a Brightspace si el cache está vacío,
+    y dispara re-sync en background para la próxima petición."""
+
+    def _build_items_from_db(db_grade_items, db_dropbox_folders):
+        dropbox_by_id: Dict[str, Any] = {}
+        dropbox_by_grade_item: Dict[str, Any] = {}
+        for df in db_dropbox_folders:
+            key = str(df.brightspace_folder_id)
+            dropbox_by_id[key] = df
+            if df.grade_item_id is not None:
+                dropbox_by_grade_item[str(df.grade_item_id)] = df
+
+        items = []
+        seen_dropbox_ids: set = set()
+
+        for gi in db_grade_items:
+            grade_id = gi.brightspace_grade_object_id
+            due_date = gi.due_date
+            end_date = gi.end_date
+            start_date = None
+            linked_dropbox_id = None
+
+            linked_df = None
+            if gi.associated_tool_id in (1, 2000) and gi.associated_tool_item_id is not None:
+                linked_df = dropbox_by_id.get(str(gi.associated_tool_item_id))
+            if not linked_df and grade_id is not None:
+                linked_df = dropbox_by_grade_item.get(str(grade_id))
+
+            if linked_df:
+                seen_dropbox_ids.add(str(linked_df.brightspace_folder_id))
+                if not due_date:
+                    due_date = linked_df.due_date
+                if not end_date:
+                    end_date = linked_df.due_date
+                start_date = linked_df.start_date
+                linked_dropbox_id = linked_df.brightspace_folder_id
+
+            items.append({
+                "id": grade_id,
+                "name": gi.name,
+                "weightPct": gi.weight,
+                "maxPoints": gi.max_points,
+                "startDate": start_date,
+                "dueDate": due_date,
+                "endDate": end_date,
+                "gradeType": gi.grade_type,
+                "categoryId": gi.category_id,
+                "source": "grade_item",
+                "linkedDropboxId": linked_dropbox_id,
+            })
+
+        for df in db_dropbox_folders:
+            if str(df.brightspace_folder_id) in seen_dropbox_ids:
+                continue
+            items.append({
+                "id": df.brightspace_folder_id,
+                "name": df.name,
+                "weightPct": None,
+                "maxPoints": None,
+                "startDate": df.start_date,
+                "dueDate": df.due_date,
+                "endDate": df.end_date or df.due_date,
+                "gradeType": "Dropbox",
+                "categoryId": df.category_id,
+                "source": "dropbox",
+                "linkedDropboxId": df.brightspace_folder_id,
+            })
+
+        return items
+
+    # --- Try DB cache first ---
+    try:
+        db = SessionLocal()
+        try:
+            db_grade_items = db.execute(
+                select(GradeItem).where(GradeItem.org_unit_id == orgUnitId)
+            ).scalars().all()
+            db_dropbox_folders = db.execute(
+                select(DropboxFolder).where(DropboxFolder.org_unit_id == orgUnitId)
+            ).scalars().all()
+        finally:
+            db.close()
+
+        if db_grade_items or db_dropbox_folders:
+            items = _build_items_from_db(db_grade_items, db_dropbox_folders)
+            return {
+                "orgUnitId": orgUnitId,
+                "count": len(items),
+                "gradeItemsCount": len(db_grade_items),
+                "dropboxFoldersCount": len(db_dropbox_folders),
+                "items": items,
+                "source": "cache",
+            }
+    except Exception as db_err:
+        logger.warning("grade-items DB cache miss for %s: %s", orgUnitId, db_err)
+
+    # --- Fallback: live Brightspace ---
+    async def _safe_grade_items():
+        try:
+            raw = await svc.bs.list_grade_items(orgUnitId)
+            if isinstance(raw, dict):
+                return raw.get("Items") or raw.get("items") or []
+            return raw if isinstance(raw, list) else []
+        except Exception:
+            return []
+
+    async def _safe_dropbox_folders():
+        try:
+            raw = await svc.bs.list_dropbox_folders(orgUnitId)
+            if isinstance(raw, dict):
+                return raw.get("Items") or raw.get("items") or []
+            return raw if isinstance(raw, list) else []
+        except Exception:
+            return []
+
+    def _pick_dropbox_due_date(df: dict) -> Optional[str]:
+        if not isinstance(df, dict):
+            return None
+        direct = df.get("DueDate") or df.get("EndDate")
+        if direct:
+            return direct
+        availability = df.get("Availability") or {}
+        if isinstance(availability, dict):
+            for k in ("DueDate", "EndDate", "dueDate", "endDate"):
+                if availability.get(k):
+                    return availability[k]
+        for k in ("RestrictedDueDate", "SubmissionEndDate"):
+            if df.get(k):
+                return df[k]
+        return None
+
+    def _pick_dropbox_start_date(df: dict) -> Optional[str]:
+        if not isinstance(df, dict):
+            return None
+        direct = df.get("StartDate")
+        if direct:
+            return direct
+        availability = df.get("Availability") or {}
+        if isinstance(availability, dict):
+            for k in ("StartDate", "startDate"):
+                if availability.get(k):
+                    return availability[k]
+        return None
+
+    try:
+        grade_items, dropbox_folders = await asyncio.gather(
+            _safe_grade_items(),
+            _safe_dropbox_folders(),
+        )
+
+        dropbox_by_id = {}
+        dropbox_by_grade_item = {}
+        for df in dropbox_folders:
+            if not isinstance(df, dict):
+                continue
+            df_id = df.get("Id") or df.get("Identifier")
+            if df_id is not None:
+                dropbox_by_id[str(df_id)] = df
+            grade_item_id = df.get("GradeItemId")
+            if grade_item_id is not None:
+                dropbox_by_grade_item[str(grade_item_id)] = df
+
+        items = []
+        seen_dropbox_ids = set()
+
+        for it in grade_items:
+            if not isinstance(it, dict):
+                continue
+            grade_id = it.get("Id") or it.get("Identifier")
+            name = it.get("Name")
+            due_date = it.get("DueDate")
+            end_date = it.get("EndDate")
+
+            associated = it.get("AssociatedTool") or {}
+            tool_item_id = associated.get("ToolItemId")
+            tool_id = associated.get("ToolId")
+            linked_dropbox = None
+            if tool_id in (1, 2000) and tool_item_id is not None:
+                linked_dropbox = dropbox_by_id.get(str(tool_item_id))
+            if not linked_dropbox and grade_id is not None:
+                linked_dropbox = dropbox_by_grade_item.get(str(grade_id))
+
+            start_date = None
+            if linked_dropbox:
+                seen_dropbox_ids.add(str(linked_dropbox.get("Id") or ""))
+                df_due = _pick_dropbox_due_date(linked_dropbox)
+                if not due_date:
+                    due_date = df_due
+                if not end_date:
+                    end_date = df_due
+                start_date = _pick_dropbox_start_date(linked_dropbox)
+
+            items.append({
+                "id": grade_id,
+                "name": name,
+                "weightPct": it.get("Weight"),
+                "maxPoints": it.get("MaxPoints"),
+                "startDate": start_date,
+                "dueDate": due_date,
+                "endDate": end_date,
+                "gradeType": it.get("GradeType"),
+                "categoryId": it.get("CategoryId"),
+                "source": "grade_item",
+                "linkedDropboxId": (linked_dropbox or {}).get("Id"),
+            })
+
+        for df in dropbox_folders:
+            if not isinstance(df, dict):
+                continue
+            df_id = df.get("Id") or df.get("Identifier")
+            if str(df_id) in seen_dropbox_ids:
+                continue
+            df_due = _pick_dropbox_due_date(df)
+            df_start = _pick_dropbox_start_date(df)
+            items.append({
+                "id": df_id,
+                "name": df.get("Name"),
+                "weightPct": None,
+                "maxPoints": None,
+                "startDate": df_start,
+                "dueDate": df_due,
+                "endDate": df_due,
+                "gradeType": "Dropbox",
+                "categoryId": df.get("CategoryId"),
+                "source": "dropbox",
+                "linkedDropboxId": df_id,
+            })
+
+        # Trigger background sync so the next request hits the cache
+        async def _bg_sync():
+            try:
+                sync_svc = SyncService(svc.bs)
+                await sync_svc.sync_grade_items(orgUnitId)
+                await sync_svc.sync_dropbox_folders(orgUnitId)
+            except Exception as e:
+                logger.warning("grade-items bg sync failed for %s: %s", orgUnitId, e)
+
+        background_tasks.add_task(_bg_sync)
+
+        return {
+            "orgUnitId": orgUnitId,
+            "count": len(items),
+            "gradeItemsCount": len(grade_items),
+            "dropboxFoldersCount": len(dropbox_folders),
+            "items": items,
+            "source": "live",
+        }
+    except Exception as e:
+        msg = str(e)
+        if "403" in msg or "401" in msg or "404" in msg:
+            return {"orgUnitId": orgUnitId, "count": 0, "items": [], "error": msg[:200]}
+        _http500(e, "gemelo_grade_items", orgUnitId=orgUnitId)
 
 
 @router.get(

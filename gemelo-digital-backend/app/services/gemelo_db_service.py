@@ -1,7 +1,103 @@
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+
 from sqlalchemy import select
 
-from app.db.models import Enrollment, Student, StudentCourseMetricSnapshot
+from app.db.models import CourseMetricHistory, Enrollment, Student, StudentCourseMetricSnapshot
 from app.db.session import SessionLocal
+
+
+def upsert_course_metric_history(orgUnitId: int, overview: Dict[str, Any]) -> None:
+    """
+    Guarda (o actualiza) el snapshot diario de métricas agregadas del curso.
+    Se llama en background tras cada overview exitoso.
+
+    Extrae avgPct, atRiskPct, coveragePct y totalStudents del dict de overview
+    devuelto por build_course_overview o build_course_overview_from_db.
+    """
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    # Extraer métricas del overview (soporta ambas formas del dict)
+    gradebook = overview.get("courseGradebook") or {}
+    avg_pct = gradebook.get("avgCurrentPerformancePct") or overview.get("avgCurrentPerformancePct")
+    coverage_pct = gradebook.get("avgCoveragePct") or overview.get("avgCoveragePct")
+
+    risk_dist = overview.get("globalRiskDistribution") or {}
+    total = overview.get("studentsCount") or 0
+    alto = risk_dist.get("alto", 0)
+    medio = risk_dist.get("medio", 0)
+    at_risk_pct = round((alto + medio) / total * 100, 2) if total > 0 else None
+
+    db = SessionLocal()
+    try:
+        entity = db.execute(
+            select(CourseMetricHistory).where(
+                CourseMetricHistory.org_unit_id == orgUnitId,
+                CourseMetricHistory.snapshot_date == today,
+            )
+        ).scalar_one_or_none()
+
+        now = datetime.utcnow()
+        if entity is None:
+            entity = CourseMetricHistory(
+                org_unit_id=orgUnitId,
+                snapshot_date=today,
+                avg_pct=float(avg_pct) if avg_pct is not None else None,
+                at_risk_pct=at_risk_pct,
+                coverage_pct=float(coverage_pct) if coverage_pct is not None else None,
+                total_students=int(total),
+                created_at=now,
+                updated_at=now,
+            )
+            db.add(entity)
+        else:
+            if avg_pct is not None:
+                entity.avg_pct = float(avg_pct)
+            if at_risk_pct is not None:
+                entity.at_risk_pct = at_risk_pct
+            if coverage_pct is not None:
+                entity.coverage_pct = float(coverage_pct)
+            if total:
+                entity.total_students = int(total)
+            entity.updated_at = now
+
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def get_course_metric_history(orgUnitId: int, days: int = 90) -> List[Dict[str, Any]]:
+    """
+    Devuelve los snapshots diarios de tendencias del curso (últimos N días),
+    ordenados por fecha ascendente.
+    """
+    from datetime import timedelta
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+
+    db = SessionLocal()
+    try:
+        rows = db.execute(
+            select(CourseMetricHistory).where(
+                CourseMetricHistory.org_unit_id == orgUnitId,
+                CourseMetricHistory.snapshot_date >= cutoff,
+            ).order_by(CourseMetricHistory.snapshot_date)
+        ).scalars().all()
+
+        return [
+            {
+                "date": r.snapshot_date,
+                "avgPct": r.avg_pct,
+                "atRiskPct": r.at_risk_pct,
+                "coveragePct": r.coverage_pct,
+                "totalStudents": r.total_students,
+            }
+            for r in rows
+        ]
+    finally:
+        db.close()
 
 
 async def build_course_overview_from_db(orgUnitId: int) -> dict:

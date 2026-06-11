@@ -50,6 +50,12 @@ class GradeItem(Base):
     name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     max_points: Mapped[float | None] = mapped_column(Float, nullable=True)
     weight: Mapped[float | None] = mapped_column(Float, nullable=True)
+    due_date: Mapped[str | None] = mapped_column(Text, nullable=True)
+    end_date: Mapped[str | None] = mapped_column(Text, nullable=True)
+    grade_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    category_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    associated_tool_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    associated_tool_item_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -64,6 +70,11 @@ class DropboxFolder(Base):
     brightspace_folder_id: Mapped[int] = mapped_column(Integer, index=True)
     name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     category: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    due_date: Mapped[str | None] = mapped_column(Text, nullable=True)
+    start_date: Mapped[str | None] = mapped_column(Text, nullable=True)
+    end_date: Mapped[str | None] = mapped_column(Text, nullable=True)
+    grade_item_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    category_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -122,6 +133,24 @@ class SyncError(Base):
     error_message: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     
+class CourseMetricHistory(Base):
+    """Un snapshot diario de métricas agregadas del curso (tendencias)."""
+    __tablename__ = "course_metric_history"
+    __table_args__ = (
+        UniqueConstraint("org_unit_id", "snapshot_date", name="uq_course_metric_history_course_date"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    org_unit_id: Mapped[int] = mapped_column(Integer, index=True)
+    snapshot_date: Mapped[str] = mapped_column(String(10), index=True)  # YYYY-MM-DD
+    avg_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    at_risk_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    coverage_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    total_students: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class StudentCourseMetricSnapshot(Base):
     __tablename__ = "student_course_metric_snapshots"
     __table_args__ = (

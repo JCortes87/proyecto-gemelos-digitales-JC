@@ -12,7 +12,7 @@ de negocio (gradebook, escalas, riesgo).
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Optional
 
 
 #|---------- Limpieza de HTML / normalizacion de texto ----------|
@@ -66,6 +66,59 @@ def _looks_like_not_submitted(comment_html: Any) -> bool:
         "no submission",
     ]
     return any(p in txt for p in patterns)
+
+
+#|---------- Deteccion de columnas "Corte" (agregados de corte evaluativo) ----------|
+
+# Detecta nombres de ítems que son totales de corte (Corte 1/2/3, C1, Primer Corte, etc.)
+# Estos se muestran pero NO se cuentan en promedios ponderados (doble conteo).
+_CORTE_REGEX = re.compile(
+    r"(?:^|\s|_|-)"
+    r"(?:"
+    r"c(?:ohor?te|orte)?\s*(?:n[°º]?\s*)?([123]|i{1,3})"
+    r"|"
+    r"(primer|segund[oa]|tercer)\s+(?:cohor?te|corte)"
+    r"|"
+    r"([123])(?:er|do|ro)?\s+(?:cohor?te|corte)"
+    r")"
+    r"(?:\s|$|:|_|-)",
+    re.IGNORECASE,
+)
+
+
+def _is_corte_item(name: Any) -> bool:
+    """True si el nombre del ítem corresponde a un total de corte evaluativo."""
+    s = _strip_html(name)
+    if not s:
+        return False
+    return bool(_CORTE_REGEX.search(s))
+
+
+def _extract_corte_period(name: Any) -> Optional[int]:
+    """Extrae el número de corte (1, 2, 3) del nombre del ítem. None si no es corte."""
+    s = _strip_html(name)
+    if not s:
+        return None
+    m = _CORTE_REGEX.search(s)
+    if not m:
+        return None
+    g1, g2, g3 = m.group(1), m.group(2), m.group(3)
+    if g1:
+        g1 = g1.lower()
+        if g1 == "i":   return 1
+        if g1 == "ii":  return 2
+        if g1 == "iii": return 3
+        try:   return int(g1)
+        except Exception: return None
+    if g2:
+        g2 = g2.lower()
+        if g2.startswith("primer"):  return 1
+        if g2.startswith("segund"):  return 2
+        if g2.startswith("tercer"):  return 3
+    if g3:
+        try:   return int(g3)
+        except Exception: return None
+    return None
 
 
 def _text_has_no_submission_signal(text: Any) -> bool:

@@ -14,6 +14,7 @@ from app.services.sync_tracking_service import SyncTrackingService
 
 #|------------- Import gemelo service -----------------|
 from app.services.gemelo_service import GemeloService
+from app.services.risk_utils import risk_from_pct
 
 
 class SyncService:
@@ -28,6 +29,13 @@ class SyncService:
     async def sync_classlist(self, orgUnitId: int) -> Dict[str, Any]:
         run_id = self.tracking.start_run("classlist", orgUnitId)
         classlist = await self.bs.list_classlist(orgUnitId)
+
+        # Brightspace puede devolver dict con clave "Items" o lista directa.
+        # Normalizar siempre a lista para evitar iteración sobre claves de dict.
+        if isinstance(classlist, dict):
+            classlist = classlist.get("Items") or classlist.get("items") or []
+        if not isinstance(classlist, list):
+            classlist = []
 
         inserted_students = 0
         updated_students = 0
@@ -240,6 +248,13 @@ class SyncService:
                 name = row.get("Name") or row.get("name")
                 max_points = row.get("MaxPoints") or row.get("maxPoints")
                 weight = row.get("Weight") or row.get("weight")
+                due_date = row.get("DueDate") or row.get("dueDate")
+                end_date = row.get("EndDate") or row.get("endDate")
+                grade_type = row.get("GradeType") or row.get("gradeType")
+                category_id = row.get("CategoryId") or row.get("categoryId")
+                associated = row.get("AssociatedTool") or {}
+                assoc_tool_id = associated.get("ToolId")
+                assoc_tool_item_id = associated.get("ToolItemId")
 
                 entity = db.execute(
                     select(GradeItem).where(
@@ -255,14 +270,29 @@ class SyncService:
                         name=name,
                         max_points=float(max_points) if max_points is not None else None,
                         weight=float(weight) if weight is not None else None,
+                        due_date=str(due_date) if due_date else None,
+                        end_date=str(end_date) if end_date else None,
+                        grade_type=str(grade_type) if grade_type else None,
+                        category_id=int(category_id) if category_id is not None else None,
+                        associated_tool_id=int(assoc_tool_id) if assoc_tool_id is not None else None,
+                        associated_tool_item_id=int(assoc_tool_item_id) if assoc_tool_item_id is not None else None,
                     )
                     db.add(entity)
                     inserted += 1
                 else:
                     changed = False
-                    if name and entity.name != name:
-                        entity.name = name
-                        changed = True
+                    for attr, val in [
+                        ("name", name),
+                        ("due_date", str(due_date) if due_date else None),
+                        ("end_date", str(end_date) if end_date else None),
+                        ("grade_type", str(grade_type) if grade_type else None),
+                        ("category_id", int(category_id) if category_id is not None else None),
+                        ("associated_tool_id", int(assoc_tool_id) if assoc_tool_id is not None else None),
+                        ("associated_tool_item_id", int(assoc_tool_item_id) if assoc_tool_item_id is not None else None),
+                    ]:
+                        if val is not None and getattr(entity, attr) != val:
+                            setattr(entity, attr, val)
+                            changed = True
                     if max_points is not None:
                         mp = float(max_points)
                         if entity.max_points != mp:
@@ -339,6 +369,16 @@ class SyncService:
 
                 name = row.get("Name") or row.get("name")
                 category = row.get("Category") or row.get("category")
+                grade_item_id = row.get("GradeItemId") or row.get("gradeItemId")
+                category_id = row.get("CategoryId") or row.get("categoryId")
+                availability = row.get("Availability") or {}
+                due_date = (
+                    row.get("DueDate") or row.get("EndDate")
+                    or availability.get("DueDate") or availability.get("EndDate")
+                    or row.get("RestrictedDueDate") or row.get("SubmissionEndDate")
+                )
+                start_date = row.get("StartDate") or availability.get("StartDate")
+                end_date = row.get("EndDate") or availability.get("EndDate")
 
                 entity = db.execute(
                     select(DropboxFolder).where(
@@ -353,18 +393,27 @@ class SyncService:
                         brightspace_folder_id=folder_id,
                         name=name,
                         category=str(category) if category is not None else None,
+                        due_date=str(due_date) if due_date else None,
+                        start_date=str(start_date) if start_date else None,
+                        end_date=str(end_date) if end_date else None,
+                        grade_item_id=int(grade_item_id) if grade_item_id is not None else None,
+                        category_id=int(category_id) if category_id is not None else None,
                     )
                     db.add(entity)
                     inserted += 1
                 else:
                     changed = False
-                    if name and entity.name != name:
-                        entity.name = name
-                        changed = True
-                    if category is not None:
-                        cat = str(category)
-                        if entity.category != cat:
-                            entity.category = cat
+                    for attr, val in [
+                        ("name", name),
+                        ("category", str(category) if category is not None else None),
+                        ("due_date", str(due_date) if due_date else None),
+                        ("start_date", str(start_date) if start_date else None),
+                        ("end_date", str(end_date) if end_date else None),
+                        ("grade_item_id", int(grade_item_id) if grade_item_id is not None else None),
+                        ("category_id", int(category_id) if category_id is not None else None),
+                    ]:
+                        if val is not None and getattr(entity, attr) != val:
+                            setattr(entity, attr, val)
                             changed = True
                     if changed:
                         updated += 1
@@ -563,10 +612,7 @@ class SyncService:
                     "overdue_count": int(summary.get("overdueCount") or 0),
                     "pending_submitted_count": int(summary.get("pendingSubmittedCount") or 0),
                     "open_count": int(summary.get("openCount") or 0),
-                    "risk_level": self.gemelo._risk_from_performance(
-                        summary.get("currentPerformancePct"),
-                        {"critical": 50.0, "watch": 70.0},
-                    ),
+                    "risk_level": risk_from_pct(summary.get("currentPerformancePct")),
                     "updated_at": datetime.utcnow(),
                 }
 
