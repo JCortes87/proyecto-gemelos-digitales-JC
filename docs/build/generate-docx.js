@@ -354,30 +354,101 @@ children.push(new Paragraph({ children: [new PageBreak()] }));
 
 // ── 5. REPOSITORIOS ──
 children.push(H1("5. Repositorios del proyecto"));
-children.push(P("Hay 3 repositorios relevantes. Solo el primero recibe pushes."));
+children.push(P("Esta sección es CRÍTICA. Entender qué repo recibe pushes y cuál no, es la diferencia entre operar bien el proyecto o tumbar el trabajo del colaborador. Léala con cuidado."));
 
-children.push(H2("5.1 Repositorio principal (production)"));
+children.push(P("Existen 3 repositorios relevantes en GitHub. Cada uno tiene un propósito distinto. Solo UNO recibe pushes desde este setup."));
+
+children.push(H2("5.1 Repositorio principal (production) — JCortes87"));
+
+children.push(P("Este es el repo que vive el código que se despliega a producción. Cualquier push a la rama main de este repo dispara los workflows de GitHub Actions y deploya automáticamente."));
+
 children.push(table2col([
-  ["URL", "https://github.com/JCortes87/proyecto-gemelos-digitales-JC"],
-  ["Dueño actual", "JCortes87"],
-  ["Branch productiva", "main (cada merge dispara deploy automático)"],
-  ["Branch de trabajo histórica", "sync/upstream-abril-2026"],
+  ["URL completa", "https://github.com/JCortes87/proyecto-gemelos-digitales-JC"],
+  ["URL corta para clonar", "git@github.com:JCortes87/proyecto-gemelos-digitales-JC.git"],
+  ["Dueño actual", "JCortes87 (cuenta personal de GitHub)"],
+  ["Visibilidad", "Privado (solo invitados ven el código)"],
+  ["Branch productiva", "main — cualquier merge a esta branch DISPARA DEPLOY"],
+  ["Branch de trabajo histórica", "sync/upstream-abril-2026 — usada históricamente para integrar cambios"],
+  ["Branches de backup", "backup/pre-merge-jd-junio-10 (estado anterior al merge con JD)"],
+  ["Recibe pushes?", "SÍ — este es el único repo donde pusheamos"],
+  ["CI/CD activo?", "SÍ — workflows en .github/workflows/"],
 ]));
 
-children.push(H2("5.2 Repositorio del colaborador (referencia, solo lectura)"));
+children.push(H3("Estructura interna del repo"));
+children.push(P("Carpetas principales:"));
+children.push(bullet("gemelo-digital-backend/ — código Python del backend (FastAPI)"));
+children.push(bullet("gemelo-digital-frontend/gemelo-frontend/ — código React del frontend"));
+children.push(bullet(".github/workflows/ — workflows de GitHub Actions (CI/CD)"));
+children.push(bullet("docs/ — documentación del proyecto (incluye este documento)"));
+children.push(bullet("frontend_dist/ — build pre-compilado del frontend (legacy, mantenido por JD)"));
+
+children.push(H3("Cómo está configurado el git localmente"));
+children.push(P("En la carpeta local GEMELO-DIGITAL-V2/, git tiene 2 remotes configurados:"));
+children.push(...codeBlock(`origin       https://github.com/JCortes87/proyecto-gemelos-digitales-JC.git (fetch)
+origin       https://github.com/JCortes87/proyecto-gemelos-digitales-JC.git (push)
+colaborador  https://github.com/juandavid639/Proyecto-Gemelos-Digitales.git (fetch)
+colaborador  DISABLED-no-push-to-upstream (push)`));
+children.push(P("Lectura de esto:"));
+children.push(bullet("origin apunta a TU repo. Puedes hacer fetch (descargar) y push (subir) sin restricción."));
+children.push(bullet("colaborador apunta al repo de JD. PUEDES hacer fetch para ver sus cambios, pero el push está literalmente bloqueado con la URL inválida \"DISABLED-no-push-to-upstream\"."));
+children.push(bullet("Cualquier intento de \"git push colaborador <cualquier-cosa>\" falla con error de URL. Imposible empujar por accidente."));
+
+children.push(H2("5.2 Repositorio del colaborador (NO TOCAR)"));
+
+// Warning visual
+children.push(new Paragraph({
+  shading: { fill: "FFE4B5", type: ShadingType.CLEAR },
+  border: { top: { color: "FF8C00", space: 1, style: BorderStyle.SINGLE, size: 12 },
+            bottom: { color: "FF8C00", space: 1, style: BorderStyle.SINGLE, size: 12 },
+            left: { color: "FF8C00", space: 1, style: BorderStyle.SINGLE, size: 12 },
+            right: { color: "FF8C00", space: 1, style: BorderStyle.SINGLE, size: 12 } },
+  spacing: { before: 200, after: 200 },
+  children: [new TextRun({
+    text: "ATENCIÓN: NUNCA empujar código a este repo. Es propiedad de Juan David y solo se usa como referencia para ver su versión histórica.",
+    bold: true,
+    size: 24,
+    color: "8B0000",
+  })],
+}));
+
 children.push(table2col([
   ["URL", "https://github.com/juandavid639/Proyecto-Gemelos-Digitales"],
   ["Dueño", "Juan David"],
-  ["Uso", "Referencia para revisar su versión. NUNCA empujar desde nuestro setup."],
-  ["Push status", "DISABLED-no-push-to-upstream (explícitamente desactivado en git config)"],
+  ["Uso permitido", "SOLO LECTURA. Hacer git fetch para ver sus avances."],
+  ["Uso NO permitido", "git push (bloqueado). git push --force (bloqueado). Cualquier operación de escritura."],
+  ["Cómo está bloqueado", "git remote set-url --push colaborador DISABLED-no-push-to-upstream"],
+  ["Qué pasa si intentas pushear", "Git falla con error de URL antes de contactar a GitHub. NO llega al servidor."],
 ]));
 
-children.push(H2("5.3 Repositorio fork inicial (archivado)"));
+children.push(H3("Por qué este repo está bloqueado"));
+children.push(P("Razones:"));
+children.push(bullet("Juan David es el colaborador original. Es SU código personal."));
+children.push(bullet("Si empujáramos por accidente, contaminaríamos su rama main con código que él no aprobó."));
+children.push(bullet("Aunque GitHub probablemente nos rechazara por permisos insuficientes, el bloqueo local es una protección extra."));
+children.push(bullet("Sigue el principio de \"fail safe\": prevenir el error antes de que ocurra."));
+
+children.push(H3("Cuándo SÍ puedes hacer git fetch colaborador"));
+children.push(P("El fetch desde colaborador es seguro y útil cuando:"));
+children.push(bullet("Quieres ver si JD ha publicado cambios nuevos."));
+children.push(bullet("Quieres comparar su versión vs la tuya."));
+children.push(bullet("Quieres traer alguno de sus avances a tu repo (vía git merge colaborador/main)."));
+children.push(P("El fetch solo descarga datos a tu máquina, no modifica nada del lado de JD."));
+
+children.push(H2("5.3 Repositorio fork inicial (archivado, sin uso)"));
+children.push(P("Repositorio antiguo que se usó como punto de partida. Está archivado y no debe usarse para nada activo. Se mantiene como referencia histórica únicamente."));
 children.push(table2col([
   ["URL", "https://github.com/JCortes87/gemelo-digital-backend-JC"],
-  ["Estado", "Archivado. Era un experimento inicial."],
-  ["Branch histórica", "integracion/manual-controlada"],
+  ["Estado", "Archivado. Sin uso activo."],
+  ["Branch histórica con valor", "integracion/manual-controlada (contiene el WIP previo)"],
+  ["Riesgo de usarlo", "Está desincronizado con el flujo actual. No vale la pena tocarlo."],
 ]));
+
+children.push(H2("5.4 Resumen visual: qué hacer y qué NO hacer con cada repo"));
+children.push(table3col([
+  ["JCortes87/proyecto-gemelos-digitales-JC", "SÍ", "Hacer push, merge, deploy, todo. Este es TU repo principal."],
+  ["juandavid639/Proyecto-Gemelos-Digitales", "NO", "NUNCA pushear. Solo git fetch para ver sus cambios."],
+  ["JCortes87/gemelo-digital-backend-JC", "OBSOLETO", "Ignorar. No hacer nada con él."],
+], ["Repositorio", "¿Tocarlo?", "Detalle"], [3500, 1200, 4660]));
 
 children.push(new Paragraph({ children: [new PageBreak()] }));
 
@@ -549,49 +620,124 @@ children.push(bullet("Conexión psql con la cadena DATABASE_URL (que vive en el 
 children.push(new Paragraph({ children: [new PageBreak()] }));
 
 // ── 9. CI/CD ──
-children.push(H1("9. CI/CD — Despliegue automático"));
+children.push(H1("9. CI/CD — Despliegue automático desde main"));
+children.push(P("Esta sección explica el flujo completo de cómo un cambio en tu computadora termina sirviéndose a los usuarios en producción. Es el corazón operacional del proyecto."));
 
-children.push(H2("9.1 Cómo se dispara el deploy"));
-children.push(P("Cualquier push a main que toque archivos en estos paths:"));
+children.push(H2("9.1 Visión general — el flujo completo en 10 pasos"));
+children.push(P("Cuando haces un cambio y lo quieres en producción, esto es lo que pasa:"));
+children.push(...codeBlock(`1.  Editas código en tu PC (ej. arreglas un bug en backend)
+              ▼
+2.  git add + git commit + git push origin <tu-rama>
+              ▼
+3.  Abres Pull Request en GitHub: <tu-rama> → main
+              ▼
+4.  Revisas los cambios en la pestaña "Files changed" del PR
+              ▼
+5.  Mergeas el PR con el botón verde "Merge pull request"
+              ▼
+6.  GitHub detecta el merge a main y dispara los workflows
+    en .github/workflows/deploy-backend.yml y deploy-frontend.yml
+              ▼
+7.  GitHub Actions levanta máquinas virtuales temporales
+              ▼
+8.  Las máquinas usan OIDC para asumir el rol IAM en AWS
+              ▼
+9.  Backend: build de imagen Docker → push a ECR → update ECS
+    Frontend: npm build → upload a S3 → invalidate CloudFront
+              ▼
+10. Los usuarios ven los cambios en https://gemelo.cesa.edu.co
+    (Backend ~10 min después del merge, Frontend ~3 min)`));
+
+children.push(H2("9.2 Qué archivos disparan qué workflow"));
+children.push(P("GitHub Actions inspecciona los paths de los archivos que cambiaron en cada push a main. Si coinciden con los filtros de algún workflow, lo dispara:"));
 children.push(table2col([
-  ["gemelo-digital-backend/**", "Dispara el workflow del backend"],
-  ["gemelo-digital-frontend/**", "Dispara el workflow del frontend"],
-  [".github/workflows/deploy-*.yml", "Dispara el workflow correspondiente"],
+  ["gemelo-digital-backend/**", "Dispara workflow de backend"],
+  ["gemelo-digital-frontend/**", "Dispara workflow de frontend"],
+  [".github/workflows/deploy-backend.yml", "Dispara workflow de backend (auto-redeploy si cambia el workflow)"],
+  [".github/workflows/deploy-frontend.yml", "Dispara workflow de frontend"],
+  ["docs/**", "NO dispara nada (solo documentación)"],
+  [".gitignore", "NO dispara nada"],
+  ["README.md, CLAUDE.md", "NO dispara nada"],
 ], ["Path que cambia", "Acción"]));
 
-children.push(H2("9.2 Disparar manualmente"));
-children.push(P("Para re-desplegar sin un commit nuevo (ej. tras cambiar variables de entorno en taskdef):"));
-children.push(bullet("Ir a GitHub → repo → Actions."));
-children.push(bullet("Click en \"Deploy backend a ECS\" o \"Deploy frontend a S3 y CloudFront\"."));
-children.push(bullet("Click \"Run workflow\" arriba a la derecha."));
-children.push(bullet("Seleccionar branch (main) y confirmar."));
+children.push(P("Si tu commit toca ambos (backend + frontend), ambos workflows corren EN PARALELO. No se esperan entre sí."));
 
-children.push(H2("9.3 Workflow del backend — pasos"));
-children.push(P("Definido en .github/workflows/deploy-backend.yml:"));
-children.push(bullet("Checkout del código.", 0));
-children.push(bullet("Configurar credenciales AWS vía OIDC (asume el rol GemeloDigitalDeployerRole).", 0));
-children.push(bullet("Login a ECR.", 0));
-children.push(bullet("Build de la imagen Docker desde gemelo-digital-backend/.", 0));
-children.push(bullet("Push a ECR con tags latest y SHA del commit.", 0));
-children.push(bullet("aws ecs update-service --force-new-deployment.", 0));
-children.push(bullet("Espera con aws ecs wait services-stable hasta que el servicio esté saludable.", 0));
+children.push(H2("9.3 Disparar manualmente (workflow_dispatch)"));
+children.push(P("Útil cuando NO hay un commit nuevo pero quieres re-deployar:"));
+children.push(bullet("Tras cambiar una variable de entorno en el taskdef de ECS, para que el container la recoja."));
+children.push(bullet("Tras tocar manualmente un archivo en S3, para refrescar la cache de CloudFront."));
+children.push(bullet("Para confirmar que el deploy funciona sin esperar a hacer un cambio real."));
+
+children.push(P("Pasos:"));
+children.push(bullet("Ir a GitHub → repo → Actions.", 0));
+children.push(bullet("En el panel izquierdo, click en \"Deploy backend a ECS\" o \"Deploy frontend a S3 y CloudFront\".", 0));
+children.push(bullet("Click el botón \"Run workflow\" arriba a la derecha.", 0));
+children.push(bullet("En el dropdown que aparece, seleccionar branch (main).", 0));
+children.push(bullet("Click el botón verde \"Run workflow\".", 0));
+children.push(bullet("El workflow arranca en segundos.", 0));
+
+children.push(H2("9.4 Workflow del backend — pasos detallados"));
+children.push(P("Definido en .github/workflows/deploy-backend.yml. Cada paso con su propósito:"));
+children.push(table2col([
+  ["1. Checkout del código", "Descarga el código del repo al runner temporal de GitHub"],
+  ["2. Configurar credenciales AWS vía OIDC", "GitHub genera un JWT firmado que AWS verifica; AWS devuelve credenciales temporales asumiendo el rol GemeloDigitalDeployerRole. Sin Access Keys."],
+  ["3. Login a Amazon ECR", "Autentica al runner contra el registry para poder hacer push de imágenes"],
+  ["4. Construir, taggear y subir imagen Docker", "docker build desde gemelo-digital-backend/, taggea con :latest y :<sha>, push a ECR. Tarda 2-3 min."],
+  ["5. Forzar redeploy del servicio ECS", "aws ecs update-service --force-new-deployment. ECS arranca un container nuevo y mata el viejo cuando el nuevo esté healthy."],
+  ["6. Esperar a que el servicio quede estable", "aws ecs wait services-stable. Bloquea hasta que ECS confirma el deploy exitoso (puede tardar 5-10 min)."],
+  ["7. Resumen del deploy", "Loguea info para que quede registro en la corrida"],
+]));
 children.push(P("Tiempo total: ~10 minutos."));
+children.push(P("Si falla en algún paso, el workflow se marca como rojo (X) y no afecta producción — el container viejo sigue corriendo."));
 
-children.push(H2("9.4 Workflow del frontend — pasos"));
-children.push(P("Definido en .github/workflows/deploy-frontend.yml:"));
-children.push(bullet("Checkout del código.", 0));
-children.push(bullet("Setup Node.js 20.", 0));
-children.push(bullet("npm ci en gemelo-digital-frontend/gemelo-frontend/.", 0));
-children.push(bullet("npm run build (Vite construye dist/).", 0));
-children.push(bullet("Configurar credenciales AWS vía OIDC.", 0));
-children.push(bullet("aws s3 sync ./dist/ s3://gemelo-frontend-prod --delete.", 0));
-children.push(bullet("aws cloudfront create-invalidation --paths \"/*\".", 0));
+children.push(H2("9.5 Workflow del frontend — pasos detallados"));
+children.push(P("Definido en .github/workflows/deploy-frontend.yml. Cada paso con su propósito:"));
+children.push(table2col([
+  ["1. Checkout del código", "Igual que backend"],
+  ["2. Setup Node.js 20", "Instala Node.js 20 en el runner para tener npm disponible"],
+  ["3. Instalar dependencias", "npm ci instala exactamente lo del package-lock.json (reproducible)"],
+  ["4. Construir la SPA", "npm run build ejecuta Vite y genera la carpeta dist/ con HTML/CSS/JS minificados"],
+  ["5. Configurar credenciales AWS vía OIDC", "Igual que backend"],
+  ["6. Sincronizar dist a S3", "aws s3 sync con --delete sube los archivos nuevos y borra los que ya no existen"],
+  ["7. Invalidar cache de CloudFront", "create-invalidation con paths /* fuerza a CloudFront a re-pedir los archivos a S3 en el próximo request"],
+]));
 children.push(P("Tiempo total: ~2-3 minutos."));
 
-children.push(H2("9.5 Seguridad del CI/CD"));
-children.push(bullet("Sin Access Keys: usa OIDC para credenciales temporales (vencen al terminar el job)."));
-children.push(bullet("Trust scope: solo se aceptan workflows desde JCortes87/proyecto-gemelos-digitales-JC. Cualquier intento desde otro repo es rechazado por AWS."));
-children.push(bullet("Policy mínima: el rol solo tiene los permisos exactos para ECR, ECS, S3 y CloudFront del proyecto. No puede tocar otros recursos."));
+children.push(H2("9.6 Seguridad del CI/CD"));
+children.push(P("El sistema está diseñado para que sea muy difícil que se filtre algo:"));
+children.push(bullet("Sin Access Keys de larga duración: GitHub Actions usa OIDC. Las credenciales temporales que AWS le da vencen automáticamente al terminar el job (no se guardan en ningún lado)."));
+children.push(bullet("Trust scope estricto: el rol GemeloDigitalDeployerRole solo confía en workflows que vienen del repo JCortes87/proyecto-gemelos-digitales-JC. Si alguien intenta usarlo desde otro repo (por error de configuración o por ataque), AWS rechaza."));
+children.push(bullet("Policy mínima: el rol tiene SOLO los permisos exactos para hacer su trabajo. No puede tocar RDS, no puede crear usuarios IAM, no puede acceder a Secrets Manager. Si se filtrara, el daño potencial es limitado."));
+children.push(bullet("Sin secrets en el repo: ningún password, API key o token está en el código. Todo vive en el taskdef de ECS o se obtiene runtime."));
+
+children.push(H2("9.7 Cómo monitorear y diagnosticar deploys"));
+children.push(P("Dónde mirar cuando algo no anda:"));
+
+children.push(H3("Ver el estado de los workflows"));
+children.push(bullet("GitHub → repo → Actions. Verde = OK, Rojo = falló, Amarillo = corriendo."));
+children.push(bullet("Click en una corrida para ver el log de cada paso."));
+children.push(bullet("El log muestra exactamente qué comando se ejecutó, su output y su código de salida."));
+
+children.push(H3("Ver los logs del backend en producción"));
+children.push(bullet("AWS Console → CloudWatch → Log groups → /aws/ecs/default/gemelo-digital-api-cbc4."));
+children.push(bullet("Filtrar por nivel (INFO, WARNING, ERROR) o por timestamp."));
+children.push(bullet("Útil para detectar errores que pasan en runtime pero el container sigue corriendo."));
+
+children.push(H3("Verificar que el deploy llegó"));
+children.push(P("Tres formas de confirmar:"));
+children.push(bullet("ECS Console → service → pestaña \"Implementaciones\". El deploy más reciente debe estar marcado como completado y tener la fecha actual."));
+children.push(bullet("Visitar https://ge-...ecs.us-east-1.on.aws/health — debe responder OK con la timestamp actual."));
+children.push(bullet("Para frontend: visitar https://gemelo.cesa.edu.co en modo incógnito (para evitar caché del browser). Los cambios visuales deben estar visibles."));
+
+children.push(H2("9.8 Qué hacer si el workflow falla"));
+children.push(P("Por orden de probabilidad:"));
+children.push(bullet("Lee el log del paso que falló — generalmente dice exactamente qué pasó."));
+children.push(bullet("Si dice \"AccessDenied\" o similar: revisa la policy IAM. Quizá faltó un permiso para el recurso nuevo que estás tocando."));
+children.push(bullet("Si dice \"Could not assume role\": el OIDC trust policy podría estar mal. Verifica que el repo en la condición coincida exactamente."));
+children.push(bullet("Si falla en \"docker build\": probablemente hay un error en el Dockerfile o falta una dependencia. Reproduce localmente."));
+children.push(bullet("Si falla en \"npm run build\": error de sintaxis o dependencia rota. Corre npm run build localmente para reproducir."));
+children.push(bullet("Si falla en \"aws ecs wait\": el container nuevo no arrancó bien. Mirá CloudWatch Logs del servicio para ver qué error tuvo."));
+children.push(P("En todos los casos: el deploy fallido NO afecta producción. Los containers viejos siguen corriendo. Tomate tu tiempo para diagnosticar."));
 
 children.push(new Paragraph({ children: [new PageBreak()] }));
 
@@ -808,55 +954,164 @@ children.push(P("Cualquier intento de git push colaborador <algo> falla con un e
 children.push(new Paragraph({ children: [new PageBreak()] }));
 
 // ── 15. TRABAJO REALIZADO EN ESTA SESIÓN ──
-children.push(H1("15. Trabajo realizado en la sesión de junio 2026"));
-children.push(P("Listado cronológico de los cambios mayores trabajados en esta sesión, para referencia."));
+children.push(H1("15. Trabajo realizado hasta hoy — sesión completa"));
+children.push(P("Inventario cronológico y detallado de todo lo que se trabajó. Para entender cómo llegamos al estado actual y reconstruir el contexto si alguien necesita continuar."));
 
-children.push(H2("15.1 Integración con repo del colaborador"));
-children.push(bullet("Fetch del repo colaborador para ver su versión más reciente."));
-children.push(bullet("Análisis de las 52+ commits que JD había avanzado: arquitectura nueva del frontend (React Router, Context API), nuevas features (calendar, predictions, alerts, vista estudiante)."));
-children.push(bullet("Merge controlado de colaborador/main al main local."));
-children.push(bullet("Resolución del único conflicto: línea de imports en gemelo_db_service.py (combinar Enrollment + CourseMetricHistory)."));
-children.push(bullet("Limpieza de archivos basura del merge (cf-config-tmp.json, commits.json, etc.)."));
+children.push(H2("15.1 Punto de partida"));
+children.push(P("Al inicio de la sesión, la situación era:"));
+children.push(bullet("Producción ejecutaba la versión del colaborador (Juan David) con sus últimos avances no commiteados a su repo."));
+children.push(bullet("Existían 2 repos: el de JD (juandavid639/Proyecto-Gemelos-Digitales) y un fork antiguo nuestro (JCortes87/gemelo-digital-backend-JC) abandonado."));
+children.push(bullet("No había CI/CD automatizado — JD hacía deploys manuales desde su PC."));
+children.push(bullet("No había documentación consolidada del proyecto."));
+children.push(bullet("Habíamos creado el repo JCortes87/proyecto-gemelos-digitales-JC vacío para empezar a trabajar de cero."));
+
+children.push(H2("15.2 Integración inicial del trabajo histórico"));
+children.push(P("Primera ronda: clonar la versión upstream del colaborador y añadir el trabajo de la capa Postgres que estaba en el fork viejo."));
+children.push(bullet("Clonado del repo de JD como base en una carpeta nueva GEMELO-DIGITAL-V2/."));
+children.push(bullet("Configuración de remotes: origin (nuestro repo) y colaborador (JD, solo fetch)."));
+children.push(bullet("Bloqueo explícito de push a colaborador con git remote set-url --push colaborador DISABLED-no-push-to-upstream."));
+children.push(bullet("Creación de la rama sync/upstream-abril-2026 para trabajo iterativo."));
+children.push(bullet("Integración de la capa Postgres del fork viejo: app/db/ con modelos SQLAlchemy, alembic/ con migraciones, app/services/sync_service.py."));
+children.push(bullet("Eliminación del app/main.py duplicado (vivía en el fork viejo, no se necesitaba)."));
+children.push(bullet("Migración de la sintaxis vieja para que importe correctamente con la nueva arquitectura."));
+
+children.push(H2("15.3 Refresh-token automático en sesiones de usuario"));
+children.push(P("Problema observado: tras dejar el dashboard idle por más de 1 hora, dejaba de cargar datos."));
+children.push(P("Causa raíz: el access_token de Brightspace dura ~1 hora; la cookie de sesión dura 8h. Sin refresh-token automático, las llamadas a Brightspace fallaban con 401 después de la primera hora."));
+children.push(P("Solución implementada:"));
+children.push(bullet("Nuevo módulo app/services/brightspace_auth.py con la función mint_access_token_from_refresh(refresh_token)."));
+children.push(bullet("Nueva función update_session_tokens(sid, new_data) en app/state.py para actualizar la sesión con el token nuevo."));
+children.push(bullet("Modificación de BrightspaceClient._auth_headers_with_refresh() async para detectar tokens próximos a expirar (<5 min) y refrescarlos proactivamente."));
+children.push(bullet("Modificación de _request_json() para usar el path async con refresh proactivo."));
+children.push(bullet("Compatibilidad backwards: el path sincrono _auth_headers() sigue funcionando para BackgroundTasks que capturaron token en momento del request."));
+
+children.push(H2("15.4 Fix de estudiantes \"fantasma\" removidos"));
+children.push(P("Problema observado: estudiantes que se sacaban del curso en Brightspace seguían apareciendo en \"Estudiantes prioritarios\" del dashboard, aunque ya no aparecían en la lista normal."));
+children.push(P("Causa raíz: dos bugs concatenados:"));
+children.push(bullet("sync_classlist creaba/activaba enrollments para estudiantes presentes en la classlist pero NUNCA marcaba como inactivos los que ya no estaban. Quedaban con is_active=True para siempre."));
+children.push(bullet("build_course_overview_from_db leía todos los snapshots del curso sin filtrar por enrollment activo."));
+children.push(P("Solución implementada:"));
+children.push(bullet("sync_classlist ahora acumula los brightspace_user_id vistos durante la sincronización y, al final, busca enrollments activos en DB cuyo user_id NO esté en el set y los marca is_active=False."));
+children.push(bullet("build_course_overview_from_db ahora hace JOIN con enrollments y filtra por is_active=True."));
+children.push(bullet("La background task del overview y el cron del scheduler ahora ejecutan sync_classlist + sync_student_metric_snapshots en orden, manteniendo enrollments al día."));
+children.push(bullet("Se añade el campo deactivated_enrollments al return del sync_classlist para visibilidad."));
+
+children.push(H2("15.5 Endpoints administrativos para scheduler externo"));
+children.push(P("Objetivo: permitir que un sistema externo (típicamente AWS EventBridge) dispare sincronizaciones automáticas cada N minutos sin depender de visitas de usuarios."));
+children.push(P("Implementación:"));
+children.push(bullet("Nuevo módulo app/services/cron_runner.py con run_sync_for_all_courses(refresh_token, org_unit_ids)."));
+children.push(bullet("Nuevo router app/api/admin.py con dos endpoints:"));
+children.push(bullet("POST /admin/sync-cron-all — para el scheduler. Auth via header X-Cron-Secret. Mintea access_token usando refresh_token de servicio.", 1));
+children.push(bullet("GET /admin/show-refresh-token — herramienta UNA-vez para capturar el refresh_token de la cuenta de servicio inicial. Eliminar tras usar.", 1));
+children.push(bullet("Documentación completa en docs/setup-scheduler.md sobre cómo configurar el schedule en AWS EventBridge."));
+children.push(bullet("Variables de entorno nuevas requeridas: BRIGHTSPACE_SERVICE_REFRESH_TOKEN, CRON_SHARED_SECRET."));
+
+children.push(H2("15.6 Refactor del backend — extracción de helpers"));
+children.push(P("Problema: gemelo_service.py tenía 2107 líneas, difícil de mantener y modificar."));
+children.push(P("Solución: extracción de 27 funciones helper a 6 módulos por dominio."));
+children.push(table2col([
+  ["text_utils.py", "Limpieza de HTML, normalización de texto, detección de \"no entregado\""],
+  ["common_utils.py", "Coerción numérica, parsing de datetime, _as_dict"],
+  ["grade_filters.py", "Predicados sobre grade values (_is_graded_value, _is_grade_zero, etc.)"],
+  ["scale_utils.py", "Thresholds, escalas de rúbricas, _get_thresholds, lookups"],
+  ["risk_utils.py", "Roll-up a macrocompetencias, weighted_avg, risk_from_pct"],
+  ["role_utils.py", "Roles, identificación de usuarios, normalización de classlist"],
+]));
+children.push(P("Resultado: gemelo_service.py bajó de 2107 a 1645 líneas (-22%). El código quedó organizado por dominio funcional."));
+
+children.push(H2("15.7 Configuración completa del CI/CD desde cero"));
+children.push(P("Sesión grande dedicada a montar el deploy automático. Pasos en orden:"));
+
+children.push(H3("Paso 1: OIDC Identity Provider en AWS"));
+children.push(bullet("En IAM Console, crear OIDC Identity Provider apuntando a https://token.actions.githubusercontent.com."));
+children.push(bullet("Audience: sts.amazonaws.com."));
+children.push(bullet("Resultado: AWS confía en tokens emitidos por GitHub Actions."));
+
+children.push(H3("Paso 2: IAM Policy con permisos mínimos"));
+children.push(bullet("Crear policy GemeloDigitalDeployerPolicy con permisos exactos para ECR push/pull, ECS update-service, S3 sync, CloudFront invalidate."));
+children.push(bullet("Cada permiso scoped al recurso específico (ej. solo el repo gemelo-backend en ECR, no \"todo ECR\")."));
+
+children.push(H3("Paso 3: IAM Role asumible vía OIDC"));
+children.push(bullet("Crear rol GemeloDigitalDeployerRole."));
+children.push(bullet("Trust policy: confía en el OIDC provider Y solo si el subject del token corresponde al repo JCortes87/proyecto-gemelos-digitales-JC."));
+children.push(bullet("Asociar la policy creada en paso 2."));
+
+children.push(H3("Paso 4: Workflows en el repo"));
+children.push(bullet(".github/workflows/deploy-backend.yml — para deploy de backend."));
+children.push(bullet(".github/workflows/deploy-frontend.yml — para deploy de frontend."));
+children.push(bullet("Ambos disparan en push a main con paths matching."));
+children.push(bullet("Usan aws-actions/configure-aws-credentials@v4 para OIDC."));
+children.push(bullet("Soportan workflow_dispatch para disparar manualmente desde la UI."));
+
+children.push(H3("Paso 5: Primer deploy"));
+children.push(bullet("Merge controlado del trabajo acumulado a main."));
+children.push(bullet("GitHub Actions detecta el merge y arranca workflows."));
+children.push(bullet("Backend: build + push ECR + update ECS — verde en ~10 min."));
+children.push(bullet("Frontend: npm build + sync S3 + invalidate CloudFront — verde en ~3 min."));
+
+children.push(H3("Paso 6: Salvaguardas pre-deploy"));
+children.push(bullet("S3 Versioning activado en bucket gemelo-frontend-prod para poder rollback de archivos individuales."));
+children.push(bullet("Snapshot manual de RDS tomado con nombre pre-deploy-junio-10-2026."));
+children.push(bullet("Branch backup/pre-merge-jd-junio-10 creado y pusheado a GitHub como punto de retorno."));
+
+children.push(H2("15.8 Integración del frontend del colaborador"));
+children.push(P("Tras observar que la producción tenía features que nuestra rama no tenía (calendario, alertas, predicciones, vista estudiante), se decidió integrar el trabajo del colaborador."));
+children.push(P("Pasos:"));
+children.push(bullet("Análisis exhaustivo de los 52+ commits que JD había avanzado desde nuestro fork."));
+children.push(bullet("Confirmación de que JD ya tenía nuestro trabajo backend mergeado (ad96123)."));
+children.push(bullet("Merge controlado: git merge colaborador/main."));
+children.push(bullet("Resolución del único conflicto: línea de imports en gemelo_db_service.py — combinamos Enrollment (nuestro fix) + CourseMetricHistory (de JD)."));
+children.push(bullet("Limpieza de archivos basura del merge: cf-config-tmp.json, cf-dist.json, cf-update.json, commits.json (todos añadidos a .gitignore para que no vuelvan)."));
 children.push(bullet("Push del merge a main."));
+children.push(bullet("GitHub Actions deploya automáticamente la versión integrada."));
+children.push(bullet("Verificación en producción: dashboard carga, login funciona, features nuevas (calendar, alerts, predictions) visibles."));
 
-children.push(H2("15.2 Configuración del CI/CD desde cero"));
-children.push(bullet("Creación del OIDC Identity Provider en AWS IAM para confiar en GitHub Actions."));
-children.push(bullet("Creación del rol GemeloDigitalDeployerRole con permisos exactos (ECR, ECS, S3, CloudFront)."));
-children.push(bullet("Creación de la policy GemeloDigitalDeployerPolicy."));
-children.push(bullet("Creación de los 2 workflows: deploy-backend.yml y deploy-frontend.yml."));
-children.push(bullet("Primer deploy automático ejecutado y verificado en producción."));
+children.push(H2("15.9 Migraciones automáticas con start.sh"));
+children.push(P("Aspecto importante del trabajo de JD que ahora forma parte del proyecto:"));
+children.push(bullet("start.sh corre alembic upgrade head antes de exec uvicorn."));
+children.push(bullet("Dockerfile actualizado para usar CMD [\"./start.sh\"] en vez de uvicorn directo."));
+children.push(bullet("set -e en el script garantiza que si una migración falla, el container no arranca."));
+children.push(bullet("ECS detecta el fallo y mantiene los containers viejos corriendo — protección automática."));
 
-children.push(H2("15.3 Refresh-token en sesiones de usuario"));
-children.push(bullet("Implementación del flujo de refresh-token automático cuando al access_token le quedan <5 min."));
-children.push(bullet("Nuevo módulo brightspace_auth.py con mint_access_token_from_refresh()."));
-children.push(bullet("Nueva función update_session_tokens() en app/state.py."));
-children.push(bullet("Modificación de BrightspaceClient para refresh proactivo."));
+children.push(H2("15.10 Voz TTS — estado actual y plan"));
+children.push(P("Estado actual:"));
+children.push(bullet("Backend: endpoints /speech/tts, /speech/stt, /speech/voices funcionando."));
+children.push(bullet("Backend: ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID, ELEVENLABS_MODEL configurados en taskdef."));
+children.push(bullet("Frontend: utils preservados (src/utils/voice.js, src/utils/speech.js, ~180 líneas)."));
+children.push(bullet("Frontend: las llamadas activas a estos utils fueron removidas por JD en commit 9bb5d6b."));
+children.push(P("Plan para reactivar (pendiente):"));
+children.push(bullet("Identificar el componente del chat estudiante en el frontend nuevo (probable: hook useStudentChat.js o componente de chat IA)."));
+children.push(bullet("Conectar las llamadas a elSpeak/elStop desde ese componente."));
+children.push(bullet("Incluir el fix de no-superposición (AbortController + token monotónico) que habíamos hecho."));
 
-children.push(H2("15.4 Fix de estudiantes \"fantasma\""));
-children.push(bullet("sync_classlist ahora acumula IDs vistos y marca como inactivos los enrollments que ya no están en Brightspace."));
-children.push(bullet("build_course_overview_from_db filtra por is_active=True para excluir estudiantes inactivos."));
-children.push(bullet("Cron y background task del overview ejecutan sync_classlist + sync_student_metric_snapshots."));
+children.push(H2("15.11 Documentación completa"));
+children.push(P("En la fase final de la sesión, se creó documentación consolidada:"));
+children.push(bullet("docs/PROYECTO-GEMELO-DIGITAL-COMPLETO.md — versión Markdown (650 líneas)."));
+children.push(bullet("docs/Gemelo-Digital-Documentacion-Completa.docx — versión Word (este documento)."));
+children.push(bullet("docs/setup-scheduler.md — guía paso-a-paso para configurar el scheduler en AWS EventBridge."));
+children.push(bullet("docs/build/generate-docx.js — script generador del Word, regenerable cuando la información cambie."));
 
-children.push(H2("15.5 Endpoints administrativos para scheduler"));
-children.push(bullet("POST /admin/sync-cron-all — para sync automático disparado por scheduler externo (AWS EventBridge)."));
-children.push(bullet("GET /admin/show-refresh-token — herramienta temporal para capturar refresh_token de cuenta de servicio."));
-children.push(bullet("Nuevo módulo app/services/cron_runner.py."));
-children.push(bullet("Documentación detallada en docs/setup-scheduler.md."));
-
-children.push(H2("15.6 Refactor del backend"));
-children.push(bullet("Extracción de 27 helpers de gemelo_service.py (2107 líneas) a 6 módulos por dominio:"));
-children.push(bullet("text_utils.py — limpieza de HTML, normalización.", 1));
-children.push(bullet("common_utils.py — coerción numérica, datetime, dict.", 1));
-children.push(bullet("grade_filters.py — predicados sobre grade values.", 1));
-children.push(bullet("scale_utils.py — thresholds, escalas, rúbricas.", 1));
-children.push(bullet("risk_utils.py — roll-up a macrocompetencias.", 1));
-children.push(bullet("role_utils.py — roles, identificación, classlist.", 1));
-children.push(bullet("gemelo_service.py bajó de 2107 a 1645 líneas (-22%)."));
-
-children.push(H2("15.7 Documentación"));
-children.push(bullet("Creación de docs/PROYECTO-GEMELO-DIGITAL-COMPLETO.md (650 líneas)."));
-children.push(bullet("Creación de docs/setup-scheduler.md (guía AWS EventBridge)."));
-children.push(bullet("Creación de este documento Word."));
+children.push(H2("15.12 Lista completa de commits relevantes en main"));
+children.push(P("Si quieres rastrear cambios específicos, estos son los SHAs principales:"));
+children.push(table2col([
+  ["8a50f1b", "Documento Word maestro del proyecto"],
+  ["ee7028f", "Documentación maestra Markdown del proyecto"],
+  ["be945ab", "Merge integral con el repo del colaborador"],
+  ["6c4f948", "Merge inicial colaborador → main (con resolución de conflicto)"],
+  ["7f06e27", "Merge a main del fix de estudiantes fantasma"],
+  ["e6830b8", "Fix: estudiantes removidos de Brightspace ya no aparecen en métricas"],
+  ["1fbd9c0", "Guía de configuración del scheduler en AWS"],
+  ["23faffd", "Endpoints para sincronización automática (admin)"],
+  ["b6108c6", "Reescritura de comentarios en lenguaje descriptivo"],
+  ["a6a9edc", "Refactor backend: 27 helpers a 6 módulos"],
+  ["64e9201", "Fix auth: refresh-token automático en sesiones"],
+  ["94a9ae1", "Fix: cargar .env de forma robusta independiente del cwd"],
+  ["7a80b81", "Fix frontend voz: evitar voces superpuestas"],
+  ["1d63a71", "Bump SQLAlchemy a >=2.0.43 (compat Python 3.14)"],
+  ["9356f9a", "Bump psycopg a 3.2.13"],
+  ["1a0a2ce", "chore: añadir .gitignore y destrackar .env"],
+  ["d8a5db0", "Fase 3: integración de capa Postgres"],
+]));
 
 children.push(new Paragraph({ children: [new PageBreak()] }));
 
