@@ -205,6 +205,100 @@ children.push(bullet("Base de datos: PostgreSQL con migraciones automáticas ví
 children.push(bullet("CI/CD: GitHub Actions OIDC desplegando backend y frontend automáticamente al mergear a main."));
 children.push(bullet("Pendiente: reactivar voz TTS ElevenLabs en el chat del asistente (infraestructura intacta, falta cablear en la nueva arquitectura)."));
 
+children.push(H2("1.3 Dónde pararse para trabajar — LEER ANTES DE TOCAR NADA"));
+
+// Big visual warning box
+children.push(new Paragraph({
+  shading: { fill: "FFE4B5", type: ShadingType.CLEAR },
+  border: { top: { color: "FF8C00", space: 1, style: BorderStyle.SINGLE, size: 12 },
+            bottom: { color: "FF8C00", space: 1, style: BorderStyle.SINGLE, size: 12 },
+            left: { color: "FF8C00", space: 1, style: BorderStyle.SINGLE, size: 12 },
+            right: { color: "FF8C00", space: 1, style: BorderStyle.SINGLE, size: 12 } },
+  spacing: { before: 200, after: 200 },
+  children: [new TextRun({
+    text: "Lee esta sección completa antes de hacer cualquier cambio al proyecto. Aclara dónde debes estar parado físicamente en tu PC y en GitHub para no romper nada del trabajo del colaborador.",
+    bold: true,
+    size: 22,
+    color: "8B0000",
+  })],
+}));
+
+children.push(H3("Carpeta de trabajo en tu PC (la única que importa)"));
+children.push(P("Hoy estamos trabajando exclusivamente en esta carpeta:"));
+children.push(...codeBlock(`C:\\Users\\jose.cortesh\\OneDrive - Colegio de Estudios Superiores de Administracion\\Escritorio\\Gemelo digital\\GEMELO-DIGITAL-V2`));
+children.push(P("Características de esta carpeta:"));
+children.push(bullet("Es la única carpeta activa del proyecto. Cualquier cambio que hagas debe ocurrir aquí."));
+children.push(bullet("Está clonada desde tu repo de GitHub (JCortes87/proyecto-gemelos-digitales-JC)."));
+children.push(bullet("Vive dentro de OneDrive, así que se sincroniza automáticamente como respaldo personal."));
+children.push(bullet("Si alguna vez accidentalmente trabajas en otra carpeta, los cambios NO van a producción aunque uses los mismos comandos git."));
+
+children.push(P("Para abrir esta carpeta rápido:"));
+children.push(bullet("Explorador de Windows: copia la ruta de arriba y pégala en la barra de direcciones."));
+children.push(bullet("Terminal PowerShell: cd \"C:\\Users\\jose.cortesh\\...\\GEMELO-DIGITAL-V2\" (usa Tab para autocompletar)."));
+children.push(bullet("VS Code: File → Open Folder y navegar hasta GEMELO-DIGITAL-V2."));
+
+children.push(H3("Carpetas anteriores que NO debes usar"));
+children.push(P("Estas carpetas existen en tu PC pero están obsoletas. NO toques nada en ellas:"));
+children.push(table2col([
+  ["GEMELO-DIGITAL (sin V2)", "Versión vieja del proyecto. Ya no se usa. NO trabajar aquí."],
+  ["repo-juan-reciente", "Carpeta de trabajo histórica. NO trabajar aquí."],
+  ["repo-juan", "Carpeta de trabajo histórica. NO trabajar aquí."],
+  ["backup-backend", "Backup de respaldo histórico. NO trabajar aquí."],
+  ["gemelo definitivo", "Carpeta vieja. NO trabajar aquí."],
+]));
+children.push(P("Aunque estas carpetas tengan archivos del proyecto, cambios hechos en ellas NO llegan a producción y pueden generar confusión. Solo GEMELO-DIGITAL-V2 importa."));
+
+children.push(H3("Repositorio de GitHub donde estamos parados"));
+children.push(P("El repositorio activo es:"));
+children.push(table2col([
+  ["URL completa", "https://github.com/JCortes87/proyecto-gemelos-digitales-JC"],
+  ["Dueño", "JCortes87 (tu cuenta personal de GitHub)"],
+  ["Branch principal (production)", "main"],
+  ["Branch de trabajo", "Puedes crear branches nuevos derivados de main"],
+  ["Recibe pushes desde tu PC?", "SÍ — este es el repo \"origin\" en tu config git"],
+  ["Tiene CI/CD activo?", "SÍ — cada push a main dispara deploy automático"],
+]));
+
+children.push(H3("Repositorio que NUNCA debes tocar"));
+
+// Big red warning box
+children.push(new Paragraph({
+  shading: { fill: "FFCCCC", type: ShadingType.CLEAR },
+  border: { top: { color: "8B0000", space: 1, style: BorderStyle.SINGLE, size: 16 },
+            bottom: { color: "8B0000", space: 1, style: BorderStyle.SINGLE, size: 16 },
+            left: { color: "8B0000", space: 1, style: BorderStyle.SINGLE, size: 16 },
+            right: { color: "8B0000", space: 1, style: BorderStyle.SINGLE, size: 16 } },
+  spacing: { before: 200, after: 200 },
+  children: [new TextRun({
+    text: "ATENCIÓN: NO empujar código al repo de Juan David bajo ninguna circunstancia.",
+    bold: true,
+    size: 24,
+    color: "8B0000",
+  })],
+}));
+
+children.push(table2col([
+  ["URL", "https://github.com/juandavid639/Proyecto-Gemelos-Digitales"],
+  ["Dueño", "Juan David (NO tú)"],
+  ["¿Por qué no tocarlo?", "Es el repo personal del colaborador. Pushear ahí contamina su rama main con código que él no aprobó."],
+  ["¿Cómo está bloqueado?", "El push a colaborador está configurado con URL inválida (DISABLED-no-push-to-upstream). Cualquier intento de push falla automáticamente antes de llegar a GitHub."],
+  ["¿Es seguro hacer git fetch desde aquí?", "SÍ. El fetch solo descarga datos a tu PC, no modifica el repo de él. Útil para ver sus avances."],
+]));
+
+children.push(H3("Resumen visual — antes de tocar nada, verifica"));
+children.push(P("Tres verificaciones rápidas para confirmar que estás en el lugar correcto:"));
+children.push(table3col([
+  ["1. Estoy en GEMELO-DIGITAL-V2", "Mira la barra de ruta de tu explorador o terminal. Debe terminar en \"GEMELO-DIGITAL-V2\".", "Si no, navegar ahí antes de continuar."],
+  ["2. git remote -v muestra origin → JCortes87", "Abre terminal en la carpeta y corre el comando. La línea origin debe apuntar a github.com/JCortes87/proyecto-gemelos-digitales-JC.", "Si apunta a otro repo, estás en la carpeta equivocada."],
+  ["3. colaborador tiene push DISABLED", "El mismo comando git remote -v debe mostrar colaborador (push) DISABLED-no-push-to-upstream.", "Si está habilitado, configurarlo de nuevo para protección."],
+], ["Verificación", "Cómo confirmar", "Si algo falla"], [2200, 4060, 3100]));
+
+children.push(H3("Si por accidente terminas tocando algo del repo de JD"));
+children.push(P("Aunque está bloqueado, si por algún motivo un push se llegara a ejecutar contra el repo de JD:"));
+children.push(bullet("Probablemente fallaría por permisos insuficientes en GitHub (no tienes acceso de escritura)."));
+children.push(bullet("Si llegara a pasar (escenario improbable), notificar a Juan David inmediatamente para revertir."));
+children.push(bullet("El daño es reversible vía git revert en su lado, pero contaminar su historial es un error grave."));
+
 children.push(new Paragraph({ children: [new PageBreak()] }));
 
 // ── 2. QUÉ ES GEMELO DIGITAL ──
