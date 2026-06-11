@@ -44,3 +44,7 @@ cf-config-tmp.json
 cf-dist.json
 cf-update.json
 commits.json
+
+# Build artifacts del generador de documentos
+docs/build/node_modules/
+docs/build/package-lock.json
