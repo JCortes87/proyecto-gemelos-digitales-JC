@@ -1138,9 +1138,162 @@ children.push(bullet("Implementar monitoreo y alertas (CloudWatch Alarms) para e
 children.push(new Paragraph({ children: [new PageBreak()] }));
 
 // ── 17. APÉNDICES ──
-children.push(H1("17. Apéndices"));
+// ── 17. REFERENCIAS RÁPIDAS — TODAS LAS URLs, PATHS Y ARNs ──
+children.push(H1("17. Referencias rápidas — todas las URLs, paths y ARNs"));
+children.push(P("Esta sección consolida en un solo lugar todas las URLs, paths del filesystem, ARNs de AWS, y cualquier identificador relevante. Pensada para tener todo a la mano sin tener que buscar por el documento."));
 
-children.push(H2("17.1 Flujo completo de un request"));
+children.push(H2("17.1 Ubicación del proyecto en tu PC"));
+children.push(P("Carpeta raíz del proyecto local:"));
+children.push(...codeBlock(`C:\\Users\\jose.cortesh\\OneDrive - Colegio de Estudios Superiores de Administracion\\Escritorio\\Gemelo digital\\GEMELO-DIGITAL-V2`));
+children.push(P("Subcarpetas importantes dentro del proyecto:"));
+children.push(table2col([
+  ["Backend (Python)", "GEMELO-DIGITAL-V2\\gemelo-digital-backend\\"],
+  ["Frontend (React)", "GEMELO-DIGITAL-V2\\gemelo-digital-frontend\\gemelo-frontend\\"],
+  ["Workflows GitHub Actions", "GEMELO-DIGITAL-V2\\.github\\workflows\\"],
+  ["Documentación", "GEMELO-DIGITAL-V2\\docs\\"],
+  ["Documento Word maestro", "GEMELO-DIGITAL-V2\\docs\\Gemelo-Digital-Documentacion-Completa.docx"],
+  ["Documento Markdown maestro", "GEMELO-DIGITAL-V2\\docs\\PROYECTO-GEMELO-DIGITAL-COMPLETO.md"],
+  ["Guía del scheduler", "GEMELO-DIGITAL-V2\\docs\\setup-scheduler.md"],
+  ["Migraciones Alembic", "GEMELO-DIGITAL-V2\\gemelo-digital-backend\\alembic\\versions\\"],
+  ["Modelos DB (SQLAlchemy)", "GEMELO-DIGITAL-V2\\gemelo-digital-backend\\app\\db\\models.py"],
+  ["Configuración Docker", "GEMELO-DIGITAL-V2\\gemelo-digital-backend\\Dockerfile"],
+  ["Script de arranque (migraciones)", "GEMELO-DIGITAL-V2\\gemelo-digital-backend\\start.sh"],
+  ["Backup local del .env", "GEMELO-DIGITAL-V2\\gemelo-digital-backend\\.env (NO commiteado, gitignoreado)"],
+]));
+
+children.push(H2("17.2 GitHub — URLs completas"));
+
+children.push(H3("Tu repo (donde está el código de producción)"));
+children.push(table2col([
+  ["Página principal", "https://github.com/JCortes87/proyecto-gemelos-digitales-JC"],
+  ["URL HTTPS para clonar", "https://github.com/JCortes87/proyecto-gemelos-digitales-JC.git"],
+  ["URL SSH para clonar", "git@github.com:JCortes87/proyecto-gemelos-digitales-JC.git"],
+  ["Branch main (production)", "https://github.com/JCortes87/proyecto-gemelos-digitales-JC/tree/main"],
+  ["Branch sync/upstream-abril-2026", "https://github.com/JCortes87/proyecto-gemelos-digitales-JC/tree/sync/upstream-abril-2026"],
+  ["Pestaña Actions (deploys)", "https://github.com/JCortes87/proyecto-gemelos-digitales-JC/actions"],
+  ["Workflow deploy backend", "https://github.com/JCortes87/proyecto-gemelos-digitales-JC/actions/workflows/deploy-backend.yml"],
+  ["Workflow deploy frontend", "https://github.com/JCortes87/proyecto-gemelos-digitales-JC/actions/workflows/deploy-frontend.yml"],
+  ["Pull Requests", "https://github.com/JCortes87/proyecto-gemelos-digitales-JC/pulls"],
+  ["Settings (configuración)", "https://github.com/JCortes87/proyecto-gemelos-digitales-JC/settings"],
+  ["Collaborators (dar acceso a otros)", "https://github.com/JCortes87/proyecto-gemelos-digitales-JC/settings/access"],
+]));
+
+children.push(H3("Documentos importantes en el repo (URLs directas)"));
+children.push(table2col([
+  ["README.md del backend", "https://github.com/JCortes87/proyecto-gemelos-digitales-JC/blob/main/gemelo-digital-backend/README.MD"],
+  ["Documento Word maestro (raw para descargar)", "https://github.com/JCortes87/proyecto-gemelos-digitales-JC/raw/main/docs/Gemelo-Digital-Documentacion-Completa.docx"],
+  ["Documento Markdown maestro (vista)", "https://github.com/JCortes87/proyecto-gemelos-digitales-JC/blob/main/docs/PROYECTO-GEMELO-DIGITAL-COMPLETO.md"],
+  ["Guía del scheduler", "https://github.com/JCortes87/proyecto-gemelos-digitales-JC/blob/main/docs/setup-scheduler.md"],
+  ["Workflow backend YAML", "https://github.com/JCortes87/proyecto-gemelos-digitales-JC/blob/main/.github/workflows/deploy-backend.yml"],
+  ["Workflow frontend YAML", "https://github.com/JCortes87/proyecto-gemelos-digitales-JC/blob/main/.github/workflows/deploy-frontend.yml"],
+]));
+
+children.push(H3("Repo del colaborador (solo referencia, NO empujar)"));
+children.push(table2col([
+  ["Página principal", "https://github.com/juandavid639/Proyecto-Gemelos-Digitales"],
+  ["URL HTTPS para fetch", "https://github.com/juandavid639/Proyecto-Gemelos-Digitales.git"],
+  ["Branch main del colaborador", "https://github.com/juandavid639/Proyecto-Gemelos-Digitales/tree/main"],
+]));
+
+children.push(H3("Repo fork inicial (archivado)"));
+children.push(table2col([
+  ["Página principal", "https://github.com/JCortes87/gemelo-digital-backend-JC"],
+  ["Estado", "Archivado — no usar"],
+]));
+
+children.push(H2("17.3 URLs de producción"));
+children.push(table2col([
+  ["Frontend público (lo que ven usuarios)", "https://gemelo.cesa.edu.co"],
+  ["Backend API directo (para tests)", "https://ge-9d9d0220a8704eeabada1b951f3f2d37.ecs.us-east-1.on.aws"],
+  ["Health check del backend", "https://ge-9d9d0220a8704eeabada1b951f3f2d37.ecs.us-east-1.on.aws/health"],
+  ["Ping DB", "https://ge-9d9d0220a8704eeabada1b951f3f2d37.ecs.us-east-1.on.aws/debug/db"],
+  ["Login Brightspace", "https://ge-9d9d0220a8704eeabada1b951f3f2d37.ecs.us-east-1.on.aws/auth/brightspace/login"],
+  ["JWKS público (para LTI)", "https://ge-9d9d0220a8704eeabada1b951f3f2d37.ecs.us-east-1.on.aws/.well-known/jwks.json"],
+]));
+
+children.push(H2("17.4 AWS Console — URLs directas"));
+children.push(P("Para acceder rápido a cada servicio:"));
+children.push(table2col([
+  ["Login a la cuenta CESA", "https://718624265053.signin.aws.amazon.com/console"],
+  ["ECS — ver clúster default", "https://us-east-1.console.aws.amazon.com/ecs/v2/clusters/default"],
+  ["ECS — servicio gemelo-digital-api", "https://us-east-1.console.aws.amazon.com/ecs/v2/clusters/default/services/gemelo-digital-api"],
+  ["ECR — repositorio gemelo-backend", "https://us-east-1.console.aws.amazon.com/ecr/repositories/private/718624265053/gemelo-backend"],
+  ["RDS — bases de datos", "https://us-east-1.console.aws.amazon.com/rds/home"],
+  ["RDS — instancia gemelo-digital-db", "https://us-east-1.console.aws.amazon.com/rds/home?#database:id=gemelo-digital-db"],
+  ["S3 — bucket gemelo-frontend-prod", "https://us-east-1.console.aws.amazon.com/s3/buckets/gemelo-frontend-prod"],
+  ["CloudFront — todas las distribuciones", "https://us-east-1.console.aws.amazon.com/cloudfront/v4/home"],
+  ["CloudFront — distribución E32WDBCT7SFCRD", "https://us-east-1.console.aws.amazon.com/cloudfront/v4/home#/distributions/E32WDBCT7SFCRD"],
+  ["CloudWatch — log groups", "https://us-east-1.console.aws.amazon.com/cloudwatch/home#logsV2:log-groups"],
+  ["CloudWatch — logs del backend", "https://us-east-1.console.aws.amazon.com/cloudwatch/home#logsV2:log-groups/log-group/$252Faws$252Fecs$252Fdefault$252Fgemelo-digital-api-cbc4"],
+  ["IAM — usuarios", "https://us-east-1.console.aws.amazon.com/iam/home#/users"],
+  ["IAM — roles", "https://us-east-1.console.aws.amazon.com/iam/home#/roles"],
+  ["IAM — rol GemeloDigitalDeployerRole", "https://us-east-1.console.aws.amazon.com/iam/home#/roles/details/GemeloDigitalDeployerRole"],
+  ["IAM — policies", "https://us-east-1.console.aws.amazon.com/iam/home#/policies"],
+  ["IAM — Identity Providers (OIDC)", "https://us-east-1.console.aws.amazon.com/iam/home#/identity_providers"],
+]));
+
+children.push(H2("17.5 Identificadores AWS importantes (ARNs y IDs)"));
+children.push(table2col([
+  ["AWS Account ID", "718624265053"],
+  ["Región principal", "us-east-1 (Virginia)"],
+  ["ECS Cluster name", "default"],
+  ["ECS Service name", "gemelo-digital-api"],
+  ["ECS Task Definition family", "default-gemelo-digital-api"],
+  ["ECR Repository name", "gemelo-backend"],
+  ["ECR Repository URI", "718624265053.dkr.ecr.us-east-1.amazonaws.com/gemelo-backend"],
+  ["RDS Instance ID", "gemelo-digital-db"],
+  ["RDS Endpoint", "gemelo-digital-db.crp1lzwejl3x.us-east-1.rds.amazonaws.com"],
+  ["S3 Bucket name", "gemelo-frontend-prod"],
+  ["CloudFront Distribution ID", "E32WDBCT7SFCRD"],
+  ["CloudFront Domain", "gemelo.cesa.edu.co"],
+  ["IAM Role ARN", "arn:aws:iam::718624265053:role/GemeloDigitalDeployerRole"],
+  ["IAM Policy name", "GemeloDigitalDeployerPolicy"],
+  ["OIDC Provider ARN", "arn:aws:iam::718624265053:oidc-provider/token.actions.githubusercontent.com"],
+  ["CloudWatch Log Group", "/aws/ecs/default/gemelo-digital-api-cbc4"],
+]));
+
+children.push(H2("17.6 Brightspace — URLs y datos"));
+children.push(table2col([
+  ["Brightspace CESA", "https://cesa.brightspace.com"],
+  ["OAuth Auth URL", "https://auth.brightspace.com/oauth2/auth"],
+  ["OAuth Token URL", "https://auth.brightspace.com/core/connect/token"],
+  ["JWKS de Brightspace (para LTI)", "https://cesa.brightspace.com/d2l/.well-known/jwks"],
+  ["LTI Authenticate endpoint", "https://cesa.brightspace.com/d2l/lti/authenticate"],
+]));
+
+children.push(H2("17.7 Comandos git de uso frecuente"));
+children.push(P("Lista de comandos útiles para operar el proyecto:"));
+
+children.push(H3("Sincronizar con tu repo"));
+children.push(code("git pull origin main"));
+children.push(P("Trae los últimos cambios desde tu repo en GitHub."));
+
+children.push(H3("Ver el estado de los remotes"));
+children.push(code("git remote -v"));
+children.push(P("Confirma que origin apunta a tu repo y colaborador está bloqueado."));
+
+children.push(H3("Ver si JD pusheó algo nuevo"));
+children.push(code("git fetch colaborador && git log HEAD..colaborador/main --oneline"));
+children.push(P("Fetch trae los datos sin tocar tu trabajo. Después el log muestra commits que JD tiene y tú no."));
+
+children.push(H3("Ver las últimas corridas de CI/CD"));
+children.push(code("Visitar https://github.com/JCortes87/proyecto-gemelos-digitales-JC/actions"));
+
+children.push(H3("Crear un branch nuevo para trabajar"));
+children.push(code("git checkout -b fix/algun-bug"));
+children.push(P("Crea y se mueve a un branch nuevo derivado del actual."));
+
+children.push(H3("Hacer un commit"));
+children.push(code(`git add <archivos>
+git commit -m "descripcion del cambio"
+git push origin <nombre-del-branch>`));
+
+children.push(new Paragraph({ children: [new PageBreak()] }));
+
+// Renombrar la sección "Apéndices" para que quede como 18
+children.push(H1("18. Apéndices"));
+
+children.push(H2("18.1 Flujo completo de un request"));
 children.push(P("Para entender cómo viaja un request desde el navegador hasta la respuesta:"));
 children.push(...codeBlock(`1. Usuario abre https://gemelo.cesa.edu.co
               ▼
@@ -1179,7 +1332,7 @@ children.push(...codeBlock(`1. Usuario abre https://gemelo.cesa.edu.co
               ▼
 18. Frontend renderiza dashboard`));
 
-children.push(H2("17.2 Glosario de términos"));
+children.push(H2("18.2 Glosario de términos"));
 children.push(table2col([
   ["LTI 1.3", "Learning Tools Interoperability. Estándar para embeber herramientas externas en LMS."],
   ["Brightspace", "LMS desarrollado por D2L, usado por CESA."],
@@ -1196,7 +1349,7 @@ children.push(table2col([
   ["SHA del commit", "Hash único que identifica un commit en git (ej. be945ab)."],
 ]));
 
-children.push(H2("17.3 Lista de archivos importantes en el repo"));
+children.push(H2("18.3 Lista de archivos importantes en el repo"));
 children.push(table2col([
   ["docs/PROYECTO-GEMELO-DIGITAL-COMPLETO.md", "Versión Markdown de este documento"],
   ["docs/setup-scheduler.md", "Guía para configurar el scheduler en AWS"],
