@@ -16,6 +16,14 @@ from app.services.sync_tracking_service import SyncTrackingService
 from app.services.gemelo_service import GemeloService
 from app.services.risk_utils import risk_from_pct
 
+#|------------- Helpers de rol / classlist (mismos que usa la lista de estudiantes) -----------|
+from app.services.role_utils import (
+    _is_student_role,
+    _extract_role_name,
+    _extract_user_id,
+    _as_items_list,
+)
+
 
 class SyncService:
     def __init__(self, bs: BrightspaceClient):
@@ -63,8 +71,6 @@ class SyncService:
                 except Exception:
                     continue
 
-                seen_user_ids.add(brightspace_user_id)
-
                 display_name = (
                     row.get("DisplayName")
                     or row.get("displayName")
@@ -101,6 +107,23 @@ class SyncService:
                         )
                     elif isinstance(role, str):
                         role_name = role
+
+                #|---------- Solo cuentas con rol de estudiante ----------|
+                # La classlist de Brightspace trae instructores, monitores y
+                # cuentas de servicio (ej. "Servicio al estudiante"). No son
+                # alumnos del curso: si los guardamos como enrollment activo,
+                # terminan contados en el overview y colados en "Estudiantes
+                # prioritarios". Aplicamos el mismo criterio que usa la lista
+                # de estudiantes (list_course_students) para que el conteo y
+                # las metricas cuadren con la lista real del curso.
+                #
+                # Importante: como NO los agregamos a seen_user_ids, cualquier
+                # enrollment viejo de un no-estudiante que siguiera activo en
+                # DB queda marcado inactivo en el barrido de mas abajo.
+                if not _is_student_role(role_name or ""):
+                    continue
+
+                seen_user_ids.add(brightspace_user_id)
 
                 student = db.execute(
                     select(Student).where(Student.brightspace_user_id == brightspace_user_id)
@@ -569,17 +592,21 @@ class SyncService:
     async def sync_student_metric_snapshots(self, orgUnitId: int) -> Dict[str, Any]:
         run_id = self.tracking.start_run("student_metric_snapshots", orgUnitId)
 
-        classlist = await self.bs.list_classlist(orgUnitId)
+        classlist = _as_items_list(await self.bs.list_classlist(orgUnitId))
         student_ids = []
 
+        #|---------- Mismo filtro de rol que el resto del sistema ----------|
+        # Solo calculamos snapshots para alumnos reales. Asi no persistimos
+        # metricas de instructores ni de cuentas de servicio que despues
+        # ensuciarian el overview y las tendencias del curso. Es el mismo
+        # criterio que aplica sync_classlist y list_course_students.
         for row in classlist:
-            user_id = row.get("Identifier") or row.get("UserId") or row.get("userId")
+            if not _is_student_role(_extract_role_name(row)):
+                continue
+            user_id = _extract_user_id(row)
             if user_id is None:
                 continue
-            try:
-                student_ids.append(int(user_id))
-            except Exception:
-                continue
+            student_ids.append(user_id)
 
         metrics_by_user = await self.compute_students_gradebook_metrics_for_sync(
             orgUnitId=orgUnitId,
