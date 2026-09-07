@@ -80,8 +80,17 @@ async def _role_name_in_course(
                 continue
             ou = it.get("OrgUnit") or {}
             if str(ou.get("Id")) == str(org_unit_id):
+                # Este endpoint (LP enrollments/users/{uid}/orgUnits) trae el
+                # rol en Role.Name ("Instructor", "Estudiante EF", …); el
+                # ClasslistRoleName de Access viene vacío aquí (solo lo trae
+                # myenrollments). Leer ambos evita bloquear a un profesor real.
+                role_obj = it.get("Role") or {}
                 access = it.get("Access") or {}
-                return access.get("ClasslistRoleName") or ""
+                return (
+                    role_obj.get("Name")
+                    or access.get("ClasslistRoleName")
+                    or ""
+                )
         paging = data.get("PagingInfo") or {}
         if not paging.get("HasMoreItems"):
             break
