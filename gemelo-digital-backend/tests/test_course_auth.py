@@ -41,6 +41,45 @@ def _patch_common(monkeypatch, session, role_name):
     monkeypatch.setattr(ca, "_role_name_in_course", fake_role)
 
 
+class TestRoleNameInCourse:
+    """Parsing real de la respuesta de Brightspace (regresión: el endpoint
+    LP enrollments trae el rol en Role.Name, no en Access.ClasslistRoleName)."""
+
+    async def test_lee_el_rol_desde_Role_Name(self, monkeypatch):
+        async def fake_get(url, headers, params=None):
+            return 200, {
+                "Items": [
+                    {"OrgUnit": {"Id": 45559}, "Role": {"Id": 109, "Name": "Instructor"},
+                     "Access": {"IsActive": True}},  # sin ClasslistRoleName
+                ],
+                "PagingInfo": {"HasMoreItems": False, "Bookmark": "x"},
+            }
+        monkeypatch.setattr(ca, "_bs_get_cached", fake_get)
+        rn = await ca._role_name_in_course({}, "412", 45559)
+        assert rn == "Instructor"
+        assert ca.classify_role_name(rn) == "instructor"
+
+    async def test_fallback_a_ClasslistRoleName(self, monkeypatch):
+        async def fake_get(url, headers, params=None):
+            return 200, {
+                "Items": [
+                    {"OrgUnit": {"Id": 77}, "Access": {"ClasslistRoleName": "Estudiante EF"}},
+                ],
+                "PagingInfo": {"HasMoreItems": False},
+            }
+        monkeypatch.setattr(ca, "_bs_get_cached", fake_get)
+        rn = await ca._role_name_in_course({}, "1", 77)
+        assert ca.classify_role_name(rn) == "student"
+
+    async def test_no_matriculado_devuelve_None(self, monkeypatch):
+        async def fake_get(url, headers, params=None):
+            return 200, {"Items": [{"OrgUnit": {"Id": 999}, "Role": {"Name": "Instructor"}}],
+                         "PagingInfo": {"HasMoreItems": False}}
+        monkeypatch.setattr(ca, "_bs_get_cached", fake_get)
+        rn = await ca._role_name_in_course({}, "1", 45559)
+        assert rn is None
+
+
 class TestRequireCourseStaff:
     async def test_instructor_del_curso_pasa(self, monkeypatch):
         _patch_common(monkeypatch, {"user_id": "42"}, "Instructor")
