@@ -1,17 +1,17 @@
-import{s as e,t}from"./colors-DlQPfOde.js";function n(n){let r=e(n);return r===`alto`?t.critical:r===`medio`?t.watch:r===`bajo`?t.ok:t.pending}function r(e){if(e==null)return``;let t=String(e);return/[",\n\r]/.test(t)?`"${t.replace(/"/g,`""`)}"`:t}function i(e,t){let n=URL.createObjectURL(e),r=document.createElement(`a`);r.href=n,r.download=t,document.body.appendChild(r),r.click(),document.body.removeChild(r),setTimeout(()=>URL.revokeObjectURL(n),100)}function a(e,t,n){let a=`﻿`+[(t||[]).map(r).join(`,`),...(n||[]).map(e=>(e||[]).map(r).join(`,`))].join(`\r
-`);i(new Blob([a],{type:`text/csv;charset=utf-8`}),e)}const o=[{key:`userId`,label:`ID`,value:e=>e.userId},{key:`displayName`,label:`Nombre`,value:e=>e.displayName},{key:`email`,label:`Email`,value:e=>e.email||``},{key:`grade10`,label:`Nota (0-10)`,value:e=>e.currentPerformancePct==null?``:(e.currentPerformancePct/10).toFixed(1)},{key:`coveragePct`,label:`Cobertura %`,value:e=>e.coveragePct==null?``:e.coveragePct.toFixed(1)},{key:`risk`,label:`Riesgo`,value:e=>e.risk||``},{key:`route`,label:`Ruta`,value:e=>e.route?.title||``},{key:`criticalMacro`,label:`RA crítico`,value:e=>e.mostCriticalMacro?.code||``},{key:`pendingPct`,label:`Pendientes %`,value:e=>e.pendingSubmittedWeightPct==null?``:e.pendingSubmittedWeightPct.toFixed(1)},{key:`overduePct`,label:`Vencidos %`,value:e=>e.notSubmittedWeightPct==null?e.overdueWeightPct==null?``:e.overdueWeightPct.toFixed(1):e.notSubmittedWeightPct.toFixed(1)}];function s(e,t,n={}){let a=Array.isArray(e)?e:[],{columns:s,filterDescription:c}=n||{},l=Array.isArray(s)&&s.length?s.map(e=>o.find(t=>t.key===e)).filter(Boolean):o,u=[l.map(e=>e.label).map(r).join(`,`)];for(let e of a)u.push(l.map(t=>t.value(e)).map(r).join(`,`));let d=`﻿`+u.join(`\r
-`),f=new Blob([d],{type:`text/csv;charset=utf-8`}),p=new Date().toISOString().slice(0,10);i(f,`gemelo_${String(t?.Name||`curso`).replace(/[^\w]+/g,`_`).slice(0,40)}${c?`_${String(c).replace(/[^\w]+/g,`_`).slice(0,30)}`:``}_${p}.csv`)}function c(t,r,i){let a=Array.isArray(t)?t:[],o=new Date().toLocaleString(`es-CO`),s=r?.Name||`Curso`,c=a.length,l=i?.courseGradebook?.avgCurrentPerformancePct,u=i?.courseGradebook?.avgCoveragePct,f={alto:0,medio:0,bajo:0,pending:0};for(let t of a)f[e(t.currentPerformancePct)]++;let p=a.map(e=>{let t=e.currentPerformancePct==null?`—`:(e.currentPerformancePct/10).toFixed(1),r=e.coveragePct==null?`—`:e.coveragePct.toFixed(1)+`%`,i=e.risk||`—`,a=n(e.currentPerformancePct);return`<tr>
+import{c as e,t}from"./colors-DkAJyhwZ.js";function n(n){let r=e(n);return r===`alto`?t.critical:r===`medio`?t.watch:r===`bajo`?t.ok:t.pending}var r=/^[=+\-@\t\r]/,i=/^-\d+(?:[.,]\d+)?%?$/;function a(e){return typeof e==`string`&&r.test(e)&&!i.test(e)?`'${e}`:e}function o(e){if(e==null)return``;let t=String(a(e));return/[",\n\r]/.test(t)?`"${t.replace(/"/g,`""`)}"`:t}function s(e,t){let n=URL.createObjectURL(e),r=document.createElement(`a`);r.href=n,r.download=t,document.body.appendChild(r),r.click(),document.body.removeChild(r),setTimeout(()=>URL.revokeObjectURL(n),100)}function c(e,t,n){let r=`﻿`+[(t||[]).map(o).join(`,`),...(n||[]).map(e=>(e||[]).map(o).join(`,`))].join(`\r
+`);s(new Blob([r],{type:`text/csv;charset=utf-8`}),e)}var l=[{key:`userId`,label:`ID`,value:e=>e.userId},{key:`displayName`,label:`Nombre`,value:e=>e.displayName},{key:`email`,label:`Email`,value:e=>e.email||``},{key:`grade10`,label:`Nota (0-10)`,value:e=>e.currentPerformancePct==null?``:(e.currentPerformancePct/10).toFixed(1)},{key:`coveragePct`,label:`Cobertura %`,value:e=>e.coveragePct==null?``:e.coveragePct.toFixed(1)},{key:`risk`,label:`Riesgo`,value:e=>e.risk||``},{key:`route`,label:`Ruta`,value:e=>e.route?.title||``},{key:`criticalMacro`,label:`RA crítico`,value:e=>e.mostCriticalMacro?.code||``},{key:`pendingPct`,label:`Pendientes %`,value:e=>e.pendingSubmittedWeightPct==null?``:e.pendingSubmittedWeightPct.toFixed(1)},{key:`overduePct`,label:`Vencidos %`,value:e=>e.notSubmittedWeightPct==null?e.overdueWeightPct==null?``:e.overdueWeightPct.toFixed(1):e.notSubmittedWeightPct.toFixed(1)}];function u(e,t,n={}){let r=Array.isArray(e)?e:[],{columns:i,filterDescription:a}=n||{},c=Array.isArray(i)&&i.length?i.map(e=>l.find(t=>t.key===e)).filter(Boolean):l,u=[c.map(e=>e.label).map(o).join(`,`)];for(let e of r)u.push(c.map(t=>t.value(e)).map(o).join(`,`));let d=`﻿`+u.join(`\r
+`),f=new Blob([d],{type:`text/csv;charset=utf-8`}),p=new Date().toISOString().slice(0,10);s(f,`gemelo_${String(t?.Name||`curso`).replace(/[^\w]+/g,`_`).slice(0,40)}${a?`_${String(a).replace(/[^\w]+/g,`_`).slice(0,30)}`:``}_${p}.csv`)}function d(t,r,i){let a=Array.isArray(t)?t:[],o=new Date().toLocaleString(`es-CO`),s=r?.Name||`Curso`,c=a.length,l=i?.courseGradebook?.avgCurrentPerformancePct,u=i?.courseGradebook?.avgCoveragePct,d={alto:0,medio:0,bajo:0,pending:0};for(let t of a)d[e(t.currentPerformancePct)]++;let f=a.map(e=>{let t=e.currentPerformancePct==null?`—`:(e.currentPerformancePct/10).toFixed(1),r=e.coveragePct==null?`—`:e.coveragePct.toFixed(1)+`%`,i=e.risk||`—`,a=n(e.currentPerformancePct);return`<tr>
       <td style="font-family:monospace;color:#5A6580">${e.userId}</td>
-      <td>${d(e.displayName||``)}</td>
+      <td>${m(e.displayName||``)}</td>
       <td style="text-align:right;font-weight:900;color:${a}">${t}</td>
       <td style="text-align:right">${r}</td>
       <td style="text-align:center;text-transform:uppercase;font-size:10px;font-weight:800">${i}</td>
-      <td style="font-size:11px;color:#5A6580">${d(e.route?.title||``)}</td>
-    </tr>`}).join(``),m=`<!DOCTYPE html>
+      <td style="font-size:11px;color:#5A6580">${m(e.route?.title||``)}</td>
+    </tr>`}).join(``),p=`<!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<title>Reporte ${d(s)}</title>
+<title>Reporte ${m(s)}</title>
 <style>
   * { box-sizing: border-box; }
   body { font-family: -apple-system, Segoe UI, Manrope, sans-serif; padding: 30px 40px; color: #0F1827; max-width: 1100px; margin: 0 auto; }
@@ -40,8 +40,8 @@ import{s as e,t}from"./colors-DlQPfOde.js";function n(n){let r=e(n);return r===`
 </style>
 </head>
 <body>
-  <h1>G.D · Reporte de Curso</h1>
-  <div class="sub">${d(s)} · Generado ${d(o)}</div>
+  <h1>Visor de desempeño estudiantil · Reporte de Curso</h1>
+  <div class="sub">${m(s)} · Generado ${m(o)}</div>
 
   <div class="stats">
     <div class="stat">
@@ -61,19 +61,19 @@ import{s as e,t}from"./colors-DlQPfOde.js";function n(n){let r=e(n);return r===`
   <div class="risk-grid">
     <div class="risk-item risk-alto">
       <div style="font-size:10px;font-weight:700;text-transform:uppercase">Alto</div>
-      <div style="font-size:22px;font-weight:900">${f.alto}</div>
+      <div style="font-size:22px;font-weight:900">${d.alto}</div>
     </div>
     <div class="risk-item risk-medio">
       <div style="font-size:10px;font-weight:700;text-transform:uppercase">Medio</div>
-      <div style="font-size:22px;font-weight:900">${f.medio}</div>
+      <div style="font-size:22px;font-weight:900">${d.medio}</div>
     </div>
     <div class="risk-item risk-bajo">
       <div style="font-size:10px;font-weight:700;text-transform:uppercase">Bajo</div>
-      <div style="font-size:22px;font-weight:900">${f.bajo}</div>
+      <div style="font-size:22px;font-weight:900">${d.bajo}</div>
     </div>
     <div class="risk-item risk-pending">
       <div style="font-size:10px;font-weight:700;text-transform:uppercase">Sin datos</div>
-      <div style="font-size:22px;font-weight:900">${f.pending}</div>
+      <div style="font-size:22px;font-weight:900">${d.pending}</div>
     </div>
   </div>
 
@@ -83,11 +83,11 @@ import{s as e,t}from"./colors-DlQPfOde.js";function n(n){let r=e(n);return r===`
         <th>ID</th><th>Nombre</th><th style="text-align:right">Nota</th><th style="text-align:right">Cobertura</th><th style="text-align:center">Riesgo</th><th>Ruta</th>
       </tr>
     </thead>
-    <tbody>${p}</tbody>
+    <tbody>${f}</tbody>
   </table>
 
   <div class="footer">
-    CESA · G.D 2026.7.10 · Reporte generado automáticamente
+    CESA · Visor de desempeño estudiantil 2026.8.7 · Reporte generado automáticamente
   </div>
 
   <script>
@@ -95,11 +95,11 @@ import{s as e,t}from"./colors-DlQPfOde.js";function n(n){let r=e(n);return r===`
     setTimeout(() => { window.print(); }, 400);
   <\/script>
 </body>
-</html>`,h=window.open(``,`_blank`);if(!h){console.warn(`No se pudo abrir la ventana de reporte. Revisa tu bloqueador de pop-ups.`);return}h.document.write(m),h.document.close()}function l(e){if(!e)return`#5A6580`;let t=String(e).toLowerCase().normalize(`NFD`).replace(/[\u0300-\u036f]/g,``);return t.includes(`avanz`)||t.includes(`excelent`)||t.includes(`superior`)||t.includes(`logrado`)?`#16a34a`:t.includes(`interm`)||t.includes(`satisf`)||t.includes(`aceptable`)||t.includes(`proficien`)?`#0B5FFF`:t.includes(`basi`)||t.includes(`elemental`)||t.includes(`suficiente`)||t.includes(`developing`)?`#d97706`:t.includes(`inicial`)||t.includes(`no cumple`)||t.includes(`deficiente`)||t.includes(`insuficiente`)||t.includes(`beginning`)?`#B42318`:`#5A6580`}function u({feedback:e={},evidenceName:t=``,studentName:n=``,studentId:r=``,courseInfo:i=null,downloadUrl:a=``}){let o=new Date().toLocaleDateString(`es-CO`,{year:`numeric`,month:`long`,day:`numeric`}),s=e.submittedAt?new Date(e.submittedAt).toLocaleDateString(`es-CO`,{year:`numeric`,month:`long`,day:`numeric`}):null,c=i?.Name||`Curso`,u=i?.Code||``,f=Array.isArray(e.rubrics)?e.rubrics:[],p=e.score,m=e.outOf;if((p==null||m==null||!(m>0))&&f.length)for(let e of f){let t=e?.score,n=e?.outOf;if(t!=null&&n!=null&&n>0){p=t,m=n;break}}let h=p!=null&&m!=null&&m>0?(p/m*10).toFixed(1):null,g=p!=null&&m!=null&&m>0?Math.min(100,p/m*100):null,_=`#5A6580`;g!=null&&(_=g>=80?`#16a34a`:g>=60?`#0B5FFF`:g>=40?`#d97706`:`#B42318`);let v=e.feedbackText||``,y=e.assignmentInstructions||``,b=e.submissionComment||``,x=Array.isArray(e.files)?e.files:[],S=f,C=`${window.location.origin}/cesa-logo-white.png`,w=S.map(e=>{let t=e.score!=null&&e.outOf!=null&&e.outOf>0?Math.min(100,e.score/e.outOf*100):null;l(e.level);let n=(Array.isArray(e.criteria)?e.criteria:[]).map(e=>{let t=l(e.level);return`
+</html>`,h=window.open(``,`_blank`);if(!h){console.warn(`No se pudo abrir la ventana de reporte. Revisa tu bloqueador de pop-ups.`);return}h.document.write(p),h.document.close()}function f(e){if(!e)return`#5A6580`;let t=String(e).toLowerCase().normalize(`NFD`).replace(/[\u0300-\u036f]/g,``);return t.includes(`avanz`)||t.includes(`excelent`)||t.includes(`superior`)||t.includes(`logrado`)?`#16a34a`:t.includes(`interm`)||t.includes(`satisf`)||t.includes(`aceptable`)||t.includes(`proficien`)?`#0B5FFF`:t.includes(`basi`)||t.includes(`elemental`)||t.includes(`suficiente`)||t.includes(`developing`)?`#d97706`:t.includes(`inicial`)||t.includes(`no cumple`)||t.includes(`deficiente`)||t.includes(`insuficiente`)||t.includes(`beginning`)?`#B42318`:`#5A6580`}function p({feedback:e={},evidenceName:t=``,studentName:n=``,studentId:r=``,courseInfo:i=null,downloadUrl:a=``}){let o=new Date().toLocaleDateString(`es-CO`,{year:`numeric`,month:`long`,day:`numeric`}),s=e.submittedAt?new Date(e.submittedAt).toLocaleDateString(`es-CO`,{year:`numeric`,month:`long`,day:`numeric`}):null,c=i?.Name||`Curso`,l=i?.Code||``,u=Array.isArray(e.rubrics)?e.rubrics:[],d=e.score,p=e.outOf;if((d==null||p==null||!(p>0))&&u.length)for(let e of u){let t=e?.score,n=e?.outOf;if(t!=null&&n!=null&&n>0){d=t,p=n;break}}let h=d!=null&&p!=null&&p>0?(d/p*10).toFixed(1):null,g=d!=null&&p!=null&&p>0?Math.min(100,d/p*100):null,_=`#5A6580`;g!=null&&(_=g>=80?`#16a34a`:g>=60?`#0B5FFF`:g>=40?`#d97706`:`#B42318`);let v=e.feedbackText||``,y=e.assignmentInstructions||``,b=e.submissionComment||``,x=Array.isArray(e.files)?e.files:[],S=u,C=`${window.location.origin}/cesa-logo-white.png`,w=S.map(e=>{let t=e.score!=null&&e.outOf!=null&&e.outOf>0?Math.min(100,e.score/e.outOf*100):null,n=(Array.isArray(e.criteria)?e.criteria:[]).map(e=>{let t=f(e.level);return`
         <tr>
-          <td style="padding:8px 10px;border-bottom:1px solid #E4E8EF;font-size:11px;font-weight:700;color:#0F1827;width:35%;border-left:3px solid ${t}">${d(e.name||``)}</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #E4E8EF;font-size:11px;font-weight:700;color:#0F1827;width:35%;border-left:3px solid ${t}">${m(e.name||``)}</td>
           <td style="padding:8px 10px;border-bottom:1px solid #E4E8EF;text-align:center;width:18%">
-            ${e.level?`<span style="font-size:9px;font-weight:800;padding:2px 8px;border-radius:99px;background:${t}22;color:${t};border:1px solid ${t}55;text-transform:uppercase">${d(e.level)}</span>`:`—`}
+            ${e.level?`<span style="font-size:9px;font-weight:800;padding:2px 8px;border-radius:99px;background:${t}22;color:${t};border:1px solid ${t}55;text-transform:uppercase">${m(e.level)}</span>`:`—`}
           </td>
           <td style="padding:8px 10px;border-bottom:1px solid #E4E8EF;text-align:right;font-family:ui-monospace,monospace;font-size:13px;font-weight:900;color:${t};width:8%">${e.points==null?`—`:e.points}</td>
           <td style="padding:8px 10px;border-bottom:1px solid #E4E8EF;font-size:10px;color:#5A6580;line-height:1.4">${e.levelDescription||e.comment?`${e.levelDescription?`<div style="color:#0F1827">${e.levelDescription}</div>`:``}${e.comment?`<div style="margin-top:${e.levelDescription?`4px`:`0`};color:#5A6580">${e.comment}</div>`:``}`:`<span style="color:#B0B7C3;font-style:italic">Sin comentario</span>`}</td>
@@ -109,12 +109,12 @@ import{s as e,t}from"./colors-DlQPfOde.js";function n(n){let r=e(n);return r===`
         <div style="padding:10px 14px;background:linear-gradient(135deg, #0B2D5C 0%, #0B5FFF 100%);color:#fff;display:flex;align-items:center;gap:12px">
           <div style="flex:1">
             <div style="font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;opacity:0.85">📋 Rúbrica utilizada</div>
-            <div style="font-size:14px;font-weight:800;margin-top:2px">${d(e.name||`Sin nombre`)}</div>
+            <div style="font-size:14px;font-weight:800;margin-top:2px">${m(e.name||`Sin nombre`)}</div>
           </div>
           ${e.score==null?``:`
             <div style="text-align:right">
               <div style="font-family:ui-monospace,monospace;font-size:18px;font-weight:900">${e.score}${e.outOf==null?``:`<span style="font-size:11px;opacity:0.75;font-weight:600"> / ${e.outOf}</span>`}</div>
-              ${e.level?`<div style="font-size:9px;font-weight:800;margin-top:3px;padding:2px 8px;border-radius:99px;background:rgba(255,255,255,0.18);display:inline-block;text-transform:uppercase">${d(e.level)}</div>`:``}
+              ${e.level?`<div style="font-size:9px;font-weight:800;margin-top:3px;padding:2px 8px;border-radius:99px;background:rgba(255,255,255,0.18);display:inline-block;text-transform:uppercase">${m(e.level)}</div>`:``}
               ${t==null?``:`<div style="height:3px;background:rgba(255,255,255,0.25);border-radius:99px;overflow:hidden;margin-top:5px;width:80px;margin-left:auto"><div style="height:100%;width:${t}%;background:#fff;border-radius:99px"></div></div>`}
             </div>`}
         </div>
@@ -135,14 +135,14 @@ import{s as e,t}from"./colors-DlQPfOde.js";function n(n){let r=e(n);return r===`
     <div class="section" style="margin-top:18px">
       <div class="section-title">📎 Archivos adjuntos del docente (${x.length})</div>
       <ul style="margin:6px 0 0;padding-left:18px;font-size:11px;color:#0F1827;line-height:1.6">
-        ${x.map(e=>`<li>${d(e.FileName||e.Name||`Archivo`)}</li>`).join(``)}
+        ${x.map(e=>`<li>${m(e.FileName||e.Name||`Archivo`)}</li>`).join(``)}
       </ul>
     </div>
   `:``,E=`<!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<title>Retroalimentación · ${d(n)} · ${d(t)}</title>
+<title>Retroalimentación · ${m(n)} · ${m(t)}</title>
 <style>
   * { box-sizing: border-box; }
   body {
@@ -262,8 +262,8 @@ import{s as e,t}from"./colors-DlQPfOde.js";function n(n){let r=e(n);return r===`
     <img src="${C}" alt="CESA" onerror="this.style.display='none'" />
     <div class="h-text">
       <div class="h-title">Colegio de Estudios Superiores de Administración</div>
-      <div class="h-sub">G.D · Reporte de Retroalimentación</div>
-      <div class="h-meta">Generado el ${d(o)}</div>
+      <div class="h-sub">Visor de desempeño estudiantil · Reporte de Retroalimentación</div>
+      <div class="h-meta">Generado el ${m(o)}</div>
     </div>
   </div>
 
@@ -272,19 +272,19 @@ import{s as e,t}from"./colors-DlQPfOde.js";function n(n){let r=e(n);return r===`
     <div class="info-grid">
       <div class="info-card">
         <div class="info-label">Estudiante</div>
-        <div class="info-value">${d(n||`—`)}</div>
-        ${r?`<div style="font-size:10px;color:#5A6580;margin-top:2px;font-family:ui-monospace,monospace">ID ${d(String(r))}</div>`:``}
+        <div class="info-value">${m(n||`—`)}</div>
+        ${r?`<div style="font-size:10px;color:#5A6580;margin-top:2px;font-family:ui-monospace,monospace">ID ${m(String(r))}</div>`:``}
       </div>
       <div class="info-card">
         <div class="info-label">Curso</div>
-        <div class="info-value">${d(c)}</div>
-        ${u?`<div style="font-size:10px;color:#5A6580;margin-top:2px">${d(u)}</div>`:``}
+        <div class="info-value">${m(c)}</div>
+        ${l?`<div style="font-size:10px;color:#5A6580;margin-top:2px">${m(l)}</div>`:``}
       </div>
       <div class="info-card" style="grid-column:1/-1;display:flex;align-items:center;gap:12px">
         <div style="flex:1;min-width:0">
           <div class="info-label">Entrega</div>
-          <div class="info-value">${d(t||`—`)}</div>
-          ${s?`<div style="font-size:10px;color:#5A6580;margin-top:2px">Fecha de entrega: ${d(s)}</div>`:``}
+          <div class="info-value">${m(t||`—`)}</div>
+          ${s?`<div style="font-size:10px;color:#5A6580;margin-top:2px">Fecha de entrega: ${m(s)}</div>`:``}
         </div>
         ${h==null?``:`
           <div style="flex-shrink:0;text-align:center;padding:8px 14px;border-radius:12px;background:${_};color:#fff;min-width:74px;-webkit-print-color-adjust:exact;print-color-adjust:exact">
@@ -307,7 +307,7 @@ import{s as e,t}from"./colors-DlQPfOde.js";function n(n){let r=e(n);return r===`
       <div class="section">
         <div class="section-title">📄 Documento entregado por el estudiante</div>
         <div style="padding:10px 14px;background:#FAFBFD;border:1px solid #E4E8EF;border-radius:8px">
-          <a href="${d(a)}" class="download-link" target="_blank" rel="noopener">⬇ Descargar entrega</a>
+          <a href="${m(a)}" class="download-link" target="_blank" rel="noopener">⬇ Descargar entrega</a>
           <div class="download-note">El documento se abrirá/descargará desde el sistema. Conserve este enlace para acceder al archivo original del estudiante.</div>
         </div>
       </div>
@@ -334,7 +334,7 @@ import{s as e,t}from"./colors-DlQPfOde.js";function n(n){let r=e(n);return r===`
 
     ${T}
 
-    ${p==null&&S.length===0&&!y&&!b&&x.length===0&&!v?`
+    ${d==null&&S.length===0&&!y&&!b&&x.length===0&&!v?`
       <div style="padding:32px;text-align:center;color:#5A6580;font-size:12px;font-style:italic;background:#FAFBFD;border-radius:8px;border:1px dashed #E4E8EF">
         Esta entrega no tiene retroalimentación registrada en el sistema.
       </div>
@@ -343,7 +343,7 @@ import{s as e,t}from"./colors-DlQPfOde.js";function n(n){let r=e(n);return r===`
   </div>
 
   <div class="footer">
-    CESA · G.D · Reporte de retroalimentación generado automáticamente<br/>
+    CESA · Visor de desempeño estudiantil · Reporte de retroalimentación generado automáticamente<br/>
     Este documento es de uso académico interno y contiene información confidencial del estudiante.
   </div>
 
@@ -354,4 +354,4 @@ import{s as e,t}from"./colors-DlQPfOde.js";function n(n){let r=e(n);return r===`
     else { window.addEventListener("load", startPrint); }
   <\/script>
 </body>
-</html>`,D=window.open(``,`_blank`);if(!D){alert(`No se pudo abrir la ventana del reporte. Revisa tu bloqueador de pop-ups.`);return}D.document.write(E),D.document.close()}function d(e){return String(e||``).replace(/&/g,`&amp;`).replace(/</g,`&lt;`).replace(/>/g,`&gt;`).replace(/"/g,`&quot;`).replace(/'/g,`&#39;`)}export{s as a,u as i,a as n,c as r,o as t};
+</html>`,D=window.open(``,`_blank`);if(!D){alert(`No se pudo abrir la ventana del reporte. Revisa tu bloqueador de pop-ups.`);return}D.document.write(E),D.document.close()}function m(e){return String(e||``).replace(/&/g,`&amp;`).replace(/</g,`&lt;`).replace(/>/g,`&gt;`).replace(/"/g,`&quot;`).replace(/'/g,`&#39;`)}export{u as a,p as i,c as n,d as r,l as t};
