@@ -4,6 +4,7 @@ import ReactDOM from "react-dom";
 import { normStatus, fmtPct } from "../../utils/helpers";
 import { COLORS, STATUS_CONFIG } from "../../utils/colors";
 import useDialogA11y from "../../hooks/useDialogA11y";
+import { OutcomeScaleSuggestion } from "./OutcomeScaleSuggestion";
 /**
  * =========================
  * UI Atoms
@@ -83,7 +84,7 @@ export const CircularRing = React.memo(function CircularRing({ pct, size = 80, s
 // ─────────────────────────────────────────────
 // ThresholdsModal — configurar umbrales de riesgo del curso (#13)
 // ─────────────────────────────────────────────
-export function ThresholdsModal({ current, base, isOverridden, onSave, onReset, onClose }) {
+export function ThresholdsModal({ current, base, isOverridden, onSave, onReset, onClose, orgUnitId }) {
   const [crit, setCrit] = useState(Number(current?.critical ?? 50));
   const [watch, setWatch] = useState(Number(current?.watch ?? 70));
   const valid = watch >= crit;
@@ -108,7 +109,8 @@ export function ThresholdsModal({ current, base, isOverridden, onSave, onReset, 
         tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
         style={{
-          width: "min(440px, 100%)", background: "var(--card)",
+          width: "min(480px, 100%)", maxHeight: "calc(100vh - 40px)", overflowY: "auto",
+          background: "var(--card)",
           border: "1px solid var(--border)", borderRadius: 16,
           boxShadow: "var(--shadow-lg)", padding: "20px 22px",
           fontFamily: "var(--font)", outline: "none",
@@ -126,13 +128,13 @@ export function ThresholdsModal({ current, base, isOverridden, onSave, onReset, 
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, fontWeight: 700, color: COLORS.critical, marginBottom: 4 }}>
               <span>Crítico (&lt; %)</span><span style={{ fontFamily: "var(--font-mono)" }}>{crit}%</span>
             </div>
-            <input type="range" min={0} max={100} value={crit} onChange={(e) => setCrit(Number(e.target.value))} style={{ width: "100%" }} />
+            <input type="range" min={0} max={100} value={crit} aria-label="Umbral crítico (%)" onChange={(e) => setCrit(Number(e.target.value))} style={{ width: "100%" }} />
           </label>
           <label style={{ display: "block" }}>
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, fontWeight: 700, color: COLORS.watch, marginBottom: 4 }}>
               <span>Observación (&lt; %)</span><span style={{ fontFamily: "var(--font-mono)" }}>{watch}%</span>
             </div>
-            <input type="range" min={0} max={100} value={watch} onChange={(e) => setWatch(Number(e.target.value))} style={{ width: "100%" }} />
+            <input type="range" min={0} max={100} value={watch} aria-label="Umbral de observación (%)" onChange={(e) => setWatch(Number(e.target.value))} style={{ width: "100%" }} />
           </label>
         </div>
 
@@ -145,6 +147,12 @@ export function ThresholdsModal({ current, base, isOverridden, onSave, onReset, 
         <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 12 }}>
           Por defecto del sistema: crítico {base?.critical ?? 50}% · observación {base?.watch ?? 70}%
         </div>
+
+        {/* BETA: umbrales sugeridos desde la escala de logro de Brightspace */}
+        <OutcomeScaleSuggestion
+          orgUnitId={orgUnitId}
+          onApply={({ critical, watch: w }) => { setCrit(critical); setWatch(w); }}
+        />
 
         <div style={{ display: "flex", gap: 8, marginTop: 18, justifyContent: "flex-end" }}>
           {isOverridden && (

@@ -1754,6 +1754,7 @@ const contentKpis = useMemo(() => {
       {showThresholdsModal && (
         <ThresholdsModal
           current={thresholds}
+          orgUnitId={orgUnitId}
           base={baseThresholds}
           isOverridden={!!thresholdsOverride}
           onSave={(v) => { saveThresholds(v); setShowThresholdsModal(false); }}
@@ -1812,6 +1813,7 @@ const contentKpis = useMemo(() => {
         )}
       >
         <StudentDrawerBody
+          orgUnitId={orgUnitId}
           chatInputText={chatInputText}
           chatInputType={chatInputType}
           courseInfo={courseInfo}

@@ -15,6 +15,8 @@ import {
 } from "recharts";
 import { useAuth } from "../context/useAuth";
 import { useTheme } from "../context/useTheme";
+import SchemeGradeChip from "../components/ui/SchemeGradeChip";
+import useGradeScheme from "../hooks/useGradeScheme";
 import { apiGet, apiGetCached, apiPost } from "../utils/api";
 import { COLORS, STATUS_CONFIG, colorForPct, withAlpha } from "../utils/colors";
 import useDialogA11y from "../hooks/useDialogA11y";
@@ -310,6 +312,8 @@ export default function StudentPortal({ orgUnitIdOverride, userIdOverride, allow
     if (saved && Number(saved) > 0) return Number(saved);
     return 0;
   });
+  // Esquema de calificación del curso (Brightspace) para mostrar la nota en su escala.
+  const gradeScheme = useGradeScheme(orgUnitId);
 
   // Load the list of student courses once
   useEffect(() => {
@@ -858,6 +862,7 @@ export default function StudentPortal({ orgUnitIdOverride, userIdOverride, allow
                 label={fmtGrade10FromPct(summary?.currentPerformancePct)}
                 sublabel="/10" fontSize={isMobile ? 19 : 22}
               />
+              <SchemeGradeChip scheme={gradeScheme} pct={summary?.currentPerformancePct} />
               <div style={{ fontSize: 10, color: "var(--muted)", textAlign: "center" }}>
                 Escala 0–10 · se actualiza a medida que tus docentes califican
               </div>

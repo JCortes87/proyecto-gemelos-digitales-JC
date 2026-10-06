@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { LayoutGrid, Target, ListChecks, AlertTriangle, BookOpen, ArrowLeft, Upload } from "lucide-react";
+import { LayoutGrid, Target, ListChecks, AlertTriangle, BookOpen, ArrowLeft, Upload, ClipboardList } from "lucide-react";
 import { apiGet, apiPost, mapLimit } from "../utils/api";
 import { downloadCsv } from "../utils/export";
 import { injectStyles } from "../styles/global";
@@ -22,6 +22,7 @@ import {
 import { CatalogTab } from "./learning-outcomes/CatalogTab";
 import { TemplateTab } from "./learning-outcomes/TemplateTab";
 import { ManualImportTab } from "./learning-outcomes/ManualImportTab";
+import { RubricsTab } from "./learning-outcomes/RubricsTab";
 import { SemesterCoursesPanel } from "./learning-outcomes/SemesterCoursesPanel";
 import { CourseLookupPanel } from "./learning-outcomes/CourseLookupPanel";
 // Estado + lógica por sección, extraídos a hooks (refactor fase 2)
@@ -52,7 +53,7 @@ export default function LearningOutcomesAdmin() {
   const [newSel, setNewSel] = useState([]);
 
   // ── Pestaña activa: organiza las herramientas por tarea (menos desorden) ──
-  const [adminTab, setAdminTab] = useState("cursos"); // cursos|catalogo|plantilla|manual
+  const [adminTab, setAdminTab] = useState("cursos"); // cursos|catalogo|plantilla|manual|rubricas
 
   // Registro global de RA (visor + edición de descripciones) — hook extraído
   const {
@@ -599,6 +600,7 @@ export default function LearningOutcomesAdmin() {
               { key: "catalogo", label: "Registro global", Icon: Target },
               { key: "plantilla", label: "Crear RA (plantilla)", Icon: Upload },
               { key: "manual", label: "Importar manual", Icon: BookOpen },
+              { key: "rubricas", label: "Rúbricas (beta)", Icon: ClipboardList },
             ].map(t => {
               const active = adminTab === t.key;
               return (
@@ -633,6 +635,7 @@ export default function LearningOutcomesAdmin() {
               {adminTab === "cursos" && <>Busca un semestre, revisa el estado de RA de cada curso (sin RA / sin alinear / alineado) y consulta o edita las alineaciones de cualquier curso por ID.</>}
               {adminTab === "catalogo" && <>Todos los conjuntos de RA del tenant (nivel organización). Explora los conjuntos y edita descripciones con el lápiz.</>}
               {adminTab === "plantilla" && <>Crea RA masivos desde un archivo: descarga la plantilla, complétala en Excel y cárgala. Es un <b>merge</b>: nunca borra RA existentes.</>}
+              {adminTab === "rubricas" && <>BETA · Genera una rúbrica en un curso a partir de sus RA: un criterio por RA, alineado a su resultado. Primero vista previa (no escribe), luego confirmación.</>}
               {adminTab === "manual" && <>Modo avanzado: importa conjuntos del catálogo global a cualquier curso por ID y sondea el registro para diagnóstico.</>}
             </span>
           </div>
@@ -714,6 +717,11 @@ export default function LearningOutcomesAdmin() {
             toggleImpSet={toggleImpSet}
           />
           </>)}
+
+          {/* ── Pestaña: Generador de rúbricas por RA (BETA, escribe en Brightspace) ── */}
+          {adminTab === "rubricas" && (
+          <RubricsTab initialOrgId={loadedOrg || orgId || ""} />
+          )}
 
           {/* ── Pestaña: Cursos y alineaciones (semestres + consulta por ID) ── */}
           {adminTab === "cursos" && (<>

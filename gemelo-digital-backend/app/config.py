@@ -150,12 +150,17 @@ class Settings:
     def from_env(cls) -> "Settings":
         return cls(
             brightspace_base_url=_env("BRIGHTSPACE_BASE_URL", ""),
-            brightspace_lp_version=_env("BRIGHTSPACE_LP_VERSION", "1.50"),
-            brightspace_le_version=_env("BRIGHTSPACE_LE_VERSION", "1.92"),
-            brightspace_grade_version=_env("BRIGHTSPACE_GRADE_VERSION", "1.50"),
-            brightspace_lo_version=_env("BRIGHTSPACE_LO_VERSION", "1.92"),
-            brightspace_align_version=_env("BRIGHTSPACE_ALIGN_VERSION", "1.93"),
-            brightspace_quiz_version=_env("BRIGHTSPACE_QUIZ_VERSION", "1.93"),
+            # Versiones de la API (cesa.brightspace.com soporta LE 1.99 / LP 1.63 a
+            # 2026-10). LP 1.50 (contrato 20.25) queda deprecado en 20.27.1.
+            # Los cambios hasta estas versiones son aditivos para las rutas que
+            # usamos; 1.98+ habilita grades/schemes/default y la escala de logro
+            # (ScaleId) en los conjuntos de RA.
+            brightspace_lp_version=_env("BRIGHTSPACE_LP_VERSION", "1.63"),
+            brightspace_le_version=_env("BRIGHTSPACE_LE_VERSION", "1.99"),
+            brightspace_grade_version=_env("BRIGHTSPACE_GRADE_VERSION", "1.99"),
+            brightspace_lo_version=_env("BRIGHTSPACE_LO_VERSION", "1.99"),
+            brightspace_align_version=_env("BRIGHTSPACE_ALIGN_VERSION", "1.99"),
+            brightspace_quiz_version=_env("BRIGHTSPACE_QUIZ_VERSION", "1.99"),
             brightspace_auth_url=_env("BRIGHTSPACE_AUTH_URL", "https://auth.brightspace.com/oauth2/auth"),
             brightspace_token_url=_env("BRIGHTSPACE_TOKEN_URL", "https://auth.brightspace.com/core/connect/token"),
             brightspace_client_id=_env("BRIGHTSPACE_CLIENT_ID", ""),

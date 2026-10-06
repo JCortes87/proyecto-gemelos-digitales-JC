@@ -1,5 +1,7 @@
 import { COLORS, colorForPct } from "../../utils/colors";
 import StudentAvatar from "../../components/ui/StudentAvatar";
+import SchemeGradeChip from "../../components/ui/SchemeGradeChip";
+import useGradeScheme from "../../hooks/useGradeScheme";
 import { buildCorteGroups, computeRiskFromPct, fmtGrade10FromPct, fmtPct } from "../../utils/helpers";
 import { Card, CircularRing, CoverageBars, ProgressBar, StatusBadge } from "./primitives";
 import { EvidencesTimeline, NoRaMappingNotice, PendingItemsBlock, ProjectionBlock, QualityFlagsBlock } from "./panels";
@@ -13,6 +15,7 @@ export function StudentDrawerBody({
   courseInfo,
   drawerTab,
   learningOutcomesData,
+  orgUnitId,
   outcomesMap,
   selectedStudent,
   setChatInputText,
@@ -27,6 +30,8 @@ export function StudentDrawerBody({
   thresholds,
   thresholdsOverride,
 }) {
+  // Esquema de calificación del curso (Brightspace) para mostrar la nota en su escala.
+  const gradeScheme = useGradeScheme(orgUnitId);
   // Valores derivados del detalle del estudiante (antes calculados en el padre;
   // solo los usa este Drawer).
   const drawerSummary = studentDetail?.summary || {};
@@ -135,6 +140,7 @@ export function StudentDrawerBody({
                 fontSize={20}
               />
               <div style={{ fontSize: 10, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.08em", textAlign: "center" }}>Nota actual</div>
+              <SchemeGradeChip scheme={gradeScheme} pct={drawerSummary?.currentPerformancePct} />
             </div>
             {/* Cobertura ring */}
             <div style={{ flex: "1 1 140px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "16px 10px", background: "var(--bg)", borderRadius: 16, border: "1px solid var(--border)", gap: 6 }}>
