@@ -15,7 +15,6 @@ el usuario deje el dashboard idle por horas.
 """
 from __future__ import annotations
 
-import os
 import asyncio
 import logging
 import random
@@ -26,9 +25,11 @@ import httpx
 from fastapi import Request, HTTPException
 
 #|---------- Cliente HTTP compartido (connection pooling) ----------|
-# Un AsyncClient por proceso evita abrir/cerrar conexiones TCP en cada request.
-# limits: max 20 conexiones totales, 10 por host (Brightspace).
-# timeout: 30s por defecto, sobrescribible en _request_json.
+# Un AsyncClient por proceso evita abrir/cerrar conexiones TCP (y el handshake
+# TLS) en cada request. Lo usan el BrightspaceClient y el proxy (_bs_get).
+# limits: hasta 100 conexiones simultáneas (el proxy lanza ráfagas de hasta
+# ~25 en paralelo por usuario) y 20 keep-alive reutilizables.
+# timeout: 30s por defecto, sobrescribible por request.
 _HTTP_CLIENT: httpx.AsyncClient | None = None
 
 
@@ -37,19 +38,81 @@ def get_http_client() -> httpx.AsyncClient:
     global _HTTP_CLIENT
     if _HTTP_CLIENT is None or _HTTP_CLIENT.is_closed:
         _HTTP_CLIENT = httpx.AsyncClient(
-            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+            limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
             timeout=httpx.Timeout(30.0),
         )
     return _HTTP_CLIENT
 
+
+async def close_http_client() -> None:
+    """Cierra el cliente compartido (shutdown de la app)."""
+    global _HTTP_CLIENT
+    if _HTTP_CLIENT is not None and not _HTTP_CLIENT.is_closed:
+        await _HTTP_CLIENT.aclose()
+    _HTTP_CLIENT = None
+
+from app.config import settings
 from app.state import (
     get_access_token,
+    get_refreshable_session,
     get_session,
     update_session_tokens,
 )
 from app.services.brightspace_auth import mint_access_token_from_refresh
 
 logger = logging.getLogger("uvicorn.error")
+
+# Un lock por sesión: si llegan varias requests a la vez con el token por
+# vencer, solo una lo refresca (Brightspace puede rotar el refresh_token y las
+# demás quedarían con uno inválido).
+_REFRESH_LOCKS: Dict[str, asyncio.Lock] = {}
+
+
+async def ensure_fresh_session_token(sid: str) -> Optional[str]:
+    """Devuelve un access_token vigente para la sesión, refrescándolo si le
+    quedan < REFRESH_THRESHOLD_SECONDS o si ya venció (usuario inactivo > 1 h)
+    y hay refresh_token. None si no hay sesión válida ni se pudo refrescar.
+    Lo usan BrightspaceClient y el middleware de refresh de main.py."""
+    session = get_refreshable_session(sid)
+    if not session:
+        return None
+
+    def _usable(s: Dict[str, Any]) -> Optional[str]:
+        if float(s.get("expires_at") or 0) > time.time():
+            return s.get("access_token")
+        return None
+
+    def _needs_refresh(s: Dict[str, Any]) -> bool:
+        seconds_left = float(s.get("expires_at") or 0) - time.time()
+        return bool(s.get("refresh_token")) and seconds_left < REFRESH_THRESHOLD_SECONDS
+
+    if not _needs_refresh(session):
+        return _usable(session)
+
+    lock = _REFRESH_LOCKS.setdefault(sid, asyncio.Lock())
+    async with lock:
+        # Otra request pudo refrescar mientras esperábamos el lock.
+        session = get_refreshable_session(sid)
+        if not session:
+            return None
+        if not _needs_refresh(session):
+            return _usable(session)
+        logger.info(
+            "Refrescando access_token (sid=%s, seconds_left=%.0f)",
+            sid[:8] + "...", float(session.get("expires_at") or 0) - time.time(),
+        )
+        new_data = await mint_access_token_from_refresh(session["refresh_token"])
+        if new_data and new_data.get("access_token"):
+            # Actualiza SESSION_STORE para que las próximas requests usen el
+            # token nuevo sin refrescar otra vez.
+            update_session_tokens(sid, new_data)
+            _REFRESH_LOCKS.pop(sid, None)
+            return new_data["access_token"]
+        # El refresh falló (refresh_token revocado, red, etc.): si el token
+        # actual aún sirve se usa; si ya venció, el usuario debe re-loguearse.
+        logger.warning("Refresh falló para sid=%s", sid[:8] + "...")
+        _REFRESH_LOCKS.pop(sid, None)
+        return _usable(session)
 
 JsonType = Union[Dict[str, Any], List[Any]]
 
@@ -64,10 +127,10 @@ REFRESH_THRESHOLD_SECONDS = 300
 
 # Timeout por request a Brightspace. Para syncs largos se puede subir via env
 # (p.ej. BRIGHTSPACE_TIMEOUT_SECONDS=120) sin tocar codigo.
-DEFAULT_TIMEOUT_SECONDS = float(os.getenv("BRIGHTSPACE_TIMEOUT_SECONDS", "30"))
+DEFAULT_TIMEOUT_SECONDS = float(settings.brightspace_timeout_seconds)
 
 # Reintentos ante fallos transitorios (red, 429, 5xx). Solo aplica a GET.
-MAX_RETRIES = max(1, int(os.getenv("BRIGHTSPACE_MAX_RETRIES", "3")))
+MAX_RETRIES = max(1, int(settings.brightspace_max_retries))
 RETRY_BACKOFF_BASE_SECONDS = 0.5
 
 
@@ -164,14 +227,14 @@ class BrightspaceClient:
         tokens: Optional[Dict[str, Any]] = None,
         request: Optional[Request] = None,
     ):
-        self.base_url = os.getenv("BRIGHTSPACE_BASE_URL", "").rstrip("/")
-        self.lp_version   = os.getenv("BRIGHTSPACE_LP_VERSION",    "1.50")
-        self.grade_version = os.getenv("BRIGHTSPACE_GRADE_VERSION", "1.50")
-        self.lo_version    = os.getenv("BRIGHTSPACE_LO_VERSION",    "1.92")
+        self.base_url = settings.brightspace_base_url.rstrip("/")
+        self.lp_version   = settings.brightspace_lp_version
+        self.grade_version = settings.brightspace_grade_version
+        self.lo_version    = settings.brightspace_lo_version
         # El endpoint /lo/alignments/ requiere version 1.93+ (LMS v20.26.4+).
         # Se mantiene separado de lo_version (1.92) para no romper outcomeSets.
-        self.align_version = os.getenv("BRIGHTSPACE_ALIGN_VERSION", "1.93")
-        self.quiz_version  = os.getenv("BRIGHTSPACE_QUIZ_VERSION",  "1.93")
+        self.align_version = settings.brightspace_align_version
+        self.quiz_version  = settings.brightspace_quiz_version
 
         self._tokens  = tokens or {}
         self._request = request
@@ -207,33 +270,9 @@ class BrightspaceClient:
         """
         sid = _extract_session_id_any(self._request)
         if sid:
-            session = get_session(sid)
-            if session:
-                expires_at = float(session.get("expires_at") or 0)
-                refresh_token = session.get("refresh_token")
-                seconds_left = expires_at - time.time()
-
-                #|-------- Solo refrescar si hay refresh_token Y el token va a expirar pronto --------|
-                if refresh_token and seconds_left < REFRESH_THRESHOLD_SECONDS:
-                    logger.info(
-                        "Refrescando access_token (sid=%s, seconds_left=%.0f)",
-                        sid[:8] + "...", seconds_left,
-                    )
-                    new_data = await mint_access_token_from_refresh(refresh_token)
-                    if new_data:
-                        # Actualiza SESSION_STORE para que las proximas
-                        # requests usen el token nuevo sin refrescar otra vez.
-                        update_session_tokens(sid, new_data)
-                        return {"Authorization": f"Bearer {new_data['access_token']}"}
-                    else:
-                        # El refresh fallo (refresh_token revocado, red, etc).
-                        # Caemos al token actual: si esta vencido Brightspace
-                        # respondera 401 y el endpoint la propaga al usuario,
-                        # quien tendra que relogearse.
-                        logger.warning(
-                            "Refresh fallo para sid=%s; usando access_token actual",
-                            sid[:8] + "...",
-                        )
+            token = await ensure_fresh_session_token(sid)
+            if token:
+                return {"Authorization": f"Bearer {token}"}
 
         # Path por default: token actual (sea de session, tokens dict o lo que sea)
         return self._auth_headers()

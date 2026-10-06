@@ -7,6 +7,7 @@ import hmac
 import json
 import logging
 import secrets
+import time
 import urllib.parse
 from datetime import datetime, timezone
 
@@ -15,6 +16,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from app.security import SESSION_SECRET
+from app.services.brightspace_client import get_http_client
 from app.state import TOKENS, save_session, get_session, delete_session, get_access_token
 from app.api.deps import (
     BRIGHTSPACE_BASE_URL, LP_VERSION, LE_VERSION,
@@ -29,6 +31,53 @@ logger = logging.getLogger("uvicorn.error")
 
 router = APIRouter()
 
+# ── State OAuth ──────────────────────────────────────────────────────────────
+# El state va firmado (HMAC-SHA256 completo) y con timestamp. Además se liga al
+# navegador con una cookie httpOnly que guarda el nonce: si la cookie llega al
+# callback debe coincidir (protege contra login CSRF / fijación de sesión).
+# Dentro del iframe LTI algunos navegadores bloquean cookies de terceros; en ese
+# caso la cookie no llega y se acepta el state firmado y vigente.
+OAUTH_STATE_TTL_SECONDS = 600
+OAUTH_NONCE_COOKIE = "gemelo_oauth_nonce"
+
+
+def _state_sig(raw: str) -> str:
+    return hmac.new(SESSION_SECRET.encode(), raw.encode(), hashlib.sha256).hexdigest()
+
+
+def _make_oauth_state(nonce: str, next_url: str, org_unit_id: str) -> str:
+    raw = json.dumps({"s": nonce, "next": next_url, "ou": org_unit_id, "ts": int(time.time())})
+    return base64.urlsafe_b64encode(f"{raw}|||{_state_sig(raw)}".encode()).decode().rstrip("=")
+
+
+def _read_oauth_state(state: str | None) -> dict | None:
+    """Devuelve el payload si el state es auténtico y vigente; si no, None."""
+    if not state:
+        return None
+    try:
+        pad = "=" * ((4 - len(state) % 4) % 4)
+        raw, sig = base64.urlsafe_b64decode(state + pad).decode().rsplit("|||", 1)
+    except Exception:
+        return None
+    if not hmac.compare_digest(sig, _state_sig(raw)):
+        return None
+    try:
+        payload = json.loads(raw)
+    except ValueError:
+        return None
+    if time.time() - int(payload.get("ts") or 0) > OAUTH_STATE_TTL_SECONDS:
+        return None
+    return payload
+
+
+def _session_id_from_request(request: Request) -> str | None:
+    """Session id desde Authorization: Bearer o, en su defecto, la cookie."""
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        sid = auth_header[7:].strip()
+        if sid:
+            return sid
+    return _get_session_id(request)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -52,12 +101,10 @@ def brightspace_login(
             },
         )
 
-    # Codificar estado para retornar tras el callback
-    state_payload = secrets.token_urlsafe(24)
-    # Guardamos next y org_unit_id en un mini-state firmado
-    raw = json.dumps({"s": state_payload, "next": next or "", "ou": org_unit_id or ""})
-    sig = hmac.new(SESSION_SECRET.encode(), raw.encode(), hashlib.sha256).hexdigest()[:16]
-    state = base64.urlsafe_b64encode(f"{raw}|||{sig}".encode()).decode().rstrip("=")
+    # State firmado con next/org_unit_id; el nonce queda además en una cookie
+    # para ligar el callback a este navegador.
+    nonce = secrets.token_urlsafe(24)
+    state = _make_oauth_state(nonce, next or "", org_unit_id or "")
 
     params = {
         "client_id":     CLIENT_ID,
@@ -73,7 +120,17 @@ def brightspace_login(
         # hay sesion en Brightspace el OAuth completa instantaneamente sin SSO.
     }
     url = f"{BRIGHTSPACE_AUTH_URL}?{urllib.parse.urlencode(params)}"
-    return RedirectResponse(url)
+    response = RedirectResponse(url)
+    response.set_cookie(
+        key=OAUTH_NONCE_COOKIE,
+        value=nonce,
+        httponly=True,
+        secure=True,
+        samesite="none",
+        max_age=OAUTH_STATE_TTL_SECONDS,
+        path="/auth/brightspace",
+    )
+    return response
 
 
 @router.get("/auth/brightspace/callback")
@@ -103,25 +160,23 @@ async def brightspace_callback(request: Request):
             content={"error": "Configuración OAuth incompleta en el servidor"},
         )
 
-    # Decodificar state para recuperar next/org_unit_id
-    next_url = ""
-    org_unit_id = ""
-    if state:
-        try:
-            pad = "=" * ((4 - len(state) % 4) % 4)
-            raw_full = base64.urlsafe_b64decode(state + pad).decode()
-            raw, sig = raw_full.rsplit("|||", 1)
-            expected = hmac.new(
-                SESSION_SECRET.encode(), raw.encode(), hashlib.sha256
-            ).hexdigest()[:16]
-            if hmac.compare_digest(sig, expected):
-                payload = json.loads(raw)
-                next_url    = payload.get("next", "")
-                org_unit_id = payload.get("ou", "")
-            else:
-                logger.warning("OAuth callback: firma de state inválida; se ignora next/ou")
-        except Exception:
-            pass
+    # Validar state: debe ser nuestro, vigente y (si hay cookie) de este navegador.
+    payload = _read_oauth_state(state)
+    if payload is None:
+        logger.warning("OAuth callback: state ausente, inválido o expirado")
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Estado de inicio de sesión inválido o expirado. Vuelve a iniciar sesión."},
+        )
+    cookie_nonce = request.cookies.get(OAUTH_NONCE_COOKIE)
+    if cookie_nonce and not hmac.compare_digest(cookie_nonce, str(payload.get("s") or "")):
+        logger.warning("OAuth callback: el nonce del state no coincide con la cookie")
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Estado de inicio de sesión no coincide. Vuelve a iniciar sesión."},
+        )
+    next_url    = payload.get("next", "")
+    org_unit_id = payload.get("ou", "")
 
     # Intercambiar code por token
     data = {
@@ -131,8 +186,7 @@ async def brightspace_callback(request: Request):
         "redirect_uri":  REDIRECT_URI,
         "code":          code,
     }
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.post(BRIGHTSPACE_TOKEN_URL, data=data)
+    resp = await get_http_client().post(BRIGHTSPACE_TOKEN_URL, data=data, timeout=30)
 
     if resp.status_code != 200:
         return JSONResponse(
@@ -152,16 +206,16 @@ async def brightspace_callback(request: Request):
     headers = {"Authorization": f"Bearer {access_token}"}
     uid, user_name, user_email = None, None, None
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            r = await client.get(
-                f"{BRIGHTSPACE_BASE_URL}/d2l/api/lp/{LP_VERSION}/users/whoami",
-                headers=headers,
-            )
-            if r.status_code == 200:
-                w = r.json()
-                uid        = str(w.get("Identifier") or w.get("UserId") or "")
-                user_name  = w.get("FirstName", "") + " " + w.get("LastName", "")
-                user_email = w.get("UniqueName") or w.get("EmailAddress") or ""
+        r = await get_http_client().get(
+            f"{BRIGHTSPACE_BASE_URL}/d2l/api/lp/{LP_VERSION}/users/whoami",
+            headers=headers,
+            timeout=15,
+        )
+        if r.status_code == 200:
+            w = r.json()
+            uid        = str(w.get("Identifier") or w.get("UserId") or "")
+            user_name  = w.get("FirstName", "") + " " + w.get("LastName", "")
+            user_email = w.get("UniqueName") or w.get("EmailAddress") or ""
     except Exception as e:
         logger.warning("whoami falló al crear sesión: %s", e)
 
@@ -178,75 +232,76 @@ async def brightspace_callback(request: Request):
     system_role = None
     if uid:
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                # a) Resolver la unidad organizativa raíz (org id) dinámicamente.
-                org_id = ""
+            # Cliente compartido (pool de conexiones), timeout corto por llamada.
+            client = get_http_client()
+            # a) Resolver la unidad organizativa raíz (org id) dinámicamente.
+            org_id = ""
+            try:
+                ro = await client.get(
+                    f"{BRIGHTSPACE_BASE_URL}/d2l/api/lp/{LP_VERSION}/organization/info",
+                    headers=headers, timeout=10,
+                )
+                if ro.status_code == 200:
+                    org_id = str((ro.json() or {}).get("Identifier") or "")
+            except Exception as _oe:
+                logger.warning("organization/info failed: %s", _oe)
+            if not org_id:
+                org_id = "6606"  # fallback: raíz conocida del tenant CESA
+
+            # b) RoleId del usuario a nivel de organización (fuente fiable).
+            role_id = ""
+            try:
+                er = await client.get(
+                    f"{BRIGHTSPACE_BASE_URL}/d2l/api/lp/{LP_VERSION}"
+                    f"/enrollments/orgUnits/{org_id}/users/{uid}",
+                    headers=headers, timeout=10,
+                )
+                if er.status_code == 200:
+                    role_id = str((er.json() or {}).get("RoleId") or "")
+            except Exception as _ee:
+                logger.warning("org enrollment lookup failed: %s", _ee)
+
+            # c) Fallback: UserData /users/{uid} (por si expone RoleId aquí).
+            if not role_id:
                 try:
-                    ro = await client.get(
-                        f"{BRIGHTSPACE_BASE_URL}/d2l/api/lp/{LP_VERSION}/organization/info",
-                        headers=headers,
+                    ur = await client.get(
+                        f"{BRIGHTSPACE_BASE_URL}/d2l/api/lp/{LP_VERSION}/users/{uid}",
+                        headers=headers, timeout=10,
                     )
-                    if ro.status_code == 200:
-                        org_id = str((ro.json() or {}).get("Identifier") or "")
-                except Exception as _oe:
-                    logger.warning("organization/info failed: %s", _oe)
-                if not org_id:
-                    org_id = "6606"  # fallback: raíz conocida del tenant CESA
+                    if ur.status_code == 200:
+                        role_id = str((ur.json() or {}).get("RoleId") or "")
+                except Exception:
+                    pass
 
-                # b) RoleId del usuario a nivel de organización (fuente fiable).
-                role_id = ""
+            # d) Fast-path por IDs conocidos.
+            if role_id == "105":
+                system_role = "Super Administrator"
+            elif role_id == "116":
+                system_role = "Administrator"
+
+            # e) Fallback por nombre de rol (tenant-agnostic).
+            role_name = ""
+            if system_role is None and role_id:
                 try:
-                    er = await client.get(
-                        f"{BRIGHTSPACE_BASE_URL}/d2l/api/lp/{LP_VERSION}"
-                        f"/enrollments/orgUnits/{org_id}/users/{uid}",
-                        headers=headers,
+                    rr = await client.get(
+                        f"{BRIGHTSPACE_BASE_URL}/d2l/api/lp/{LP_VERSION}/roles/{role_id}",
+                        headers=headers, timeout=10,
                     )
-                    if er.status_code == 200:
-                        role_id = str((er.json() or {}).get("RoleId") or "")
-                except Exception as _ee:
-                    logger.warning("org enrollment lookup failed: %s", _ee)
+                    if rr.status_code == 200:
+                        role_name = str((rr.json() or {}).get("DisplayName") or "").strip()
+                except Exception as _re:
+                    logger.warning("role name lookup failed (roleId=%s): %s", role_id, _re)
 
-                # c) Fallback: UserData /users/{uid} (por si expone RoleId aquí).
-                if not role_id:
-                    try:
-                        ur = await client.get(
-                            f"{BRIGHTSPACE_BASE_URL}/d2l/api/lp/{LP_VERSION}/users/{uid}",
-                            headers=headers,
-                        )
-                        if ur.status_code == 200:
-                            role_id = str((ur.json() or {}).get("RoleId") or "")
-                    except Exception:
-                        pass
-
-                # d) Fast-path por IDs conocidos.
-                if role_id == "105":
+                rn = role_name.lower()
+                if "super administrator" in rn or "super admin" in rn:
                     system_role = "Super Administrator"
-                elif role_id == "116":
+                elif "administrator" in rn or rn == "admin":
                     system_role = "Administrator"
 
-                # e) Fallback por nombre de rol (tenant-agnostic).
-                role_name = ""
-                if system_role is None and role_id:
-                    try:
-                        rr = await client.get(
-                            f"{BRIGHTSPACE_BASE_URL}/d2l/api/lp/{LP_VERSION}/roles/{role_id}",
-                            headers=headers,
-                        )
-                        if rr.status_code == 200:
-                            role_name = str((rr.json() or {}).get("DisplayName") or "").strip()
-                    except Exception as _re:
-                        logger.warning("role name lookup failed (roleId=%s): %s", role_id, _re)
-
-                    rn = role_name.lower()
-                    if "super administrator" in rn or "super admin" in rn:
-                        system_role = "Super Administrator"
-                    elif "administrator" in rn or rn == "admin":
-                        system_role = "Administrator"
-
-                logger.info(
-                    "role detection: uid=%s orgId=%s roleId=%s roleName=%r -> system_role=%s",
-                    uid, org_id, role_id, role_name, system_role,
-                )
+            logger.info(
+                "role detection: uid=%s orgId=%s roleId=%s roleName=%r -> system_role=%s",
+                uid, org_id, role_id, role_name, system_role,
+            )
         except Exception as e:
             logger.warning("user role detection failed: %s", e)
 
@@ -305,6 +360,7 @@ async def brightspace_callback(request: Request):
         max_age=SESSION_MAX_AGE,
         path="/",
     )
+    response.delete_cookie(OAUTH_NONCE_COOKIE, path="/auth/brightspace")
     return response
 
 
@@ -375,9 +431,11 @@ async def auth_me(request: Request):
 
 @router.post("/auth/logout")
 async def auth_logout(request: Request):
-    """Cierra la sesión del usuario y limpia la cookie."""
-    sid = _get_session_id(request)
-    if sid:
+    """Cierra la sesión del usuario (Bearer y/o cookie) y limpia la cookie."""
+    # El frontend envía el sid como Bearer (dentro del iframe LTI la cookie de
+    # terceros suele no llegar): se invalidan ambos si vienen.
+    sids = {_session_id_from_request(request), _get_session_id(request)}
+    for sid in sids - {None}:
         delete_session(sid)
     response = JSONResponse({"ok": True})
     response.delete_cookie(SESSION_COOKIE, path="/")

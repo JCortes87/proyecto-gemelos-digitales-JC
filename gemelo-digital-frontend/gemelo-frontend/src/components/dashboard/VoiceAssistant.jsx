@@ -3,6 +3,12 @@ import { fmtPct, fmtGrade10FromPct, computeRiskFromPct } from "../../utils/helpe
 import { sanitizeHtml } from "../../utils/sanitize";
 import { elSpeak, elStop } from "../../utils/speech";
 
+// Generadores impuros a nivel de módulo: solo se invocan desde manejadores de
+// eventos (sendMsg), nunca durante el render. Sacarlos del cuerpo del componente
+// evita el falso positivo de react-hooks/purity sin cambiar el comportamiento.
+const newMsgId = () => Date.now();
+const thinkingDelayMs = () => 500 + Math.random() * 300;
+
 export default function VoiceAssistant({ studentRows, overview, raDashboard, courseInfo }) {
   const [msgs, setMsgs] = React.useState(() => [{
     id: 0, role: "bot", fromVoice: false,
@@ -210,16 +216,16 @@ export default function VoiceAssistant({ studentRows, overview, raDashboard, cou
     const t = (text || input).trim();
     if (!t) return;
     setInput("");
-    const uid = Date.now();
+    const uid = newMsgId();
     setMsgs((prev) => [...prev, { id: uid, role: "user", fromVoice, text: t }]);
     setAiStatus("thinking");
     setTimeout(() => {
       const resp = processCmd(t);
-      const bid = Date.now() + 1;
+      const bid = newMsgId() + 1;
       setMsgs((prev) => [...prev, { id: bid, role: "bot", fromVoice: false, text: resp }]);
       setAiStatus("idle");
       if (voiceOut) speakText(resp, bid);
-    }, 500 + Math.random() * 300);
+    }, thinkingDelayMs());
   }
 
   // ── Mic ──
@@ -355,6 +361,7 @@ export default function VoiceAssistant({ studentRows, overview, raDashboard, cou
           className={`voice-btn${aiStatus === "listening" ? " listening" : ""}`}
           onClick={voiceOk ? toggleMic : undefined}
           title={voiceOk ? (aiStatus === "listening" ? "Detener" : "Hablar por voz") : "Micrófono no disponible en este navegador"}
+          aria-label={voiceOk ? (aiStatus === "listening" ? "Detener dictado por voz" : "Hablar por voz") : "Micrófono no disponible en este navegador"}
           style={{ height: 40, width: 40, fontSize: 17, flexShrink: 0, opacity: voiceOk ? 1 : 0.4, cursor: voiceOk ? "pointer" : "not-allowed" }}
         >
           {aiStatus === "listening" ? "⏹" : "🎙️"}
@@ -362,13 +369,14 @@ export default function VoiceAssistant({ studentRows, overview, raDashboard, cou
         <input
           ref={inputRef}
           className="ai-input"
+          aria-label="Pregunta sobre el curso"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMsg(); } }}
           placeholder={aiStatus === "listening" ? "🎙️ Escuchando…" : "Pregunta sobre el curso…"}
           style={{ height: 40 }}
         />
-        <button className="ai-send-btn" onClick={() => sendMsg()} style={{ height: 40, padding: "0 14px", fontSize: 13 }}>↵</button>
+        <button className="ai-send-btn" onClick={() => sendMsg()} aria-label="Enviar pregunta" style={{ height: 40, padding: "0 14px", fontSize: 13 }}>↵</button>
       </div>
 
       {/* Controls row */}
@@ -376,6 +384,7 @@ export default function VoiceAssistant({ studentRows, overview, raDashboard, cou
         <button
           className={`ai-toggle${voiceOut ? " active" : ""}`}
           onClick={() => { setVoiceOut((v) => !v); if (aiStatus === "speaking") stopSpeaking(); }}
+          aria-pressed={voiceOut}
         >
           <div className="ai-toggle-dot" />
           <span style={{ fontSize: 11, fontWeight: 700, color: voiceOut ? "var(--ok)" : "var(--muted)" }}>
@@ -385,6 +394,7 @@ export default function VoiceAssistant({ studentRows, overview, raDashboard, cou
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontSize: 10, color: "var(--muted)", fontWeight: 700 }}>TTS:</span>
           <select
+            aria-label="Velocidad de lectura en voz alta"
             value={speed}
             onChange={(e) => setSpeed(Number(e.target.value))}
             style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8, padding: "4px 8px", fontSize: 11, color: "var(--text)", fontFamily: "var(--font-mono)", outline: "none" }}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useRef, useMemo, useId } from "react";
 import { Search, ChevronRight } from "lucide-react";
 import Dialog from "./Dialog";
 
@@ -18,13 +18,22 @@ export default function CommandPalette({ open, onClose, commands = [] }) {
   const [query, setQuery] = useState("");
   const [activeIdx, setActiveIdx] = useState(0);
   const inputRef = useRef(null);
+  // Patrón combobox + listbox: el foco se queda en el input y las flechas
+  // mueven la opción activa (aria-activedescendant).
+  const listId = useId();
+  const optionId = (idx) => `${listId}-opt-${idx}`;
 
-  useEffect(() => {
+  // Al abrir, limpiar búsqueda y selección. Se ajusta durante el render
+  // comparando con el valor previo de `open` (patrón recomendado por React en
+  // lugar de un efecto que hace setState y provoca un render extra).
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (open !== prevOpen) {
+    setPrevOpen(open);
     if (open) {
       setQuery("");
       setActiveIdx(0);
     }
-  }, [open]);
+  }
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -34,10 +43,6 @@ export default function CommandPalette({ open, onClose, commands = [] }) {
       return hay.includes(q);
     });
   }, [query, commands]);
-
-  useEffect(() => {
-    setActiveIdx(0);
-  }, [query]);
 
   const handleKeyDown = (e) => {
     if (e.key === "ArrowDown") {
@@ -80,14 +85,23 @@ export default function CommandPalette({ open, onClose, commands = [] }) {
           borderBottom: "1px solid var(--border)",
         }}
       >
-        <Search size={18} strokeWidth={2.2} style={{ color: "var(--muted)" }} />
+        <Search size={18} strokeWidth={2.2} style={{ color: "var(--muted)" }} aria-hidden="true" />
         <input
           ref={inputRef}
           type="text"
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => {
+            // Cada cambio de búsqueda reinicia la selección al primer resultado
+            setQuery(e.target.value);
+            setActiveIdx(0);
+          }}
           placeholder="Escribe un comando o busca un estudiante..."
           aria-label="Buscar comando"
+          role="combobox"
+          aria-autocomplete="list"
+          aria-expanded="true"
+          aria-controls={listId}
+          aria-activedescendant={filtered[activeIdx] ? optionId(activeIdx) : undefined}
           style={{
             flex: 1, border: "none", outline: "none",
             background: "transparent", color: "var(--text)",
@@ -104,15 +118,15 @@ export default function CommandPalette({ open, onClose, commands = [] }) {
       </div>
 
       {/* Results list */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "6px 0" }}>
+      <div id={listId} role="listbox" aria-label="Comandos" style={{ flex: 1, overflowY: "auto", padding: "6px 0" }}>
         {filtered.length === 0 ? (
           <div style={{ padding: "30px 20px", textAlign: "center", color: "var(--muted)", fontSize: 13 }}>
             Sin resultados para "{query}"
           </div>
         ) : (
           Object.entries(grouped).map(([groupName, items]) => (
-            <div key={groupName}>
-              <div style={{
+            <div key={groupName} role="group" aria-label={groupName}>
+              <div aria-hidden="true" style={{
                 padding: "8px 18px 4px",
                 fontSize: 10, fontWeight: 800, color: "var(--muted)",
                 textTransform: "uppercase", letterSpacing: "0.08em",
@@ -124,6 +138,11 @@ export default function CommandPalette({ open, onClose, commands = [] }) {
                 return (
                   <button
                     key={cmd.id}
+                    type="button"
+                    id={optionId(cmd._originalIdx)}
+                    role="option"
+                    aria-selected={isActive}
+                    tabIndex={-1}
                     onClick={() => {
                       cmd.action?.();
                       onClose?.();
@@ -138,7 +157,7 @@ export default function CommandPalette({ open, onClose, commands = [] }) {
                       color: isActive ? "var(--brand)" : "var(--text)",
                     }}
                   >
-                    <span style={{ fontSize: 16, flexShrink: 0, display: "flex", alignItems: "center" }}>
+                    <span aria-hidden="true" style={{ fontSize: 16, flexShrink: 0, display: "flex", alignItems: "center" }}>
                       {cmd.icon
                         ? (typeof cmd.icon === "function"
                             ? <cmd.icon size={16} strokeWidth={2.2} />

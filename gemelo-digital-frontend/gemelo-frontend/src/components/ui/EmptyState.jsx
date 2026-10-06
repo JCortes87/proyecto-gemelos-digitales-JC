@@ -88,7 +88,7 @@ export default function EmptyState({
             borderRadius: 8,
             border: "1px solid var(--brand)",
             background: "var(--brand)",
-            color: "#fff",
+            color: "var(--on-brand)",
             cursor: "pointer",
           }}
         >

@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useId } from "react";
+import useDialogA11y from "../hooks/useDialogA11y";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine } from "recharts";
 import { apiGet, apiGetCached, mapLimit } from "../utils/api";
 import { COLORS, colorForPct } from "../utils/colors";
@@ -17,6 +18,9 @@ import { downloadCsv } from "../utils/export";
  */
 export default function StudentOverviewPanel({ userId, period, onClose }) {
   useEffect(() => { injectStyles(); }, []);
+  // Panel a pantalla completa = diálogo modal: foco, trampa de Tab, Esc y scroll lock
+  const dialogRef = useDialogA11y({ open: !!userId, onClose });
+  const titleId = useId();
 
   const [userInfo, setUserInfo] = useState(null);
   const [courses, setCourses] = useState([]);
@@ -203,15 +207,22 @@ export default function StudentOverviewPanel({ userId, period, onClose }) {
   if (!userId) return null;
 
   return (
-    <div style={{
-      position: "fixed", inset: 0, zIndex: 300,
-      background: "var(--bg)", overflow: "auto",
-      fontFamily: "var(--font)",
-    }}>
+    <div
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      tabIndex={-1}
+      style={{
+        position: "fixed", inset: 0, zIndex: 300,
+        background: "var(--bg)", overflow: "auto",
+        fontFamily: "var(--font)", outline: "none",
+      }}
+    >
       {/* Header */}
       <header style={{
         position: "sticky", top: 0, zIndex: 10,
-        background: "rgba(255,255,255,0.9)", backdropFilter: "blur(16px) saturate(180%)",
+        background: "color-mix(in srgb, var(--card) 90%, transparent)", backdropFilter: "blur(16px) saturate(180%)",
         borderBottom: "1px solid var(--border)",
         display: "flex", alignItems: "center", justifyContent: "space-between",
         padding: "0 24px", height: 56,
@@ -221,7 +232,7 @@ export default function StudentOverviewPanel({ userId, period, onClose }) {
             width: 32, height: 32, borderRadius: 8,
             background: "var(--brand)", display: "flex",
             alignItems: "center", justifyContent: "center",
-            color: "#fff", fontSize: 10, fontWeight: 900,
+            color: "var(--on-brand)", fontSize: 10, fontWeight: 900,
           }}>CESA</div>
           <div>
             <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)" }}>Visor de desempeño estudiantil</div>
@@ -233,7 +244,7 @@ export default function StudentOverviewPanel({ userId, period, onClose }) {
         <button
           onClick={onClose}
           style={{
-            background: "var(--brand)", color: "#fff", border: "none",
+            background: "var(--brand)", color: "var(--on-brand)", border: "none",
             borderRadius: 8, padding: "7px 14px", fontSize: 12,
             fontWeight: 700, cursor: "pointer", fontFamily: "var(--font)",
           }}
@@ -251,14 +262,14 @@ export default function StudentOverviewPanel({ userId, period, onClose }) {
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
             <div style={{
               width: 48, height: 48, borderRadius: "50%",
-              background: "var(--brand)", color: "#fff",
+              background: "var(--brand)", color: "var(--on-brand)",
               display: "flex", alignItems: "center", justifyContent: "center",
               fontSize: 18, fontWeight: 900, flexShrink: 0,
             }}>
               {(userInfo?.name || "?").charAt(0).toUpperCase()}
             </div>
             <div>
-              <h1 style={{ fontSize: 24, fontWeight: 900, color: "var(--text)", letterSpacing: "-0.03em", margin: 0 }}>
+              <h1 id={titleId} style={{ fontSize: 24, fontWeight: 900, color: "var(--text)", letterSpacing: "-0.03em", margin: 0 }}>
                 {userInfo?.name || "Cargando..."}
               </h1>
               <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
@@ -333,7 +344,7 @@ export default function StudentOverviewPanel({ userId, period, onClose }) {
                   <span>Analizando curso {kpis.loadedCourses} de {kpis.totalCourses}</span>
                   <span>{Math.round((kpis.loadedCourses / kpis.totalCourses) * 100)}%</span>
                 </div>
-                <div style={{ height: 6, borderRadius: 999, background: "rgba(148,163,184,0.18)", overflow: "hidden" }}>
+                <div style={{ height: 6, borderRadius: 999, background: "color-mix(in srgb, var(--pending) 18%, transparent)", overflow: "hidden" }}>
                   <div style={{
                     width: `${(kpis.loadedCourses / kpis.totalCourses) * 100}%`,
                     height: "100%", background: "var(--brand)",
@@ -377,7 +388,8 @@ export default function StudentOverviewPanel({ userId, period, onClose }) {
                         <XAxis dataKey="sem" tick={{ fontSize: 11, fill: "var(--muted)" }} />
                         <YAxis domain={[0, 10]} tick={{ fontSize: 11, fill: "var(--muted)" }} width={28} />
                         <Tooltip
-                          contentStyle={{ borderRadius: 8, border: "1px solid var(--border)", fontSize: 12 }}
+                          contentStyle={{ background: "var(--card)", borderRadius: 8, border: "1px solid var(--border)", fontSize: 12, color: "var(--text)" }}
+                          labelStyle={{ color: "var(--text)" }}
                           formatter={(v, _n, p) => [`${v} /10 (${p.payload.count} curso${p.payload.count !== 1 ? "s" : ""})`, "Promedio"]}
                         />
                         <ReferenceLine y={7} stroke={COLORS.ok} strokeDasharray="4 4" />
@@ -398,6 +410,7 @@ export default function StudentOverviewPanel({ userId, period, onClose }) {
             }}>
               <input
                 type="text"
+                aria-label="Buscar curso"
                 placeholder="Buscar curso..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -408,6 +421,7 @@ export default function StudentOverviewPanel({ userId, period, onClose }) {
                 }}
               />
               <select
+                aria-label="Filtrar por nivel de riesgo"
                 value={riskFilter}
                 onChange={(e) => setRiskFilter(e.target.value)}
                 style={{
@@ -423,6 +437,7 @@ export default function StudentOverviewPanel({ userId, period, onClose }) {
                 <option value="pending">Sin datos</option>
               </select>
               <select
+                aria-label="Ordenar cursos"
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value)}
                 style={{
@@ -473,7 +488,7 @@ export default function StudentOverviewPanel({ userId, period, onClose }) {
                 style={{
                   padding: "8px 12px", borderRadius: 8,
                   border: "1px solid var(--brand)", background: "var(--brand)",
-                  color: "#fff", fontSize: 11, fontWeight: 800,
+                  color: "var(--on-brand)", fontSize: 11, fontWeight: 800,
                   cursor: filteredCourses.length === 0 ? "not-allowed" : "pointer",
                   opacity: filteredCourses.length === 0 ? 0.5 : 1,
                   fontFamily: "var(--font)",
@@ -524,7 +539,7 @@ export default function StudentOverviewPanel({ userId, period, onClose }) {
                               <span style={{
                                 marginLeft: 6, fontSize: 9, fontWeight: 700,
                                 padding: "1px 6px", borderRadius: 4,
-                                background: "rgba(255, 170, 0, 0.12)", color: "#b27300",
+                                background: "var(--warning-bg)", color: "var(--warning-fg)",
                               }}>{c.semesterCode}</span>
                             )}
                             {c.roleName && (

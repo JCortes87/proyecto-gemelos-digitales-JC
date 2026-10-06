@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { apiUrl } from "../../utils/api";
+import { apiUrl, getSessionId, authHeaders } from "../../utils/api";
 
 // Caché en módulo: userId → Promise<objectURL|null>. Evita re-pedir la misma
 // foto cuando el avatar aparece en varias listas, y persiste entre montajes.
@@ -7,14 +7,14 @@ const _avatarCache = new Map();
 
 function fetchAvatarUrl(userId) {
   if (_avatarCache.has(userId)) return _avatarCache.get(userId);
-  const sid = typeof localStorage !== "undefined" ? localStorage.getItem("gemelo_sid") : null;
+  const sid = getSessionId();
   if (!sid) return Promise.resolve(null);
   // Nota seguridad: antes la imagen se cargaba con <img src="...?sid=...">,
   // lo que filtraba el token de sesión en la URL (historial, logs, Referer).
   // Ahora se pide con fetch + header Authorization y se muestra via blob URL.
   const p = fetch(apiUrl(`/brightspace/user/${userId}/image`), {
     credentials: "include",
-    headers: { Authorization: `Bearer ${sid}` },
+    headers: authHeaders(sid),
   })
     .then((res) => {
       if (!res.ok) return null;

@@ -276,7 +276,7 @@ function AssignmentsPanel({ orgUnitId, courseStart }) {
             style={{
               height: 6,
               borderRadius: 999,
-              background: "rgba(148,163,184,0.2)",
+              background: "color-mix(in srgb, var(--pending) 20%, transparent)",
               overflow: "hidden",
             }}
           >

@@ -46,7 +46,7 @@ export default function useCourseSnapshots(orgUnitId, currentMetrics) {
           // Sincroniza localStorage con lo que llegó de la API
           try {
             localStorage.setItem(storageKey, JSON.stringify(apiSnaps));
-          } catch {}
+          } catch { /* storage lleno/bloqueado: el estado en memoria ya está al día */ }
         } else {
           setSource("empty");
         }
@@ -57,23 +57,34 @@ export default function useCourseSnapshots(orgUnitId, currentMetrics) {
       });
 
     return () => { cancelled = true; };
-  }, [orgUnitId]);
+  }, [orgUnitId, storageKey]);
+
+  // Primitivas de currentMetrics: el efecto depende de los valores, no de la
+  // identidad del objeto (que el padre recrea en cada render).
+  const mAvgPct = currentMetrics?.avgPct;
+  const mAtRiskPct = currentMetrics?.atRiskPct;
+  const mCoveragePct = currentMetrics?.coveragePct;
+  const mTotalStudents = currentMetrics?.totalStudents;
 
   // Captura snapshot del día actual desde currentMetrics (escribe a localStorage + API lo persiste via overview)
   useEffect(() => {
     if (!storageKey) return;
-    if (!currentMetrics) return;
-    if (currentMetrics.totalStudents == null || currentMetrics.totalStudents === 0) return;
+    // (cubre también currentMetrics == null)
+    if (mTotalStudents == null || mTotalStudents === 0) return;
 
     const today = new Date().toISOString().slice(0, 10);
     const newSnap = {
       date: today,
-      avgPct: currentMetrics.avgPct ?? null,
-      atRiskPct: currentMetrics.atRiskPct ?? null,
-      coveragePct: currentMetrics.coveragePct ?? null,
-      totalStudents: currentMetrics.totalStudents ?? 0,
+      avgPct: mAvgPct ?? null,
+      atRiskPct: mAtRiskPct ?? null,
+      coveragePct: mCoveragePct ?? null,
+      totalStudents: mTotalStudents ?? 0,
     };
 
+    // setState en efecto intencional: fusiona el snapshot de hoy en una serie
+    // acumulada que también escribe la respuesta async de la API; derivarlo en
+    // render cambiaría el orden de precedencia entre ambas fuentes.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSnapshots((prev) => {
       const filtered = prev.filter((s) => s.date !== today);
       const next = [...filtered, newSnap];
@@ -84,16 +95,10 @@ export default function useCourseSnapshots(orgUnitId, currentMetrics) {
       trimmed.sort((a, b) => a.date.localeCompare(b.date));
       try {
         localStorage.setItem(storageKey, JSON.stringify(trimmed));
-      } catch {}
+      } catch { /* storage lleno/bloqueado: se conserva solo en memoria */ }
       return trimmed;
     });
-  }, [
-    storageKey,
-    currentMetrics?.avgPct,
-    currentMetrics?.atRiskPct,
-    currentMetrics?.coveragePct,
-    currentMetrics?.totalStudents,
-  ]);
+  }, [storageKey, mAvgPct, mAtRiskPct, mCoveragePct, mTotalStudents]);
 
   const today = useMemo(() => {
     const d = new Date().toISOString().slice(0, 10);

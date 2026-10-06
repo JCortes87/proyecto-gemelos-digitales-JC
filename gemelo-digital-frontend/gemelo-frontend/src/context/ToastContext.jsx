@@ -1,6 +1,7 @@
-import React, { createContext, useContext, useState, useCallback, useEffect, useMemo } from "react";
+import React, { useState, useCallback, useEffect, useMemo } from "react";
+import { ToastContext } from "./useToast";
 import { X } from "lucide-react";
-import { getSeverityTokens, normalizeSeverity } from "../components/ui/StatusBadge";
+import { getSeverityTokens, normalizeSeverity } from "../components/ui/severity";
 
 /**
  * Mapeo tipo-de-toast → severity del design system.
@@ -14,7 +15,6 @@ const TYPE_TO_SEVERITY = {
   error: "critical",
 };
 
-const ToastContext = createContext(null);
 
 let _toastId = 0;
 
@@ -46,12 +46,6 @@ export function ToastProvider({ children }) {
       <ToastContainer toasts={toasts} onRemove={removeToast} />
     </ToastContext.Provider>
   );
-}
-
-export function useToast() {
-  const ctx = useContext(ToastContext);
-  if (!ctx) throw new Error("useToast must be used within ToastProvider");
-  return ctx;
 }
 
 /* ── Toast Container + individual Toast ── */
@@ -98,7 +92,7 @@ function Toast({ toast, onRemove }) {
           flexShrink: 0, display: "flex", alignItems: "center",
         }}
       >
-        <X size={14} strokeWidth={2.5} />
+        <X size={14} strokeWidth={2.5} aria-hidden="true" />
       </button>
     </div>
   );

@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAuth } from "../context/AuthContext";
+import { useAuth } from "../context/useAuth";
 import { apiGet, apiGetCached } from "../utils/api";
-import { fmtPct, fmtGrade10FromPct, computeRiskFromPct } from "../utils/helpers";
+import { fmtGrade10FromPct } from "../utils/helpers";
 import { COLORS, colorForPct } from "../utils/colors";
 import { injectStyles } from "../styles/global";
 import Breadcrumb from "../components/ui/Breadcrumb";
@@ -16,7 +16,7 @@ import { isStudentRole } from "../utils/roles";
 export default function CoordinatorDashboard({ onClose }) {
   useEffect(() => { injectStyles(); }, []);
   const navigate = useNavigate();
-  const { authUser, logout } = useAuth();
+  const { logout } = useAuth();
 
   // ── Phase 1: pre-cargar el catálogo de cursos del coordinador ──────────────
   // Se usa para (a) derivar los períodos disponibles del propio listado —igual
@@ -168,7 +168,6 @@ export default function CoordinatorDashboard({ onClose }) {
       if (s) set.add(s);
     }
     return Array.from(set).sort().reverse();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [catalog]);
 
   // ── Client-side filtering + sorting on loaded courses ────────────────────
@@ -197,7 +196,6 @@ export default function CoordinatorDashboard({ onClose }) {
       return 0;
     });
     return withMetrics;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [courses, courseMetrics, filterSearch, sortBy, filterCategory]);
 
   const filteredTotals = useMemo(() => {
@@ -227,20 +225,20 @@ export default function CoordinatorDashboard({ onClose }) {
       {/* Topbar */}
       <header style={{
         position: "sticky", top: 0, zIndex: 50,
-        background: "rgba(255,255,255,0.9)", backdropFilter: "blur(16px) saturate(180%)",
+        background: "color-mix(in srgb, var(--card) 90%, transparent)", backdropFilter: "blur(16px) saturate(180%)",
         borderBottom: "1px solid var(--border)",
         display: "flex", alignItems: "center", justifyContent: "space-between",
         padding: "0 24px", height: 56,
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ width: 32, height: 32, borderRadius: 8, background: "var(--brand)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 10, fontWeight: 900 }}>CESA</div>
+          <div style={{ width: 32, height: 32, borderRadius: 8, background: "var(--brand)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--on-brand)", fontSize: 10, fontWeight: 900 }}>CESA</div>
           <div>
             <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)" }}>Visor de desempeño estudiantil</div>
             <div style={{ fontSize: 9, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Panel Coordinador</div>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <button className="btn" onClick={() => navigate("/")} style={{ padding: "7px 12px", fontSize: 12, background: "var(--brand)", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, cursor: "pointer" }}>
+          <button className="btn" onClick={() => navigate("/")} style={{ padding: "7px 12px", fontSize: 12, background: "var(--brand)", color: "var(--on-brand)", border: "none", borderRadius: 8, fontWeight: 700, cursor: "pointer" }}>
             🏠 Inicio
           </button>
           <button className="btn" onClick={onClose ? onClose : () => navigate("/dashboard")} style={{ padding: "7px 12px", fontSize: 12 }}>
@@ -337,7 +335,7 @@ export default function CoordinatorDashboard({ onClose }) {
               style={{
                 padding: "9px 20px", borderRadius: 8, border: "none",
                 background: catalogLoading ? "var(--border)" : "var(--brand)",
-                color: catalogLoading ? "var(--muted)" : "#fff",
+                color: catalogLoading ? "var(--muted)" : "var(--on-brand)",
                 fontSize: 13, fontWeight: 800, cursor: catalogLoading ? "not-allowed" : "pointer",
                 fontFamily: "var(--font)", flexShrink: 0, alignSelf: "flex-end",
               }}
@@ -453,6 +451,7 @@ export default function CoordinatorDashboard({ onClose }) {
                 <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--border)", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
                   <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700 }}>Ordenar:</span>
                   <select
+                    aria-label="Ordenar cursos"
                     value={sortBy}
                     onChange={(e) => setSortBy(e.target.value)}
                     style={{
@@ -517,6 +516,10 @@ export default function CoordinatorDashboard({ onClose }) {
                       </tr>
                     )}
                     {sortedCourses.map(({ id, name, code, m, _semester, _category }) => {
+                      const openCourse = (courseId) => {
+                        sessionStorage.setItem("gemelo_pending_org", String(courseId));
+                        window.location.href = window.location.origin + "/dashboard";
+                      };
                       const avgColor = m.avgPct != null ? colorForPct(m.avgPct, null) : "var(--muted)";
                       const riskColor = m.atRiskPct == null ? "var(--muted)"
                         : m.atRiskPct > 30 ? COLORS.critical
@@ -525,9 +528,11 @@ export default function CoordinatorDashboard({ onClose }) {
                       return (
                         <tr
                           key={id}
-                          onClick={() => {
-                            sessionStorage.setItem("gemelo_pending_org", String(id));
-                            window.location.href = window.location.origin + "/dashboard";
+                          onClick={() => openCourse(id)}
+                          // Accesible por teclado: Enter/Espacio abren el curso
+                          tabIndex={0}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openCourse(id); }
                           }}
                           style={{ borderBottom: "1px solid var(--border)", cursor: "pointer" }}
                           className="tr-hover"
@@ -557,7 +562,7 @@ export default function CoordinatorDashboard({ onClose }) {
                             {m.atRiskCount != null ? `${m.atRiskCount} (${m.atRiskPct?.toFixed(0)}%)` : "—"}
                           </td>
                           <td style={{ padding: "10px 14px", textAlign: "right" }}>
-                            <span style={{ color: "var(--brand)", fontSize: 16 }}>→</span>
+                            <span aria-hidden="true" style={{ color: "var(--brand)", fontSize: 16 }}>→</span>
                           </td>
                         </tr>
                       );

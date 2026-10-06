@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
+import { I18nContext } from "./useI18n";
 
 /**
  * Lightweight i18n context — no external library.
@@ -131,13 +132,16 @@ const translations = {
   },
 };
 
-const I18nContext = createContext(null);
+
+// La interfaz solo está traducida al español: el selector de idioma se retiró
+// (la mayoría de pantallas no usaba t()). El sistema queda listo por si se
+// retoma: bastaría con volver a leer `gemelo_locale` y exponer el selector.
+const SUPPORTED_UI_LOCALE = "es";
 
 export function I18nProvider({ children }) {
-  const [locale, setLocaleState] = useState(() => {
-    if (typeof localStorage === "undefined") return "es";
-    return localStorage.getItem("gemelo_locale") || "es";
-  });
+  // Siempre español, aunque un usuario haya elegido "en" antes (si no, vería
+  // la interfaz a medio traducir y sin forma de volver).
+  const [locale, setLocaleState] = useState(SUPPORTED_UI_LOCALE);
 
   useEffect(() => {
     try { localStorage.setItem("gemelo_locale", locale); } catch { /* noop */ }
@@ -170,16 +174,3 @@ export function I18nProvider({ children }) {
   );
 }
 
-export function useI18n() {
-  const ctx = useContext(I18nContext);
-  if (!ctx) {
-    // Fallback: return a no-op t() so the app still works if provider missing
-    return {
-      locale: "es",
-      t: (k, fb) => fb || k,
-      setLocale: () => {},
-      toggleLocale: () => {},
-    };
-  }
-  return ctx;
-}

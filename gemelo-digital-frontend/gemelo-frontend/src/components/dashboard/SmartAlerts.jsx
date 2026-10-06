@@ -4,7 +4,6 @@ import {
   CalendarClock, Trophy, BarChart3, Target, Siren, Compass, Puzzle, Telescope,
   ChevronDown, ChevronUp,
 } from "lucide-react";
-import { computeRiskFromPct } from "../../utils/helpers";
 
 /**
  * SmartAlerts: analyzes studentRows and course data to generate
@@ -65,7 +64,6 @@ function normalizeBackendAlert(a, index = 0) {
 function SmartAlerts({
   studentRows = [],
   overview = null,
-  courseInfo = null,
   contentKpis = null,
   backendAlerts = null,
   onStudentClick = () => {},
@@ -242,7 +240,7 @@ function SmartAlerts({
       >
         <div style={{
           width: 34, height: 34, borderRadius: 10,
-          background: "linear-gradient(135deg, var(--brand-light) 0%, rgba(11, 95, 255, 0.06) 100%)",
+          background: "linear-gradient(135deg, var(--brand-light) 0%, color-mix(in srgb, var(--brand) 6%, transparent) 100%)",
           color: "var(--brand)", display: "flex", alignItems: "center", justifyContent: "center",
           flexShrink: 0,
         }}>
@@ -258,33 +256,35 @@ function SmartAlerts({
           {/* Severity breakdown badges */}
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
             {counts.critical > 0 && (
-              <span className="badge" style={{ background: "var(--critical-bg)", color: "#B42318" }}>
+              <span className="badge" style={{ background: "var(--critical-bg)", color: "var(--critical-fg)" }}>
                 <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--critical)", display: "inline-block" }} />
                 Críticas: {counts.critical}
               </span>
             )}
             {counts.warning > 0 && (
-              <span className="badge" style={{ background: "var(--watch-bg)", color: "#9A3412" }}>
+              <span className="badge" style={{ background: "var(--watch-bg)", color: "var(--watch-fg)" }}>
                 <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--watch)", display: "inline-block" }} />
                 Observación: {counts.warning}
               </span>
             )}
             {counts.info > 0 && (
-              <span className="badge" style={{ background: "var(--ok-bg)", color: "#1B5E20" }}>
+              <span className="badge" style={{ background: "var(--ok-bg)", color: "var(--ok-fg)" }}>
                 <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--ok)", display: "inline-block" }} />
                 Positivas: {counts.info}
               </span>
             )}
           </div>
         </div>
-        <button
+        {/* Indicador visual: la cabecera completa (role="button") ya alterna el panel;
+            un <button> anidado dentro de otro control no es accesible. */}
+        <span
           className="btn"
-          onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
-          style={{ padding: "6px 10px", fontSize: 12, flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 4 }}
+          aria-hidden="true"
+          style={{ padding: "6px 10px", fontSize: 12, flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer" }}
         >
           {open ? "Ocultar" : "Ver detalle"}
           {open ? <ChevronUp size={14} strokeWidth={2.4} /> : <ChevronDown size={14} strokeWidth={2.4} />}
-        </button>
+        </span>
       </div>
 
       {/* Expanded details */}
@@ -313,7 +313,7 @@ function SmartAlerts({
               >
                 <div style={{
                   width: 32, height: 32, borderRadius: 10,
-                  background: "rgba(255,255,255,0.7)", color: s.color,
+                  background: "color-mix(in srgb, var(--card) 70%, transparent)", color: s.color,
                   display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
                 }}>
                   {AlertIcon

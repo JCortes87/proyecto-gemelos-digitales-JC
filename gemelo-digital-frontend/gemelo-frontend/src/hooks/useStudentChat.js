@@ -1,4 +1,15 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useCallback } from "react";
+
+// Lee las entradas guardadas para la clave; [] si no hay o falla.
+function readEntries(storageKey) {
+  if (!storageKey || typeof localStorage === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(storageKey);
+    return raw ? (JSON.parse(raw) || []) : [];
+  } catch {
+    return [];
+  }
+}
 
 /**
  * Hook for a per-student "chat log" (simple timeline of interactions).
@@ -10,27 +21,19 @@ import { useState, useEffect, useCallback } from "react";
 export default function useStudentChat(orgUnitId, userId) {
   const storageKey = orgUnitId && userId ? `gemelo_chat_${orgUnitId}_${userId}` : null;
 
-  const [entries, setEntries] = useState(() => {
-    if (!storageKey || typeof localStorage === "undefined") return [];
-    try {
-      const raw = localStorage.getItem(storageKey);
-      return raw ? (JSON.parse(raw) || []) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [entries, setEntries] = useState(() => readEntries(storageKey));
 
-  useEffect(() => {
-    if (!storageKey) { setEntries([]); return; }
-    try {
-      const raw = localStorage.getItem(storageKey);
-      setEntries(raw ? (JSON.parse(raw) || []) : []);
-    } catch { setEntries([]); }
-  }, [storageKey]);
+  // Recargar al cambiar de estudiante/curso: ajuste durante el render
+  // comparando con la clave previa (en vez de setState dentro de un efecto).
+  const [prevKey, setPrevKey] = useState(storageKey);
+  if (storageKey !== prevKey) {
+    setPrevKey(storageKey);
+    setEntries(readEntries(storageKey));
+  }
 
   const persist = useCallback((next) => {
     if (!storageKey) return;
-    try { localStorage.setItem(storageKey, JSON.stringify(next)); } catch {}
+    try { localStorage.setItem(storageKey, JSON.stringify(next)); } catch { /* cuota/almacenamiento bloqueado: se mantiene en memoria */ }
   }, [storageKey]);
 
   const addEntry = useCallback((type, text) => {
@@ -59,7 +62,7 @@ export default function useStudentChat(orgUnitId, userId) {
   const clearAll = useCallback(() => {
     setEntries([]);
     if (storageKey) {
-      try { localStorage.removeItem(storageKey); } catch {}
+      try { localStorage.removeItem(storageKey); } catch { /* almacenamiento bloqueado: ya se limpió en memoria */ }
     }
   }, [storageKey]);
 

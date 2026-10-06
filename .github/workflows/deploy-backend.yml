@@ -7,12 +7,17 @@
 #   - Se ejecuta manualmente desde la pestana Actions de GitHub.
 #
 # Lo que hace:
+#   0. Corre los tests del backend (ci.yml via workflow_call). Si fallan, no
+#      se despliega.
 #   1. Checkout del codigo.
 #   2. Asume el rol IAM en AWS via OIDC (sin Access Keys ni secretos).
 #   3. Hace login en el registry ECR.
-#   4. Construye la imagen Docker del backend desde gemelo-digital-backend/.
+#   4. Construye la imagen Docker del backend desde gemelo-digital-backend/
+#      (linux/amd64, sin provenance/sbom: Fargate rechaza OCI index).
 #   5. La sube a ECR taggeada con el SHA del commit y como 'latest'.
-#   6. Le dice al servicio ECS que reinicie sus tasks con la nueva imagen.
+#   6. Registra una nueva revision de la task definition ACTUAL del servicio
+#      con la imagen fijada por digest (repo@sha256:...) y actualiza el
+#      servicio a esa revision (dispara el canary + circuit breaker).
 #   7. Espera a que el servicio quede estable antes de marcar el job como ok.
 # ----------------------------------------------------------------------------
 name: Deploy backend a ECS
@@ -45,8 +50,16 @@ env:
   IAM_ROLE_ARN: arn:aws:iam::718624265053:role/GemeloDigitalDeployerRole
 
 jobs:
+  tests:
+    name: Tests backend
+    uses: ./.github/workflows/ci.yml
+    with:
+      backend: true
+      frontend: false
+
   deploy:
     name: Construir imagen y actualizar servicio ECS
+    needs: tests
     runs-on: ubuntu-latest
 
     steps:
@@ -65,24 +78,70 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Construir, taggear y subir imagen Docker
+        id: build
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
         working-directory: gemelo-digital-backend
         run: |
-          docker build \
+          # Fargate SOLO acepta un manifiesto de una plataforma: sin
+          # provenance/sbom (BuildKit los agrega como OCI image index).
+          docker buildx build \
+            --platform linux/amd64 --provenance=false --sbom=false \
             -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
             -t $ECR_REGISTRY/$ECR_REPOSITORY:latest \
+            --metadata-file "$RUNNER_TEMP/build-meta.json" \
+            --push \
             .
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          DIGEST=$(jq -r '."containerimage.digest"' "$RUNNER_TEMP/build-meta.json")
+          if [ -z "$DIGEST" ] || [ "$DIGEST" = "null" ]; then
+            # Respaldo: pedir el digest a ECR por el tag inmutable (SHA).
+            DIGEST=$(aws ecr describe-images \
+              --repository-name $ECR_REPOSITORY \
+              --image-ids imageTag=$IMAGE_TAG \
+              --query 'imageDetails[0].imageDigest' --output text \
+              --region ${{ env.AWS_REGION }})
+          fi
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY@$DIGEST" >> "$GITHUB_OUTPUT"
 
-      - name: Forzar redeploy del servicio ECS
+      - name: Registrar task definition con la imagen por digest y desplegar
+        env:
+          IMAGE: ${{ steps.build.outputs.image }}
         run: |
+          # Parte de la task definition que el servicio usa HOY (asi se
+          # conservan secrets, env, roles, logs, cpu/memoria) y solo cambia la
+          # imagen del contenedor del backend (puerto 8000).
+          CURRENT_TD=$(aws ecs describe-services \
+            --cluster ${{ env.ECS_CLUSTER }} --services ${{ env.ECS_SERVICE }} \
+            --query 'services[0].taskDefinition' --output text \
+            --region ${{ env.AWS_REGION }})
+          echo "Task definition actual: $CURRENT_TD"
+          aws ecs describe-task-definition --task-definition "$CURRENT_TD" \
+            --query 'taskDefinition' --output json \
+            --region ${{ env.AWS_REGION }} > "$RUNNER_TEMP/td-current.json"
+
+          jq --arg IMG "$IMAGE" '
+            .containerDefinitions |= (
+              if length == 1 then map(.image = $IMG)
+              else map(if ([.portMappings[]?.containerPort] | index(8000)) != null
+                       then .image = $IMG else . end)
+              end)
+            | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+                  .compatibilities, .registeredAt, .registeredBy,
+                  .deregisteredAt)
+          ' "$RUNNER_TEMP/td-current.json" > "$RUNNER_TEMP/td-new.json"
+
+          NEW_TD=$(aws ecs register-task-definition \
+            --cli-input-json "file://$RUNNER_TEMP/td-new.json" \
+            --query 'taskDefinition.taskDefinitionArn' --output text \
+            --region ${{ env.AWS_REGION }})
+          echo "Nueva task definition: $NEW_TD"
+
           aws ecs update-service \
             --cluster ${{ env.ECS_CLUSTER }} \
             --service ${{ env.ECS_SERVICE }} \
-            --force-new-deployment \
+            --task-definition "$NEW_TD" \
             --region ${{ env.AWS_REGION }}
 
       - name: Esperar a que el servicio quede estable
@@ -96,4 +155,5 @@ jobs:
         run: |
           echo "Backend desplegado correctamente."
           echo "Imagen: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}"
+          echo "Digest: ${{ steps.build.outputs.digest }}"
           echo "Servicio ECS: ${{ env.ECS_CLUSTER }}/${{ env.ECS_SERVICE }}"

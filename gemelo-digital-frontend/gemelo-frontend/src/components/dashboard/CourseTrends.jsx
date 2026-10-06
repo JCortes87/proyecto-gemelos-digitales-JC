@@ -70,7 +70,9 @@ function CourseTrends({ snapshots = [] }) {
                 border: "1px solid var(--border)",
                 borderRadius: 8,
                 fontSize: 12,
+                color: "var(--text)",
               }}
+              labelStyle={{ color: "var(--text)" }}
             />
             <Legend wrapperStyle={{ fontSize: 11, paddingTop: 6 }} />
             <Line

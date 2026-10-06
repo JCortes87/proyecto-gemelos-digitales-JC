@@ -20,6 +20,7 @@ import time as _time_mod
 from datetime import datetime, timezone
 from pydantic import BaseModel
 
+from app.config import settings
 from app.state import get_session as _get_session
 from app.services.brightspace_client import _extract_session_id_any
 from app.services.email_service import send_email, smtp_configured
@@ -30,13 +31,13 @@ from app.services.user_registry import (
 )
 
 # Correo del administrador que recibe los reportes de error.
-BUG_REPORT_EMAIL = _os.getenv("BUG_REPORT_EMAIL", "desarrolloprofesoral@cesa.edu.co")
+BUG_REPORT_EMAIL = settings.bug_report_email
 # IDs de super-administrador autorizados (mismo default que el frontend: 5427).
 _SUPERADMIN_IDS = {
-    s.strip() for s in _os.getenv("SUPERADMIN_IDS", "5427").split(",") if s.strip()
+    s.strip() for s in settings.superadmin_ids.split(",") if s.strip()
 }
 
-_DATA_DIR = _os.getenv("GEMELO_DATA_DIR") or _os.path.dirname(
+_DATA_DIR = settings.gemelo_data_dir or _os.path.dirname(
     _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 )
 _BUG_REPORTS_FILE = _os.path.join(_DATA_DIR, "bug_reports.jsonl")
@@ -83,6 +84,9 @@ async def submit_bug_report(payload: BugReportIn, request: Request):
         raise HTTPException(status_code=422, detail="La descripción es obligatoria.")
 
     sess = _session_from_request(request)
+    if not sess.get("user_id"):
+        # Solo usuarios autenticados: evita que se use para enviar spam.
+        raise HTTPException(status_code=401, detail="Inicia sesión para reportar un error.")
     reporter = {
         "user_id": sess.get("user_id"),
         "user_name": sess.get("user_name"),
@@ -275,7 +279,7 @@ async def create_announcement(payload: AnnouncementIn, request: Request):
         if not smtp_configured():
             sent["error"] = "smtp_no_configurado"
         else:
-            from_name = _os.getenv("SMTP_FROM_NAME", "G.D CESA")
+            from_name = settings.smtp_from_name
             html = (
                 f"<div style='font-family:Arial,sans-serif;max-width:560px'>"
                 f"<h2 style='color:#0b5fff'>{subject}</h2>"

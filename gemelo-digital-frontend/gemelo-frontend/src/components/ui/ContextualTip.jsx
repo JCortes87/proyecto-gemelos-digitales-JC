@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { Lightbulb, X } from "lucide-react";
 
 /**
@@ -16,14 +16,18 @@ export default function ContextualTip({ id, title, description, Icon = Lightbulb
     return localStorage.getItem(storageKey) !== "dismissed";
   });
 
-  useEffect(() => {
+  // Si el id desaparece, ocultar el tip. Ajuste durante el render comparando
+  // con la clave previa (evita setState dentro de un efecto).
+  const [prevKey, setPrevKey] = useState(storageKey);
+  if (storageKey !== prevKey) {
+    setPrevKey(storageKey);
     if (!storageKey) setVisible(false);
-  }, [storageKey]);
+  }
 
   const dismiss = () => {
     setVisible(false);
     if (storageKey) {
-      try { localStorage.setItem(storageKey, "dismissed"); } catch {}
+      try { localStorage.setItem(storageKey, "dismissed"); } catch { /* storage bloqueado: el tip solo se oculta en esta sesión */ }
     }
   };
 

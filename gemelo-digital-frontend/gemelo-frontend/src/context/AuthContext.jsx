@@ -1,7 +1,7 @@
-import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from "react";
-import { apiUrl } from "../utils/api";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { AuthContext } from "./useAuth";
+import { apiUrl, getSessionId, setSessionId, clearSessionId, authHeaders, onUnauthorized } from "../utils/api";
 
-const AuthContext = createContext(null);
 
 const ROLES_INSTRUCTOR = new Set(["instructor", "coordinador administrativo", "super administrator"]);
 const ROLES_STUDENT = new Set(["estudiante ef"]);
@@ -73,9 +73,9 @@ export function AuthProvider({ children }) {
           }
         }
 
-        if (!_sid) _sid = localStorage.getItem("gemelo_sid");
+        if (!_sid) _sid = getSessionId();
         if (_sid) {
-          localStorage.setItem("gemelo_sid", _sid);
+          setSessionId(_sid);
           localStorage.removeItem("gemelo_oauth_pending"); // limpiar bandera de retry
         }
 
@@ -90,9 +90,11 @@ export function AuthProvider({ children }) {
         }
 
         // Call /auth/me (el sid va solo en el header Bearer, nunca en la URL)
+        // Fetch directo (no apiGet): la respuesta de /auth/me se maneja aquí
+        // mismo y no debe disparar el manejo global de 401.
         const res = await fetch(apiUrl("/auth/me"), {
           credentials: "include",
-          headers: _sid ? { "Authorization": `Bearer ${_sid}` } : {},
+          headers: authHeaders(_sid),
         });
         const data = await res.json();
         if (data.authenticated) {
@@ -107,7 +109,7 @@ export function AuthProvider({ children }) {
               apiUrl(`/brightspace/courses/enrolled?active_only=false&limit=200`),
               {
                 credentials: "include",
-                headers: _sid ? { "Authorization": `Bearer ${_sid}` } : {},
+                headers: authHeaders(_sid),
               }
             );
             if (coursesRes.ok) {
@@ -191,17 +193,30 @@ export function AuthProvider({ children }) {
     })();
   }, []);
 
-  const logout = useCallback(async () => {
-    try {
-      const sid = localStorage.getItem("gemelo_sid");
-      const hdrs = sid ? { Authorization: `Bearer ${sid}` } : {};
-      await fetch(apiUrl("/auth/logout"), { method: "POST", credentials: "include", headers: hdrs });
-    } catch { /* noop */ }
-    localStorage.removeItem("gemelo_sid");
+  // Limpieza local de la sesión + vuelta a la pantalla de login. Compartida
+  // por logout() y por el manejo global de 401 (que NO vuelve a llamar al
+  // backend: la sesión ya es inválida allá).
+  const redirectingRef = useRef(false);
+  const resetSessionToLogin = useCallback(() => {
+    clearSessionId();
     sessionStorage.clear();
+    // Evita redirecciones repetidas si llegan varios 401 en paralelo
+    if (redirectingRef.current) return;
+    redirectingRef.current = true;
     // Redirect to root (login) instead of reload to avoid 403 on SPA routes
     window.location.href = window.location.origin + "/";
   }, []);
+
+  const logout = useCallback(async () => {
+    try {
+      await fetch(apiUrl("/auth/logout"), { method: "POST", credentials: "include", headers: authHeaders() });
+    } catch { /* noop */ }
+    resetSessionToLogin();
+  }, [resetSessionToLogin]);
+
+  // 401 global: utils/api emite "gemelo:unauthorized" cuando una llamada
+  // autenticada es rechazada (sesión expirada/revocada) → volver al login.
+  useEffect(() => onUnauthorized(() => resetSessionToLogin()), [resetSessionToLogin]);
 
   // Memoizado: sin esto el objeto value se recrea en cada render del provider
   // y TODOS los consumidores de useAuth() re-renderizan en cascada.
@@ -229,8 +244,3 @@ export function AuthProvider({ children }) {
   );
 }
 
-export function useAuth() {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth must be used within AuthProvider");
-  return ctx;
-}

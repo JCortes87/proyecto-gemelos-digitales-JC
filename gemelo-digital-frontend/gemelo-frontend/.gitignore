@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Copias manuales de builds (usar git/tags en vez de duplicar)
+dist - copia/
+dist [0-9]*/
+dist*.zip

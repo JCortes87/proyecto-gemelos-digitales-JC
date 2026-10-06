@@ -8,6 +8,14 @@
 
 export function predictFinalGrade(student) {
   if (!student) return null;
+  // null/"" = aún sin calificaciones (pendiente): Number(null) daría 0 y el
+  // estudiante aparecería como "reprobará". Sin datos no hay predicción.
+  if (
+    student.currentPerformancePct == null || student.currentPerformancePct === "" ||
+    student.coveragePct == null || student.coveragePct === ""
+  ) {
+    return null;
+  }
   const currentPct = Number(student.currentPerformancePct);
   const coveragePct = Number(student.coveragePct);
 

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { computeRiskFromPct, fmtGrade10FromPct, fmtPct } from "../../utils/helpers";
+import { computeRiskFromPct, fmtPct } from "../../utils/helpers";
 import { elSpeak, elStop } from "../../utils/speech";
 
 /**
@@ -7,7 +7,8 @@ import { elSpeak, elStop } from "../../utils/speech";
  * course state. Pure client-side heuristic generation — no external AI call.
  * Can optionally be read aloud using the existing TTS utility.
  */
-function AINarrativeSummary({ studentRows = [], overview = null, courseInfo = null, raDashboard = null, contentKpis = null }) {
+// Nota: el padre también pasa `overview`, pero el resumen ya no lo usa.
+function AINarrativeSummary({ studentRows = [], courseInfo = null, raDashboard = null, contentKpis = null }) {
   // Estado de la lectura por voz: "idle" (sin sonar) | "loading" (pidiendo el
   // audio al backend) | "playing" (sonando). Permite deshabilitar el boton
   // mientras carga y mostrar "Detener" mientras suena.
@@ -19,7 +20,6 @@ function AINarrativeSummary({ studentRows = [], overview = null, courseInfo = nu
     if (loaded.length === 0) return null;
 
     const courseName = courseInfo?.Name || "este curso";
-    const avgPct = overview?.courseGradebook?.avgCurrentPerformancePct;
     const withGrade = loaded.filter((s) => s.currentPerformancePct != null);
     const avgGrade = withGrade.length > 0
       ? (withGrade.reduce((a, s) => a + s.currentPerformancePct, 0) / withGrade.length)
@@ -83,7 +83,7 @@ function AINarrativeSummary({ studentRows = [], overview = null, courseInfo = nu
     }
 
     return parts.join(" ");
-  }, [studentRows, overview, courseInfo, raDashboard, contentKpis]);
+  }, [studentRows, courseInfo, raDashboard, contentKpis]);
 
   const handleSpeak = () => {
     // Si ya esta sonando, este clic la detiene.

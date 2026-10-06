@@ -1,0 +1,62 @@
+# Contexto de build de la imagen backend (contexto = gemelo-digital-backend/).
+# El Dockerfile copia explicitamente lo que necesita en runtime:
+#   requirements.txt, alembic.ini, alembic/, config/, app/, main.py, start.sh,
+#   frontend_dist/  -> NO excluir nada de eso aqui.
+
+# ── Secretos / llaves — nunca dentro de la imagen ───────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+certs/
+keys/
+app/keys/
+
+# ── Datos locales de runtime (dev) ──────────────────────────────────────────
+.session_store.json
+.session_store.json.tmp
+known_users.json
+announcements.json
+announcements.json.tmp
+bug_reports.jsonl
+
+# ── Python / tooling ────────────────────────────────────────────────────────
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.log
+
+# ── Tests y utilidades que no van a produccion ──────────────────────────────
+tests/
+pytest.ini
+requirements-dev.txt
+test_db_connection.py
+scripts/
+
+# ── Archivos de deploy / docs / restos ──────────────────────────────────────
+Dockerfile
+Dockerfile copy
+.dockerignore
+docker-compose.yml
+taskdef*.json
+package-lock.json
+README.MD
+*.md
+
+# ── VCS / IDE / SO ──────────────────────────────────────────────────────────
+.git
+.gitignore
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

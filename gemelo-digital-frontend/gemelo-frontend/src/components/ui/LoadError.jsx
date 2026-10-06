@@ -76,7 +76,7 @@ export default function LoadError({ message, onRetry, compact = false }) {
       {onRetry && (
         <button type="button" onClick={handleRetry} disabled={retrying} style={{
           border: "none", borderRadius: 8, padding: "8px 16px",
-          background: "var(--brand, #0B5FFF)", color: "#fff",
+          background: "var(--brand, #0B5FFF)", color: "var(--on-brand, #fff)",
           fontSize: 12, fontWeight: 800, cursor: retrying ? "wait" : "pointer",
           display: "inline-flex", alignItems: "center", gap: 6,
           fontFamily: "inherit",

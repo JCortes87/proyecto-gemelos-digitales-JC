@@ -13,6 +13,7 @@ from app.rate_limit import limiter
 from app.services.brightspace_client import BrightspaceClient
 from app.services.gemelo_service import GemeloService
 from app.services.sync_service import SyncService
+from app.services.role_utils import _is_student_role as _is_student_role_base
 from app.api.gemelo_shared import get_service, _http500, logger
 from app.api.course_auth import require_course_staff, require_course_member
 
@@ -334,7 +335,7 @@ async def gemelo_course_metric_history(
     Fuente: DB — no llama a Brightspace.
     """
     try:
-        history = get_course_metric_history(orgUnitId, days=days)
+        history = await asyncio.to_thread(get_course_metric_history, orgUnitId, days=days)
         return {
             "orgUnitId": orgUnitId,
             "days": days,
@@ -740,17 +741,23 @@ async def gemelo_grade_items(
         return items
 
     # --- Try DB cache first ---
-    try:
+    def _load_cached_items():
         db = SessionLocal()
         try:
-            db_grade_items = db.execute(
-                select(GradeItem).where(GradeItem.org_unit_id == orgUnitId)
-            ).scalars().all()
-            db_dropbox_folders = db.execute(
-                select(DropboxFolder).where(DropboxFolder.org_unit_id == orgUnitId)
-            ).scalars().all()
+            return (
+                db.execute(
+                    select(GradeItem).where(GradeItem.org_unit_id == orgUnitId)
+                ).scalars().all(),
+                db.execute(
+                    select(DropboxFolder).where(DropboxFolder.org_unit_id == orgUnitId)
+                ).scalars().all(),
+            )
         finally:
             db.close()
+
+    try:
+        # SQLAlchemy síncrono → en un hilo para no bloquear el event loop.
+        db_grade_items, db_dropbox_folders = await asyncio.to_thread(_load_cached_items)
 
         if db_grade_items or db_dropbox_folders:
             items = _build_items_from_db(db_grade_items, db_dropbox_folders)
@@ -930,10 +937,7 @@ async def gemelo_grade_items(
 
 def _is_student_role(role_name: Optional[str]) -> bool:
     """Filtra solo estudiantes. Si no viene rol, no bloquea."""
-    if not role_name:
-        return True
-    rn = role_name.lower()
-    return ("student" in rn) or ("estudiante" in rn) or ("learner" in rn)
+    return _is_student_role_base(role_name, allow_missing=True)
 
 
 async def _gather_with_semaphore(coros, limit: int = 10):

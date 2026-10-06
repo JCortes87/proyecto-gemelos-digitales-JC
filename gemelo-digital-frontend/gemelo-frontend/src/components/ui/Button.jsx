@@ -42,7 +42,7 @@ export default function Button({
   const variants = {
     solid: {
       background: "var(--brand)",
-      color: "#fff",
+      color: "var(--on-brand)",
       border: "1px solid var(--brand)",
     },
     ghost: {
@@ -62,7 +62,7 @@ export default function Button({
     },
     danger: {
       background: "var(--critical)",
-      color: "#fff",
+      color: "var(--on-status)",
       border: "1px solid var(--critical)",
     },
   };

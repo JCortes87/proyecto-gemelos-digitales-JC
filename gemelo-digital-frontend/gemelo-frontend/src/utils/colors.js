@@ -6,19 +6,29 @@ export const COLORS = {
   brand: "#0B5FFF",
 };
 
+/**
+ * Aplica transparencia a cualquier color CSS, incluidas variables (`var(--x)`).
+ * Sustituye el patrón `${hex}22` (alpha hex concatenado), que no funciona con
+ * tokens de tema. pct: 0–100.
+ *   withAlpha("var(--critical)", 13) → "color-mix(in srgb, var(--critical) 13%, transparent)"
+ */
+export function withAlpha(color, pct) {
+  return `color-mix(in srgb, ${color} ${pct}%, transparent)`;
+}
+
 export const STATUS_CONFIG = {
-  solido: { bg: "var(--ok-bg)", fg: "#1B5E20", dot: COLORS.ok, label: "Óptimo" },
-  "óptimo": { bg: "var(--ok-bg)", fg: "#1B5E20", dot: COLORS.ok, label: "Óptimo" },
-  optimo: { bg: "var(--ok-bg)", fg: "#1B5E20", dot: COLORS.ok, label: "Óptimo" },
-  observacion: { bg: "var(--watch-bg)", fg: "#9A3412", dot: COLORS.watch, label: "Seguimiento" },
-  "en seguimiento": { bg: "var(--watch-bg)", fg: "#9A3412", dot: COLORS.watch, label: "Seguimiento" },
-  "en desarrollo": { bg: "var(--watch-bg)", fg: "#9A3412", dot: COLORS.watch, label: "En desarrollo" },
-  critico: { bg: "var(--critical-bg)", fg: "#B42318", dot: COLORS.critical, label: "Crítico" },
-  cargando: { bg: "var(--brand-light)", fg: "#1D4ED8", dot: COLORS.brand, label: "Cargando" },
+  solido: { bg: "var(--ok-bg)", fg: "var(--ok-fg)", dot: COLORS.ok, label: "Óptimo" },
+  "óptimo": { bg: "var(--ok-bg)", fg: "var(--ok-fg)", dot: COLORS.ok, label: "Óptimo" },
+  optimo: { bg: "var(--ok-bg)", fg: "var(--ok-fg)", dot: COLORS.ok, label: "Óptimo" },
+  observacion: { bg: "var(--watch-bg)", fg: "var(--watch-fg)", dot: COLORS.watch, label: "Seguimiento" },
+  "en seguimiento": { bg: "var(--watch-bg)", fg: "var(--watch-fg)", dot: COLORS.watch, label: "Seguimiento" },
+  "en desarrollo": { bg: "var(--watch-bg)", fg: "var(--watch-fg)", dot: COLORS.watch, label: "En desarrollo" },
+  critico: { bg: "var(--critical-bg)", fg: "var(--critical-fg)", dot: COLORS.critical, label: "Crítico" },
+  cargando: { bg: "var(--brand-light)", fg: "var(--info-fg)", dot: COLORS.brand, label: "Cargando" },
   pending: { bg: "var(--pending-bg)", fg: "var(--muted)", dot: COLORS.pending, label: "Pendiente" },
-  alto: { bg: "var(--critical-bg)", fg: "#B42318", dot: COLORS.critical, label: "Alto" },
-  medio: { bg: "var(--watch-bg)", fg: "#9A3412", dot: COLORS.watch, label: "Medio" },
-  bajo: { bg: "var(--ok-bg)", fg: "#1B5E20", dot: COLORS.ok, label: "Bajo" },
+  alto: { bg: "var(--critical-bg)", fg: "var(--critical-fg)", dot: COLORS.critical, label: "Alto" },
+  medio: { bg: "var(--watch-bg)", fg: "var(--watch-fg)", dot: COLORS.watch, label: "Medio" },
+  bajo: { bg: "var(--ok-bg)", fg: "var(--ok-fg)", dot: COLORS.ok, label: "Bajo" },
 };
 
 import { normStatus } from "./helpers";

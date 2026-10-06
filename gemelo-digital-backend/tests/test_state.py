@@ -60,10 +60,26 @@ class TestSaveAndGet:
 
 
 class TestExpiry:
-    def test_expired_session_is_evicted(self):
-        state.save_session("sid1", _mk_token_data(expires_in=1))
+    def test_expired_session_without_refresh_is_evicted(self):
+        state.save_session("sid1", _mk_token_data(expires_in=1, refresh_token=None))
         # Forzar expiración sin dormir
         state.SESSION_STORE["sid1"]["expires_at"] = time.time() - 10
+        assert state.get_session("sid1") is None
+        assert "sid1" not in state.SESSION_STORE
+
+    def test_expired_session_with_refresh_is_kept_for_refresh(self):
+        state.save_session("sid1", _mk_token_data(expires_in=1))
+        state.SESSION_STORE["sid1"]["expires_at"] = time.time() - 10
+        # No es usable tal cual…
+        assert state.get_session("sid1") is None
+        # …pero sigue disponible para que el refresh la renueve.
+        assert state.get_refreshable_session("sid1")["refresh_token"] == "ref-xyz"
+
+    def test_refreshable_session_respects_absolute_cap(self):
+        state.save_session("sid1", _mk_token_data(expires_in=1))
+        state.SESSION_STORE["sid1"]["expires_at"] = time.time() - 10
+        state.SESSION_STORE["sid1"]["iat"] = time.time() - state.SESSION_TTL - 10
+        assert state.get_refreshable_session("sid1") is None
         assert state.get_session("sid1") is None
         assert "sid1" not in state.SESSION_STORE
 

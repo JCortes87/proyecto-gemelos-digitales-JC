@@ -6,8 +6,10 @@ Sirve para que el administrador pueda enviar anuncios/notificaciones a
 "todos los usuarios de la plataforma" (opción B) sin depender de las
 sesiones en memoria, que son efímeras.
 
-Se guarda como JSON: { "<user_id>": {user_id, name, email, role, last_seen, logins} }
-Almacenamiento best-effort en disco (gitignored). No lanza excepciones.
+Fuente principal: Postgres (tabla known_users, alimentada por
+usage_tracking en cada login) — sobrevive redeploys. El JSON en disco
+{ "<user_id>": {user_id, name, email, role, last_seen, logins} } se mantiene
+como respaldo best-effort por si la BD no responde. No lanza excepciones.
 """
 import os
 import json
@@ -15,12 +17,14 @@ import threading
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from app.config import settings
+
 _LOCK = threading.Lock()
 
-_DATA_DIR = os.getenv("GEMELO_DATA_DIR") or os.path.dirname(
+_DATA_DIR = settings.gemelo_data_dir or os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 )
-_REGISTRY_PATH = os.getenv("GEMELO_USERS_FILE") or os.path.join(_DATA_DIR, "known_users.json")
+_REGISTRY_PATH = settings.gemelo_users_file or os.path.join(_DATA_DIR, "known_users.json")
 
 
 def _load() -> Dict[str, Dict[str, Any]]:
@@ -83,14 +87,48 @@ def record_user(
         _save_locked(data)
 
 
+def _load_db() -> Optional[Dict[str, Dict[str, Any]]]:
+    """Usuarios desde Postgres con la misma forma que el JSON, o None si la
+    BD no está disponible."""
+    try:
+        from sqlalchemy import select
+        from app.db.models import KnownUser
+        from app.db.session import SessionLocal
+        with SessionLocal() as db:
+            rows = db.execute(select(KnownUser)).scalars().all()
+    except Exception:
+        return None
+    out: Dict[str, Dict[str, Any]] = {}
+    for r in rows:
+        last_seen = r.last_seen.replace(tzinfo=timezone.utc).isoformat() if r.last_seen else ""
+        out[str(r.user_id)] = {
+            "user_id": str(r.user_id),
+            "name": r.name or "",
+            "email": r.email or "",
+            "role": r.role or "",
+            "audience": r.audience or "",
+            "last_seen": last_seen,
+            "logins": int(r.login_count or 0),
+        }
+    return out
+
+
 def list_users(with_email_only: bool = False, exclude_students: bool = False) -> List[Dict[str, Any]]:
-    """Lista los usuarios registrados.
+    """Lista los usuarios registrados (Postgres + respaldo JSON).
 
     - with_email_only: solo con email.
     - exclude_students: omite a quienes tienen audience == "student".
     """
     with _LOCK:
         data = _load()
+    # Postgres manda: el JSON local se pierde en cada redeploy, así que sin
+    # esto los anuncios solo llegaban a quien entró desde el último deploy.
+    db_users = _load_db()
+    if db_users:
+        for uid, u in db_users.items():
+            merged = dict(data.get(uid, {}))
+            merged.update({k: v for k, v in u.items() if v not in ("", None)})
+            data[uid] = merged
     items = list(data.values())
     if with_email_only:
         items = [u for u in items if (u.get("email") or "").strip()]

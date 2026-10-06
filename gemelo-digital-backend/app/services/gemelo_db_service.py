@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -101,6 +102,12 @@ def get_course_metric_history(orgUnitId: int, days: int = 90) -> List[Dict[str, 
 
 
 async def build_course_overview_from_db(orgUnitId: int) -> dict:
+    """Versión async: corre la lectura síncrona en un hilo para no bloquear
+    el event loop. Ver `_build_course_overview_from_db_sync`."""
+    return await asyncio.to_thread(_build_course_overview_from_db_sync, orgUnitId)
+
+
+def _build_course_overview_from_db_sync(orgUnitId: int) -> dict:
     """
     Lee el overview agregado del curso directamente desde Postgres,
     sin tocar la API de Brightspace.

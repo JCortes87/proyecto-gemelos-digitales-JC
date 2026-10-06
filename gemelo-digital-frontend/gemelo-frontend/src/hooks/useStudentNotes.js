@@ -1,4 +1,17 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useCallback } from "react";
+
+// Lee { text, updatedAt } guardado para la clave; vacío si no hay o falla.
+function readNote(storageKey) {
+  if (!storageKey || typeof localStorage === "undefined") return { text: "", updatedAt: null };
+  try {
+    const raw = localStorage.getItem(storageKey);
+    if (!raw) return { text: "", updatedAt: null };
+    const parsed = JSON.parse(raw);
+    return { text: parsed?.text || "", updatedAt: parsed?.updatedAt || null };
+  } catch {
+    return { text: "", updatedAt: null };
+  }
+}
 
 /**
  * Hook for persistent private teacher notes per student.
@@ -11,52 +24,19 @@ import { useState, useEffect, useCallback } from "react";
 export default function useStudentNotes(orgUnitId, userId) {
   const storageKey = orgUnitId && userId ? `gemelo_note_${orgUnitId}_${userId}` : null;
 
-  const [notes, setNotesState] = useState(() => {
-    if (!storageKey || typeof localStorage === "undefined") return "";
-    try {
-      const raw = localStorage.getItem(storageKey);
-      if (!raw) return "";
-      const parsed = JSON.parse(raw);
-      return parsed?.text || "";
-    } catch {
-      return "";
-    }
-  });
+  const [notes, setNotesState] = useState(() => readNote(storageKey).text);
+  const [lastUpdated, setLastUpdated] = useState(() => readNote(storageKey).updatedAt);
 
-  const [lastUpdated, setLastUpdated] = useState(() => {
-    if (!storageKey || typeof localStorage === "undefined") return null;
-    try {
-      const raw = localStorage.getItem(storageKey);
-      if (!raw) return null;
-      const parsed = JSON.parse(raw);
-      return parsed?.updatedAt || null;
-    } catch {
-      return null;
-    }
-  });
-
-  // Reload notes when storageKey changes (different student opened)
-  useEffect(() => {
-    if (!storageKey) {
-      setNotesState("");
-      setLastUpdated(null);
-      return;
-    }
-    try {
-      const raw = localStorage.getItem(storageKey);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        setNotesState(parsed?.text || "");
-        setLastUpdated(parsed?.updatedAt || null);
-      } else {
-        setNotesState("");
-        setLastUpdated(null);
-      }
-    } catch {
-      setNotesState("");
-      setLastUpdated(null);
-    }
-  }, [storageKey]);
+  // Recargar las notas cuando cambia storageKey (se abrió otro estudiante).
+  // Se ajusta durante el render comparando con la clave previa, en lugar de
+  // un efecto con setState (evita un render intermedio con datos viejos).
+  const [prevKey, setPrevKey] = useState(storageKey);
+  if (storageKey !== prevKey) {
+    setPrevKey(storageKey);
+    const n = readNote(storageKey);
+    setNotesState(n.text);
+    setLastUpdated(n.updatedAt);
+  }
 
   const setNotes = useCallback((text) => {
     setNotesState(text);
@@ -76,7 +56,7 @@ export default function useStudentNotes(orgUnitId, userId) {
       localStorage.removeItem(storageKey);
       setNotesState("");
       setLastUpdated(null);
-    } catch {}
+    } catch { /* storage no disponible: se conservan las notas en memoria */ }
   }, [storageKey]);
 
   return { notes, setNotes, lastUpdated, clearNotes };

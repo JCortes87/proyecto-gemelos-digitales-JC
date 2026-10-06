@@ -118,7 +118,7 @@ export default class ErrorBoundary extends React.Component {
             <button
               type="button"
               onClick={this.handleRetry}
-              style={{ ...btnBase, background: "var(--brand, #0B5FFF)", color: "#fff" }}
+              style={{ ...btnBase, background: "var(--brand, #0B5FFF)", color: "var(--on-brand, #fff)" }}
             >
               <RotateCcw size={14} strokeWidth={2.2} aria-hidden="true" />
               Reintentar

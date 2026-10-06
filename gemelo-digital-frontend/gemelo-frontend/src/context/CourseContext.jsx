@@ -1,7 +1,7 @@
-import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
+import { CourseContext } from "./useCourse";
 import { apiGetCached } from "../utils/api";
 
-const CourseContext = createContext(null);
 
 export function CourseProvider({ children, orgUnitId: externalOrgUnitId }) {
   // orgUnitId can be controlled externally or internally
@@ -198,8 +198,3 @@ export function CourseProvider({ children, orgUnitId: externalOrgUnitId }) {
   );
 }
 
-export function useCourse() {
-  const ctx = useContext(CourseContext);
-  if (!ctx) throw new Error("useCourse must be used within CourseProvider");
-  return ctx;
-}

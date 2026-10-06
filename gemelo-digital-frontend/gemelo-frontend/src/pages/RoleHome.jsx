@@ -6,7 +6,7 @@ import {
   Ban, ExternalLink, Crown, Clock, ChevronDown, ChevronUp, Filter, Megaphone, Send,
   Target, ListChecks, Activity,
 } from "lucide-react";
-import { useAuth } from "../context/AuthContext";
+import { useAuth } from "../context/useAuth";
 import { apiGet, apiPost } from "../utils/api";
 import { injectStyles } from "../styles/global";
 import { isStudentRole } from "../utils/roles";
@@ -163,7 +163,7 @@ export default function RoleHome() {
     if (!obj.id || obj.id === "0" || obj.id === "undefined") return;
     setRecentEntries(prev => {
       const next = [obj, ...prev.filter(x => x.id !== obj.id)].slice(0, 5);
-      try { localStorage.setItem(RECENT_KEY, JSON.stringify(next)); } catch {}
+      try { localStorage.setItem(RECENT_KEY, JSON.stringify(next)); } catch { /* storage bloqueado: los recientes quedan solo en memoria */ }
       return next;
     });
   }, []);
@@ -368,7 +368,7 @@ export default function RoleHome() {
       {/* ==================== TOP BAR ==================== */}
       <header style={{
         position: "sticky", top: 0, zIndex: 50,
-        background: "rgba(255,255,255,0.85)", backdropFilter: "blur(16px) saturate(180%)",
+        background: "color-mix(in srgb, var(--card) 85%, transparent)", backdropFilter: "blur(16px) saturate(180%)",
         WebkitBackdropFilter: "blur(16px) saturate(180%)",
         borderBottom: "1px solid var(--border)",
         display: "flex", alignItems: "center", justifyContent: "space-between",
@@ -379,7 +379,7 @@ export default function RoleHome() {
             width: 36, height: 36, borderRadius: 10,
             background: "linear-gradient(135deg, var(--brand) 0%, #1e40af 100%)",
             display: "flex", alignItems: "center", justifyContent: "center",
-            color: "#fff", fontSize: 10, fontWeight: 900, letterSpacing: "0.05em",
+            color: "var(--on-brand)", fontSize: 10, fontWeight: 900, letterSpacing: "0.05em",
             boxShadow: "0 4px 14px -4px rgba(11, 95, 255, 0.5)",
           }}>CESA</div>
           <div>
@@ -395,7 +395,7 @@ export default function RoleHome() {
           <div style={{
             width: 34, height: 34, borderRadius: "50%",
             background: "linear-gradient(135deg, var(--brand) 0%, #1e40af 100%)",
-            color: "#fff", display: "flex", alignItems: "center", justifyContent: "center",
+            color: "var(--on-brand)", display: "flex", alignItems: "center", justifyContent: "center",
             fontSize: 13, fontWeight: 800,
             boxShadow: "0 3px 10px -3px rgba(11, 95, 255, 0.4)",
           }}>
@@ -510,6 +510,7 @@ export default function RoleHome() {
             }} />
             <input
               type="text"
+              aria-label="Buscar cursos por nombre, código o ID"
               placeholder={lazyMode && courses.length === 0
                 ? "Buscar en todos los cursos por nombre, código o ID (mín. 3 caracteres)..."
                 : "Buscar por nombre, código o ID..."}
@@ -643,6 +644,7 @@ export default function RoleHome() {
                       Filtrar por período
                     </span>
                     <select
+                      aria-label="Filtrar por período"
                       value={filterSemester}
                       onChange={(e) => { setFilterSemester(e.target.value); setShowAllInst(false); }}
                       style={{
@@ -760,12 +762,14 @@ export default function RoleHome() {
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
                   <input
                     type="number"
+                    aria-label="ID del estudiante"
                     placeholder="ID del estudiante"
                     value={overviewStudentSearchId}
                     onChange={e => setOverviewStudentSearchId(e.target.value)}
                     style={{ flex: "1 1 160px", minWidth: 0, maxWidth: "100%", padding: "10px 14px", borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13, fontFamily: "var(--font)", outline: "none", fontWeight: 500 }}
                   />
                   <select
+                    aria-label="Período académico"
                     value={impersonatePeriod}
                     onChange={e => setImpersonatePeriod(e.target.value)}
                     style={{ flex: "1 1 160px", minWidth: 0, maxWidth: "100%", textOverflow: "ellipsis", padding: "10px 14px", borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13, fontFamily: "var(--font)", outline: "none", cursor: "pointer", fontWeight: 500 }}
@@ -790,7 +794,7 @@ export default function RoleHome() {
                     background: overviewStudentSearchId
                       ? "linear-gradient(135deg, var(--brand) 0%, #1e40af 100%)"
                       : "var(--bg)",
-                    color: overviewStudentSearchId ? "#fff" : "var(--muted)",
+                    color: overviewStudentSearchId ? "var(--on-brand)" : "var(--muted)",
                     fontSize: 14, fontWeight: 800, fontFamily: "var(--font)",
                     display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8,
                     transition: "transform 0.15s, box-shadow 0.2s",
@@ -818,22 +822,24 @@ export default function RoleHome() {
                 </div>
                 <div style={{
                   fontSize: 12, color: "var(--muted)", marginBottom: 14,
-                  padding: "10px 14px", background: "rgba(255, 170, 0, 0.08)",
-                  borderRadius: 10, borderLeft: "3px solid #f59e0b",
+                  padding: "10px 14px", background: "var(--warning-bg)",
+                  borderRadius: 10, borderLeft: "3px solid var(--watch)",
                   display: "flex", alignItems: "flex-start", gap: 8, lineHeight: 1.5,
                 }}>
-                  <Crown size={16} strokeWidth={2.2} style={{ color: "#f59e0b", flexShrink: 0, marginTop: 1 }} />
+                  <Crown size={16} strokeWidth={2.2} style={{ color: "var(--watch)", flexShrink: 0, marginTop: 1 }} />
                   <span>Abre un curso como si fueras un profesor o estudiante específico. Para "Como Estudiante" debes ingresar el ID del estudiante.</span>
                 </div>
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
                   <input
                     type="number"
+                    aria-label="ID del curso"
                     placeholder="ID del curso"
                     value={impersonateOrgId}
                     onChange={e => setImpersonateOrgId(e.target.value)}
                     style={{ flex: "1 1 120px", padding: "10px 14px", borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13, fontFamily: "var(--font)", outline: "none", fontWeight: 500 }}
                   />
                   <select
+                    aria-label="Rol a suplantar"
                     value={impersonateRole}
                     onChange={e => setImpersonateRole(e.target.value)}
                     style={{ padding: "10px 14px", borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13, fontFamily: "var(--font)", outline: "none", cursor: "pointer", fontWeight: 500 }}
@@ -844,6 +850,7 @@ export default function RoleHome() {
                   {impersonateRole === "student" && (
                     <input
                       type="number"
+                      aria-label="ID del estudiante a suplantar"
                       placeholder="ID del estudiante"
                       value={impersonateUserId}
                       onChange={e => setImpersonateUserId(e.target.value)}
@@ -920,7 +927,7 @@ export default function RoleHome() {
                     width: "100%", padding: "12px 16px", borderRadius: 12,
                     border: "none", cursor: "pointer",
                     background: "linear-gradient(135deg, var(--brand) 0%, #1e40af 100%)",
-                    color: "#fff", fontSize: 14, fontWeight: 800, fontFamily: "var(--font)",
+                    color: "var(--on-brand)", fontSize: 14, fontWeight: 800, fontFamily: "var(--font)",
                     display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8,
                     transition: "transform 0.15s, box-shadow 0.2s",
                     boxShadow: "0 6px 16px -6px rgba(11, 95, 255, 0.5)",
@@ -961,7 +968,7 @@ export default function RoleHome() {
                     width: "100%", padding: "12px 16px", borderRadius: 12,
                     border: "none", cursor: "pointer",
                     background: "linear-gradient(135deg, var(--brand) 0%, #1e40af 100%)",
-                    color: "#fff", fontSize: 14, fontWeight: 800, fontFamily: "var(--font)",
+                    color: "var(--on-brand)", fontSize: 14, fontWeight: 800, fontFamily: "var(--font)",
                     display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8,
                     transition: "transform 0.15s, box-shadow 0.2s",
                     boxShadow: "0 6px 16px -6px rgba(11, 95, 255, 0.5)",
@@ -1073,7 +1080,7 @@ export default function RoleHome() {
                     {isSuperAdmin && (
                       <div style={{
                         marginBottom: 12, padding: "12px 14px",
-                        background: "rgba(255, 170, 0, 0.08)", border: "1px solid rgba(255, 170, 0, 0.3)",
+                        background: "var(--warning-bg)", border: "1px solid var(--warning-border)",
                         borderRadius: 12, fontSize: 12, color: "var(--text)", maxWidth: 460,
                       }}>
                         <div style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--muted)", marginBottom: 8 }}>
@@ -1106,7 +1113,7 @@ export default function RoleHome() {
                 <button
                   onClick={() => setSearch("")}
                   style={{
-                    background: "var(--brand)", color: "#fff", border: "none",
+                    background: "var(--brand)", color: "var(--on-brand)", border: "none",
                     borderRadius: 10, padding: "8px 18px", fontSize: 12, fontWeight: 800, cursor: "pointer",
                     marginTop: 8, transition: "transform 0.15s",
                   }}
@@ -1258,18 +1265,20 @@ function AdminAnnounce() {
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
         <input
           type="text"
+          aria-label="Asunto del anuncio"
           placeholder="Asunto del anuncio"
           value={subject}
           maxLength={140}
           onChange={e => setSubject(e.target.value)}
           style={{ ...inputStyle, flex: "2 1 220px" }}
         />
-        <select value={tag} onChange={e => setTag(e.target.value)} style={{ ...inputStyle, flex: "1 1 140px", cursor: "pointer" }}>
+        <select aria-label="Etiqueta del anuncio" value={tag} onChange={e => setTag(e.target.value)} style={{ ...inputStyle, flex: "1 1 140px", cursor: "pointer" }}>
           {TAGS.map(t => <option key={t} value={t}>{t}</option>)}
         </select>
       </div>
 
       <textarea
+        aria-label="Mensaje del anuncio"
         placeholder="Escribe el mensaje… (ej: nueva actualización de la plataforma, mantenimiento programado, reforma importante…)"
         value={message}
         onChange={e => setMessage(e.target.value)}
@@ -1284,7 +1293,7 @@ function AdminAnnounce() {
           width: "100%", padding: "12px 16px", borderRadius: 12,
           border: "none", cursor: canSend ? "pointer" : "not-allowed",
           background: canSend ? "linear-gradient(135deg, var(--brand) 0%, #1e40af 100%)" : "var(--bg)",
-          color: canSend ? "#fff" : "var(--muted)",
+          color: canSend ? "var(--on-brand)" : "var(--muted)",
           fontSize: 14, fontWeight: 800, fontFamily: "var(--font)",
           display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8,
           boxShadow: canSend ? "0 6px 16px -6px rgba(11, 95, 255, 0.5)" : "none",
@@ -1296,8 +1305,8 @@ function AdminAnnounce() {
       {result && (
         <div style={{
           marginTop: 12, padding: "10px 14px", borderRadius: 10, fontSize: 12, lineHeight: 1.5,
-          background: result.ok ? "rgba(22,163,74,0.08)" : "rgba(220,38,38,0.08)",
-          border: `1px solid ${result.ok ? "rgba(22,163,74,0.3)" : "rgba(220,38,38,0.3)"}`,
+          background: result.ok ? "var(--success-bg)" : "var(--danger-bg)",
+          border: `1px solid ${result.ok ? "var(--success-border)" : "var(--danger-border)"}`,
           color: "var(--text)",
         }}>
           {result.ok ? (

@@ -3,6 +3,7 @@ import React, { useState } from "react";
 import ReactDOM from "react-dom";
 import { normStatus, fmtPct } from "../../utils/helpers";
 import { COLORS, STATUS_CONFIG } from "../../utils/colors";
+import useDialogA11y from "../../hooks/useDialogA11y";
 /**
  * =========================
  * UI Atoms
@@ -86,11 +87,11 @@ export function ThresholdsModal({ current, base, isOverridden, onSave, onReset, 
   const [crit, setCrit] = useState(Number(current?.critical ?? 50));
   const [watch, setWatch] = useState(Number(current?.watch ?? 70));
   const valid = watch >= crit;
+  // Foco inicial, focus trap, Esc, bloqueo de scroll y restauración del foco
+  const dialogRef = useDialogA11y({ onClose });
+  const titleId = React.useId();
   return (
     <div
-      role="dialog"
-      aria-modal="true"
-      aria-label="Configurar umbrales de riesgo"
       onClick={onClose}
       style={{
         position: "fixed", inset: 0, zIndex: 10000,
@@ -100,15 +101,20 @@ export function ThresholdsModal({ current, base, isOverridden, onSave, onReset, 
       }}
     >
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
         style={{
           width: "min(440px, 100%)", background: "var(--card)",
           border: "1px solid var(--border)", borderRadius: 16,
           boxShadow: "var(--shadow-lg)", padding: "20px 22px",
-          fontFamily: "var(--font)",
+          fontFamily: "var(--font)", outline: "none",
         }}
       >
-        <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text)", marginBottom: 4 }}>
+        <div id={titleId} style={{ fontSize: 16, fontWeight: 800, color: "var(--text)", marginBottom: 4 }}>
           Umbrales de riesgo del curso
         </div>
         <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 16 }}>
@@ -169,7 +175,7 @@ export function ThresholdsModal({ current, base, isOverridden, onSave, onReset, 
             style={{
               padding: "8px 14px", borderRadius: 8, border: "none",
               background: valid ? "var(--brand)" : "var(--border)",
-              color: "#fff", fontSize: 12, fontWeight: 800,
+              color: "var(--on-brand)", fontSize: 12, fontWeight: 800,
               cursor: valid ? "pointer" : "not-allowed", fontFamily: "var(--font)",
             }}
           >
@@ -359,8 +365,7 @@ export function InfoTooltip({ text }) {
   const triggerRef = React.useRef(null);
   const tooltipRef = React.useRef(null);
   const [pos, setPos] = React.useState({ top: -9999, left: -9999 });
-
-  if (!String(text || "").trim()) return null;
+  const tooltipId = React.useId();
 
   const TW = 260; // tooltip width
   const GAP = 7;
@@ -399,11 +404,14 @@ export function InfoTooltip({ text }) {
     };
   }, [open, calcPos]);
 
+  if (!String(text || "").trim()) return null;
+
   // Portal content
   const tooltipNode = open && _tooltipRoot
     ? ReactDOM.createPortal(
         <div
           ref={tooltipRef}
+          id={tooltipId}
           role="tooltip"
           style={{
             position: "fixed",
@@ -444,6 +452,11 @@ export function InfoTooltip({ text }) {
           role="button"
           tabIndex={0}
           aria-label="Ver descripción"
+          aria-describedby={open ? tooltipId : undefined}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); setOpen((v) => !v); }
+            else if (e.key === "Escape") setOpen(false);
+          }}
           style={{
             display: "inline-flex", width: 16, height: 16, borderRadius: 999,
             alignItems: "center", justifyContent: "center",
@@ -486,6 +499,27 @@ export function SortTh({ label, active, dir, onClick, title }) {
   );
 }
 
+// Fila de CoverageBars (etiqueta + % + barra). A nivel de módulo para no
+// recrear el componente en cada render del padre.
+const BarRow = ({ label, value, color, tooltip }) => (
+  <div style={{ display: "flex", flexDirection: "column", gap: 5 }} title={tooltip}>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <div style={{
+        fontSize: 11, color: "var(--muted)", fontWeight: 700,
+        textTransform: "uppercase", letterSpacing: "0.04em",
+        display: "flex", alignItems: "center", gap: 5,
+      }}>
+        <span style={{ width: 7, height: 7, borderRadius: "50%", background: color, display: "inline-block", flexShrink: 0 }} />
+        {label}
+      </div>
+      <div style={{ fontSize: 12, color: "var(--text)", fontWeight: 800, fontFamily: "var(--font-mono)" }}>
+        {value.toFixed(1)}%
+      </div>
+    </div>
+    <ProgressBar value={value} color={color} animate={false} />
+  </div>
+);
+
 export function CoverageBars({ donePct, pendingPct, overduePct, openPct }) {
   const d  = Math.max(0, Math.min(100, Number(donePct   ?? 0)));
   const p  = Math.max(0, Math.min(100, Number(pendingPct ?? 0)));
@@ -494,25 +528,6 @@ export function CoverageBars({ donePct, pendingPct, overduePct, openPct }) {
   const op = openPct != null
     ? Math.max(0, Math.min(100, Number(openPct)))
     : Math.max(0, 100 - d - p - ov);
-
-  const BarRow = ({ label, value, color, tooltip }) => (
-    <div style={{ display: "flex", flexDirection: "column", gap: 5 }} title={tooltip}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div style={{
-          fontSize: 11, color: "var(--muted)", fontWeight: 700,
-          textTransform: "uppercase", letterSpacing: "0.04em",
-          display: "flex", alignItems: "center", gap: 5,
-        }}>
-          <span style={{ width: 7, height: 7, borderRadius: "50%", background: color, display: "inline-block", flexShrink: 0 }} />
-          {label}
-        </div>
-        <div style={{ fontSize: 12, color: "var(--text)", fontWeight: 800, fontFamily: "var(--font-mono)" }}>
-          {value.toFixed(1)}%
-        </div>
-      </div>
-      <ProgressBar value={value} color={color} animate={false} />
-    </div>
-  );
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
