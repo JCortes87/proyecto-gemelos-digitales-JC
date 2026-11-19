@@ -1,4 +1,4 @@
-import { apiUrl } from "./api";
+import { apiUrl, authHeaders } from "./api";
 
 // INTERRUPTOR TEMPORAL: en false, elSpeak NUNCA llama a /speech/tts
 // (ElevenLabs) y usa solo la voz gratuita del navegador (speechSynthesis).
@@ -15,7 +15,7 @@ export function elStop() {
   // antes termina despues de este stop, su token ya no coincide y se descarta
   // (asi nunca suenan dos audios a la vez aunque se hagan clics rapidos).
   _elToken++;
-  if (_elController) { try { _elController.abort(); } catch (_) {} _elController = null; }
+  if (_elController) { try { _elController.abort(); } catch (_) { /* abort sobre un fetch ya terminado: nada que hacer */ } _elController = null; }
   if (_elCurrentAudio) { _elCurrentAudio.pause(); _elCurrentAudio = null; }
   if ("speechSynthesis" in window) window.speechSynthesis.cancel();
 }
@@ -56,7 +56,9 @@ export async function elSpeak(rawText, onStart, onEnd) {
   const clean = rawText
     .replace(/<[^>]*>/g, " ")
     .replace(/&lt;/g, "menor que").replace(/&gt;/g, "mayor que").replace(/&amp;/g, "y")
-    .replace(/[^\u0000-\u007F\u00C0-\u024F\u0400-\u04FF\s]/g, "")
+    // \p{ASCII} equivale al rango \u0000-\u007F sin escribir caracteres de control
+    // en la regex; con /u los emojis se eliminan como un solo code point.
+    .replace(/[^\p{ASCII}\u00C0-\u024F\u0400-\u04FF\s]/gu, "")
     .replace(/\[.*?\]/g, "").replace(/\s+/g, " ").trim().slice(0, 2000);
 
   // Con ElevenLabs desactivado no se toca /speech/tts: voz del navegador
@@ -68,9 +70,7 @@ export async function elSpeak(rawText, onStart, onEnd) {
   }
 
   try {
-    const sid = localStorage.getItem("gemelo_sid");
-    const hdrs = { "Content-Type": "application/json" };
-    if (sid) hdrs["Authorization"] = "Bearer " + sid;
+    const hdrs = { "Content-Type": "application/json", ...authHeaders() };
     const res = await fetch(apiUrl("/speech/tts"), {
       method: "POST", credentials: "include", headers: hdrs,
       body: JSON.stringify({ text: clean }),
@@ -112,8 +112,7 @@ export async function elListen(onResult, onError) {
       const form = new FormData();
       form.append("audio", blob, "audio.webm");
       try {
-        const sid = localStorage.getItem("gemelo_sid");
-        const hdrs = sid ? { "Authorization": "Bearer " + sid } : {};
+        const hdrs = authHeaders();
         const res = await fetch(apiUrl("/speech/stt"), { method: "POST", credentials: "include", headers: hdrs, body: form });
         if (!res.ok) throw new Error("STT " + res.status);
         const data = await res.json();

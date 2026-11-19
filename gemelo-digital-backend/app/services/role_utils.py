@@ -39,12 +39,18 @@ def _as_items_list(classlist_resp: Any) -> List[Dict[str, Any]]:
 
 
 #|---------- Predicados de rol ----------|
-def _is_student_role(role_name: str) -> bool:
+def _is_student_role(role_name: Optional[str], *, allow_missing: bool = False) -> bool:
     """
     True si el role_name (string libre desde Brightspace) representa
     un estudiante. Tolerante a variantes ES/EN: 'estudiante',
     'student', 'learner'.
+
+    `allow_missing=True`: un rol vacío/None NO bloquea (devuelve True).
+    Es la variante permisiva que usa el filtro `only_students` de
+    app/api/gemelo.py; por defecto (False) un rol vacío no es estudiante.
     """
+    if allow_missing and not role_name:
+        return True
     r = _norm(role_name)
     return ("estudiante" in r) or ("student" in r) or ("learner" in r)
 

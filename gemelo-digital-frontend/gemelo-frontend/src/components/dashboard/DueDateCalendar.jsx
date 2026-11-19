@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useEffect } from "react";
+import { withAlpha } from "../../utils/colors";
 import { apiGetCached } from "../../utils/api";
 
 /**
@@ -130,7 +131,7 @@ function DueDateCalendar({ orgUnitId, studentRows, studentEvidences }) {
     }
     list.sort((a, b) => a.due - b.due);
     return list;
-  }, [items]);
+  }, [items, submissionStats, studentSubmissionMap]);
 
   const upcoming = useMemo(() => assignments.filter((a) => !a.isPast), [assignments]);
   const recent = useMemo(
@@ -204,13 +205,12 @@ function DueDateCalendar({ orgUnitId, studentRows, studentEvidences }) {
     const weekday = dateObj.toLocaleDateString("es-CO", { weekday: "short" });
     const day = dateObj.toLocaleDateString("es-CO", { day: "2-digit" });
     const month = dateObj.toLocaleDateString("es-CO", { month: "short" });
-    const chipColor = past ? "#94a3b8" : (a.isUrgent ? "#dc2626" : "#0b5fff");
-    const chipBg = past
-      ? "rgba(148, 163, 184, 0.10)"
-      : (a.isUrgent ? "rgba(220, 38, 38, 0.08)" : "rgba(11, 95, 255, 0.06)");
-    const chipBorder = past
-      ? "rgba(148, 163, 184, 0.30)"
-      : (a.isUrgent ? "rgba(220, 38, 38, 0.35)" : "rgba(11, 95, 255, 0.25)");
+    // Colores por estado como tokens de tema (se adaptan a modo oscuro)
+    const chipColor = past ? "var(--pending)" : (a.isUrgent ? "var(--danger-fg)" : "var(--brand)");
+    const chipBg = withAlpha(chipColor, past ? 10 : (a.isUrgent ? 8 : 6));
+    const chipBorder = withAlpha(chipColor, past ? 30 : (a.isUrgent ? 35 : 25));
+    // Texto sobre el bloque de fecha (relleno sólido de chipColor)
+    const chipText = past || a.isUrgent ? "var(--on-status)" : "var(--on-brand)";
 
     const tooltip = `${formatRemaining(a)} · ${formatExactDate(a)}`;
     const isHovered = hoverId === a.id;
@@ -223,25 +223,31 @@ function DueDateCalendar({ orgUnitId, studentRows, studentEvidences }) {
         title={tooltip}
         onMouseEnter={() => setHoverId(a.id)}
         onMouseLeave={() => setHoverId((cur) => (cur === a.id ? null : cur))}
+        // Accesible por teclado: el foco muestra el mismo resaltado que el hover
+        tabIndex={0}
+        role="group"
+        aria-label={`${a.name}: ${tooltip}`}
+        onFocus={() => setHoverId(a.id)}
+        onBlur={() => setHoverId((cur) => (cur === a.id ? null : cur))}
         style={{
           display: "flex", alignItems: "center", gap: 10,
           padding: "10px 12px",
           borderRadius: 10,
           border: dueSoon
-            ? "1.5px solid #dc2626"
+            ? "1.5px solid var(--danger-fg)"
             : `1px solid ${isHovered ? chipColor : chipBorder}`,
-          background: isHovered ? `${chipColor}18` : chipBg,
+          background: isHovered ? withAlpha(chipColor, 9) : chipBg,
           cursor: "pointer",
           transition: "transform 0.15s, box-shadow 0.15s, background 0.15s, border-color 0.15s",
           transform: isHovered ? "translateY(-1px)" : "",
-          boxShadow: isHovered ? `0 4px 12px ${chipColor}22` : "",
+          boxShadow: isHovered ? `0 4px 12px ${withAlpha(chipColor, 13)}` : "",
         }}
       >
         <div style={{
           display: "flex", flexDirection: "column", alignItems: "center",
           minWidth: 46, padding: "6px 8px", borderRadius: 8,
           background: chipColor,
-          color: "#fff",
+          color: chipText,
           flexShrink: 0,
         }}>
           <div style={{ fontSize: 8, fontWeight: 700, textTransform: "uppercase", opacity: 0.9 }}>{weekday}</div>
@@ -260,8 +266,8 @@ function DueDateCalendar({ orgUnitId, studentRows, studentEvidences }) {
                 style={{
                   display: "inline-flex", alignItems: "center", justifyContent: "center",
                   width: 18, height: 18, borderRadius: "50%",
-                  background: "#dc2626",
-                  color: "#fff", fontSize: 11, fontWeight: 900,
+                  background: "var(--danger-fg)",
+                  color: "var(--on-status)", fontSize: 11, fontWeight: 900,
                   flexShrink: 0,
                   animation: "pulse-alert 1.4s ease-in-out infinite",
                 }}
@@ -271,7 +277,7 @@ function DueDateCalendar({ orgUnitId, studentRows, studentEvidences }) {
               overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
             }}>{a.name}</span>
           </div>
-          <div style={{ fontSize: 10, color: past ? "var(--muted)" : (dueSoon ? "#dc2626" : chipColor), marginTop: 2, fontWeight: dueSoon ? 800 : 600 }}>
+          <div style={{ fontSize: 10, color: past ? "var(--muted)" : (dueSoon ? "var(--danger-fg)" : chipColor), marginTop: 2, fontWeight: dueSoon ? 800 : 600 }}>
             {formatRemaining(a)}
           </div>
         </div>
@@ -283,7 +289,7 @@ function DueDateCalendar({ orgUnitId, studentRows, studentEvidences }) {
             display: "flex", alignItems: "center", justifyContent: "center",
             background: a.didSubmit ? "var(--ok-bg)" : "var(--critical-bg)",
             color: a.didSubmit ? "var(--ok)" : "var(--critical)",
-            border: `1px solid ${a.didSubmit ? "var(--ok)" : "var(--critical)"}33`,
+            border: `1px solid ${withAlpha(a.didSubmit ? "var(--ok)" : "var(--critical)", 20)}`,
           }}>
             {a.didSubmit ? "✓" : "✗"}
           </span>
@@ -311,8 +317,8 @@ function DueDateCalendar({ orgUnitId, studentRows, studentEvidences }) {
         {a.weightPct > 0 && (
           <span className="tag" style={{
             flexShrink: 0, fontSize: 10, fontWeight: 700,
-            background: past ? "var(--bg)" : "rgba(11, 95, 255, 0.10)",
-            color: past ? "var(--muted)" : "#0b5fff",
+            background: past ? "var(--bg)" : withAlpha("var(--brand)", 10),
+            color: past ? "var(--muted)" : "var(--brand)",
           }}>
             {a.weightPct.toFixed(0)}%
           </span>
@@ -360,10 +366,10 @@ function DueDateCalendar({ orgUnitId, studentRows, studentEvidences }) {
                 <span>📅 Próximas entregas ({upcoming.length})</span>
                 {upcoming.some((a) => a.isUrgent) && (
                   <span style={{
-                    fontSize: 10, color: "#dc2626", fontWeight: 800,
+                    fontSize: 10, color: "var(--danger-fg)", fontWeight: 800,
                     padding: "2px 6px", borderRadius: 10,
-                    background: "rgba(220, 38, 38, 0.08)",
-                    border: "1px solid rgba(220, 38, 38, 0.25)",
+                    background: "var(--danger-bg)",
+                    border: "1px solid var(--danger-border)",
                   }}>
                     ⚠ {upcoming.filter((a) => a.isUrgent).length} urgente(s)
                   </span>
@@ -503,6 +509,7 @@ function MonthGrid({ assignments, hoverId, onHoverChange }) {
             fontFamily: "var(--font)",
           }}
           title="Mes anterior"
+          aria-label="Mes anterior"
         >‹</button>
         <button
           onClick={goToday}
@@ -531,6 +538,7 @@ function MonthGrid({ assignments, hoverId, onHoverChange }) {
             fontFamily: "var(--font)",
           }}
           title="Mes siguiente"
+          aria-label="Mes siguiente"
         >›</button>
       </div>
 
@@ -576,7 +584,7 @@ function MonthGrid({ assignments, hoverId, onHoverChange }) {
           }
           const primaryColor = !primary
             ? null
-            : (primary.isPast ? "#94a3b8" : (primary.isUrgent ? "#dc2626" : "#0b5fff"));
+            : (primary.isPast ? "var(--pending)" : (primary.isUrgent ? "var(--danger-fg)" : "var(--brand)"));
 
           // Cell background: hover range takes precedence
           let bg = "transparent";
@@ -585,10 +593,10 @@ function MonthGrid({ assignments, hoverId, onHoverChange }) {
             // Color the range using the hovered assignment's own color
             const hov = assignments.find((a) => a.id === hoverId);
             const hovColor = hov
-              ? (hov.isPast ? "#94a3b8" : (hov.isUrgent ? "#dc2626" : "#0b5fff"))
-              : "#0b5fff";
-            bg = `${hovColor}1f`;
-            borderColor = `${hovColor}55`;
+              ? (hov.isPast ? "var(--pending)" : (hov.isUrgent ? "var(--danger-fg)" : "var(--brand)"))
+              : "var(--brand)";
+            bg = withAlpha(hovColor, 12);
+            borderColor = withAlpha(hovColor, 33);
           }
           if (isToday) {
             borderColor = "var(--brand)";
@@ -597,6 +605,13 @@ function MonthGrid({ assignments, hoverId, onHoverChange }) {
           const hasAssignment = dayAssignments.length > 0;
           const isPrimaryHovered =
             hasAssignment && dayAssignments.some((a) => a.id === hoverId);
+          const dayTitle = hasAssignment
+            ? dayAssignments
+                .map((a) => `${a.isUrgent ? "⚠ " : ""}${a.name} — vence ${a.due.toLocaleDateString("es-CO")}`)
+                .join("\n")
+            : undefined;
+          // Texto sobre el círculo relleno (hover): marca → on-brand; estado → on-status
+          const primaryText = primary && !primary.isPast && !primary.isUrgent ? "var(--on-brand)" : "var(--on-status)";
 
           return (
             <div
@@ -622,11 +637,19 @@ function MonthGrid({ assignments, hoverId, onHoverChange }) {
                   ? () => onHoverChange((cur) => (cur === primary.id ? null : cur))
                   : undefined
               }
-              title={
-                hasAssignment
-                  ? dayAssignments
-                      .map((a) => `${a.isUrgent ? "⚠ " : ""}${a.name} — vence ${a.due.toLocaleDateString("es-CO")}`)
-                      .join("\n")
+              title={dayTitle}
+              // Días con entregas: enfocables con teclado (mismo efecto que el hover)
+              tabIndex={hasAssignment && primary ? 0 : undefined}
+              role={hasAssignment ? "group" : undefined}
+              aria-label={hasAssignment ? dayTitle : undefined}
+              onFocus={
+                hasAssignment && primary
+                  ? () => onHoverChange(primary.id)
+                  : undefined
+              }
+              onBlur={
+                hasAssignment && primary
+                  ? () => onHoverChange((cur) => (cur === primary.id ? null : cur))
                   : undefined
               }
             >
@@ -634,14 +657,14 @@ function MonthGrid({ assignments, hoverId, onHoverChange }) {
                 <div style={{
                   width: "88%", aspectRatio: "1 / 1", maxWidth: 36,
                   borderRadius: "50%",
-                  background: isPrimaryHovered ? primaryColor : `${primaryColor}26`,
-                  border: `1.5px solid ${primaryColor}${isPrimaryHovered ? "" : "88"}`,
+                  background: isPrimaryHovered ? primaryColor : withAlpha(primaryColor, 15),
+                  border: `1.5px solid ${isPrimaryHovered ? primaryColor : withAlpha(primaryColor, 53)}`,
                   display: "flex", alignItems: "center", justifyContent: "center",
                   fontSize: 11, fontWeight: 800,
-                  color: isPrimaryHovered ? "#fff" : primaryColor,
+                  color: isPrimaryHovered ? primaryText : primaryColor,
                   cursor: "pointer",
                   position: "relative",
-                  boxShadow: isPrimaryHovered ? `0 2px 8px ${primaryColor}55` : "",
+                  boxShadow: isPrimaryHovered ? `0 2px 8px ${withAlpha(primaryColor, 33)}` : "",
                   transition: "all 0.12s",
                 }}>
                   {day.getDate()}
@@ -650,10 +673,10 @@ function MonthGrid({ assignments, hoverId, onHoverChange }) {
                       position: "absolute",
                       top: -3, right: -3,
                       width: 12, height: 12, borderRadius: "50%",
-                      background: "#12B76A", color: "#fff",
+                      background: "var(--ok)", color: "var(--on-status)",
                       fontSize: 8, fontWeight: 900,
                       display: "flex", alignItems: "center", justifyContent: "center",
-                      border: "1.5px solid #fff",
+                      border: "1.5px solid var(--card)",
                     }}>✓</span>
                   )}
                   {primary?.isUrgent && primary?.didSubmit !== true && (
@@ -661,10 +684,10 @@ function MonthGrid({ assignments, hoverId, onHoverChange }) {
                       position: "absolute",
                       top: -3, right: -3,
                       width: 10, height: 10, borderRadius: "50%",
-                      background: "#dc2626", color: "#fff",
+                      background: "var(--danger-fg)", color: "var(--on-status)",
                       fontSize: 7, fontWeight: 900,
                       display: "flex", alignItems: "center", justifyContent: "center",
-                      border: "1.5px solid #fff",
+                      border: "1.5px solid var(--card)",
                     }}>!</span>
                   )}
                   {dayAssignments.length > 1 && (
@@ -672,9 +695,9 @@ function MonthGrid({ assignments, hoverId, onHoverChange }) {
                       position: "absolute",
                       bottom: -2, right: -2,
                       fontSize: 7, fontWeight: 900,
-                      color: "#fff", background: "var(--muted)",
+                      color: "var(--card)", background: "var(--muted)",
                       borderRadius: 5, padding: "0 3px",
-                      border: "1.5px solid #fff",
+                      border: "1.5px solid var(--card)",
                     }}>+{dayAssignments.length - 1}</span>
                   )}
                 </div>
@@ -697,8 +720,8 @@ function MonthGrid({ assignments, hoverId, onHoverChange }) {
         minHeight: 52,
         padding: "8px 12px",
         borderRadius: 8,
-        background: hoverAssignment ? "rgba(11, 95, 255, 0.06)" : "var(--bg)",
-        border: `1px solid ${hoverAssignment ? "rgba(11, 95, 255, 0.25)" : "var(--border)"}`,
+        background: hoverAssignment ? withAlpha("var(--brand)", 6) : "var(--bg)",
+        border: `1px solid ${hoverAssignment ? withAlpha("var(--brand)", 25) : "var(--border)"}`,
         fontSize: 11,
         display: "flex", alignItems: "center", gap: 8,
         transition: "background 0.15s, border-color 0.15s",
@@ -720,7 +743,7 @@ function MonthGrid({ assignments, hoverId, onHoverChange }) {
                     {" → "}
                   </>
                 ) : "Vence "}
-                <strong style={{ color: hoverAssignment.isUrgent ? "#dc2626" : "var(--brand)" }}>
+                <strong style={{ color: hoverAssignment.isUrgent ? "var(--danger-fg)" : "var(--brand)" }}>
                   {hoverAssignment.due.toLocaleDateString("es-CO", { day: "2-digit", month: "long", year: "numeric" })}
                 </strong>
               </div>
@@ -728,7 +751,7 @@ function MonthGrid({ assignments, hoverId, onHoverChange }) {
           </>
         ) : (
           <div style={{ color: "var(--muted)", fontStyle: "italic", textAlign: "center", flex: 1, fontSize: 10 }}>
-            Pasa el cursor sobre una entrega para ver sus fechas
+            Pasa el cursor (o enfoca con Tab) una entrega para ver sus fechas
           </div>
         )}
       </div>

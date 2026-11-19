@@ -8,7 +8,7 @@ import {
   ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis,
   Tooltip, CartesianGrid, Legend,
 } from "recharts";
-import { useAuth } from "../context/AuthContext";
+import { useAuth } from "../context/useAuth";
 import { apiGet } from "../utils/api";
 import { downloadCsv } from "../utils/export";
 import CesaLoader from "../components/ui/CesaLoader";
@@ -202,7 +202,7 @@ export default function AdminPanel() {
           <span style={{
             display: "inline-flex", alignItems: "center", justifyContent: "center",
             width: 30, height: 30, borderRadius: 9,
-            background: "linear-gradient(135deg, var(--brand) 0%, #1e40af 100%)", color: "#fff",
+            background: "linear-gradient(135deg, var(--brand) 0%, #1e40af 100%)", color: "var(--on-brand)",
           }}>
             <Crown size={16} strokeWidth={2.4} />
           </span>
@@ -222,11 +222,12 @@ export default function AdminPanel() {
               <button
                 key={d}
                 onClick={() => setDays(d)}
+                aria-pressed={days === d}
                 style={{
                   padding: "7px 13px", border: "none", cursor: "pointer",
                   fontSize: 12, fontWeight: 800, fontFamily: "var(--font)",
                   background: days === d ? "var(--brand)" : "var(--card)",
-                  color: days === d ? "#fff" : "var(--muted)",
+                  color: days === d ? "var(--on-brand)" : "var(--muted)",
                 }}
               >
                 {d} días
@@ -351,8 +352,9 @@ export default function AdminPanel() {
                 </div>
 
                 <div style={{ position: "relative", marginBottom: 12 }}>
-                  <Search size={14} strokeWidth={2.4} style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)", color: "var(--muted)" }} />
+                  <Search aria-hidden="true" size={14} strokeWidth={2.4} style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)", color: "var(--muted)" }} />
                   <input
+                    aria-label="Buscar usuarios por nombre, email, ID o rol"
                     value={userQuery}
                     onChange={(e) => setUserQuery(e.target.value)}
                     placeholder="Buscar por nombre, email, ID o rol…"

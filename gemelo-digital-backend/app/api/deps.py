@@ -1,38 +1,41 @@
 """Config compartida y helpers de sesion/proxy Brightspace (extraidos de main.py)."""
 from __future__ import annotations
 
+import asyncio
 import copy
 import hashlib
 import json
-import os
 import time
 
 import httpx
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from app.config import settings
 from app.state import get_session, get_access_token
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Configuración Brightspace OAuth
 # ──────────────────────────────────────────────────────────────────────────────
-BRIGHTSPACE_BASE_URL  = (os.getenv("BRIGHTSPACE_BASE_URL",  "") or "").rstrip("/")
-LP_VERSION            = os.getenv("BRIGHTSPACE_LP_VERSION", "1.50")
-LE_VERSION            = os.getenv("BRIGHTSPACE_LE_VERSION",  "1.92")
+# (valores desde app/config.py; las constantes de módulo se conservan
+# porque otros módulos y los tests las importan/monkeypatchean)
+BRIGHTSPACE_BASE_URL  = (settings.brightspace_base_url or "").rstrip("/")
+LP_VERSION            = settings.brightspace_lp_version
+LE_VERSION            = settings.brightspace_le_version
 
-BRIGHTSPACE_AUTH_URL  = os.getenv("BRIGHTSPACE_AUTH_URL",  "https://auth.brightspace.com/oauth2/auth")
-BRIGHTSPACE_TOKEN_URL = os.getenv("BRIGHTSPACE_TOKEN_URL", "https://auth.brightspace.com/core/connect/token")
+BRIGHTSPACE_AUTH_URL  = settings.brightspace_auth_url
+BRIGHTSPACE_TOKEN_URL = settings.brightspace_token_url
 
-CLIENT_ID     = os.getenv("BRIGHTSPACE_CLIENT_ID",     "")
-CLIENT_SECRET = os.getenv("BRIGHTSPACE_CLIENT_SECRET", "")
-REDIRECT_URI  = os.getenv("BRIGHTSPACE_REDIRECT_URI",  "")
-SCOPE         = os.getenv("BRIGHTSPACE_SCOPE",         "core:*:* Application:*:* Data:*:* enrollment:own_enrollment:read enrollment:orgunit:read users:own_profile:read users:profile:read grades:gradeobjects:read grades:gradevalues:read grades:own_grades:read grades:gradeschemes:read grades:gradesettings:read grades:gradestatistics:read grades:gradecategories:read outcomes:sets:read outcomes:sets:export outcomes:sets:import outcomes:sets:manage outcomes:alignments:read outcomes:alignments:manage content:modules:readonly content:topics:readonly content:toc:read content:completions:read rubrics:objects:read rubrics:assessments:read dropbox:folders:read discussions:forums:readonly discussions:topics:readonly quizzing:quizzes:read quizzing:attempts:read organizations:organization:read orgunits:course:read role:detail:read")
-FRONTEND_BASE = os.getenv("FRONTEND_BASE_URL",         "").rstrip("/")
+CLIENT_ID     = settings.brightspace_client_id
+CLIENT_SECRET = settings.brightspace_client_secret
+REDIRECT_URI  = settings.brightspace_redirect_uri
+SCOPE         = settings.brightspace_scope
+FRONTEND_BASE = (settings.frontend_base_url or "").rstrip("/")
 
 # Cookie config
 SESSION_COOKIE   = "gemelo_session_id"
 SESSION_MAX_AGE  = 60 * 60 * 8     # 8 horas
-_tool_is_https   = lambda: (os.getenv("TOOL_BASE_URL", "") or "").lower().startswith("https://")
+_tool_is_https   = lambda: (settings.tool_base_url or "").lower().startswith("https://")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -105,14 +108,43 @@ def _auth_headers(access_token: str) -> dict:
     return {"Authorization": f"Bearer {access_token}"}
 
 
+_BS_GET_RETRIES = 3
+_RETRYABLE_STATUS = {429, 502, 503, 504}
+
+
+def _retry_delay(attempt: int, response: httpx.Response | None) -> float:
+    """Backoff exponencial (0.5s, 1s, …); respeta Retry-After (máx. 5s)."""
+    if response is not None:
+        try:
+            return min(float(response.headers.get("Retry-After", "")), 5.0)
+        except ValueError:
+            pass
+    return 0.5 * (2 ** attempt)
+
+
 async def _bs_get(
     url: str,
     headers: dict,
     params: dict | None = None,
     timeout: int = 30,
 ) -> tuple[int, dict | list]:
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        r = await client.get(url, headers=headers, params=params or {})
+    # Cliente compartido (pool de conexiones) + reintentos ante fallos
+    # transitorios: 429 (rate limit), 502/503/504 y errores de red.
+    from app.services.brightspace_client import get_http_client
+    client = get_http_client()
+    for attempt in range(_BS_GET_RETRIES):
+        last = attempt == _BS_GET_RETRIES - 1
+        try:
+            r = await client.get(url, headers=headers, params=params or {}, timeout=timeout)
+        except httpx.TransportError:
+            if last:
+                raise
+            await asyncio.sleep(_retry_delay(attempt, None))
+            continue
+        if r.status_code in _RETRYABLE_STATUS and not last:
+            await asyncio.sleep(_retry_delay(attempt, r))
+            continue
+        break
     try:
         body = r.json()
     except Exception:

@@ -2,7 +2,6 @@ import React, { useState, useEffect } from "react";
 import { BookOpen } from "lucide-react";
 import { apiGetCached } from "../../utils/api";
 import { COLORS, colorForPct } from "../../utils/colors";
-import { fmtPct, fmtGrade10FromPct, computeRiskFromPct } from "../../utils/helpers";
 import { isStudentRole } from "../../utils/roles";
 
 /**

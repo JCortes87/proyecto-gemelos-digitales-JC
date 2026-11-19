@@ -48,4 +48,8 @@ export default defineConfig({
     // SPA fallback: redirect all non-API routes to index.html for BrowserRouter
     historyApiFallback: true,
   },
+  // Vitest: matchers de jest-dom + cleanup de React Testing Library.
+  test: {
+    setupFiles: ["./vitest.setup.js"],
+  },
 })

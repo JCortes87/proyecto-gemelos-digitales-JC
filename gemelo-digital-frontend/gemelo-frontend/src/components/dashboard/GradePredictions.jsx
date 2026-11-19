@@ -1,6 +1,63 @@
 import React, { useMemo, useState } from "react";
 import { predictClassFailures, predictFinalGrade } from "../../utils/prediction";
-import { COLORS, colorForPct } from "../../utils/colors";
+import { COLORS } from "../../utils/colors";
+
+// Lista de estudiantes por categoría de proyección. Definida a nivel de módulo
+// (antes se recreaba en cada render del padre); recibe variant/onStudentClick por props.
+const StudentList = ({ list, color, bgColor, borderColor, label, icon, variant, onStudentClick }) => (
+  <div style={{
+    padding: 14, background: bgColor, border: `1px solid ${borderColor}`,
+    borderRadius: 12, marginBottom: 12,
+  }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+      <span style={{ fontSize: 18 }}>{icon}</span>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 12, fontWeight: 800, color: color, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+          {label} ({list.length})
+        </div>
+      </div>
+    </div>
+    <div style={{ display: "flex", flexDirection: "column", gap: 5, maxHeight: variant === "full" ? 360 : 200, overflowY: "auto" }}>
+      {list.map(({ student, pred }) => {
+        const grade10 = pred.expectedGrade10.toFixed(1);
+        return (
+          <button
+            key={student.userId}
+            onClick={() => onStudentClick(student.userId)}
+            style={{
+              display: "flex", alignItems: "center", gap: 10,
+              padding: "8px 12px", borderRadius: 8,
+              background: "color-mix(in srgb, var(--card) 60%, transparent)",
+              border: "1px solid color-mix(in srgb, var(--card) 40%, transparent)",
+              cursor: "pointer",
+              fontSize: 12, fontFamily: "var(--font)", textAlign: "left",
+              transition: "background 0.12s",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "color-mix(in srgb, var(--card) 95%, transparent)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "color-mix(in srgb, var(--card) 60%, transparent)"; }}
+          >
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 700, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {student.displayName}
+              </div>
+              <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>
+                Nota actual: {student.currentPerformancePct != null ? (student.currentPerformancePct / 10).toFixed(1) : "—"}/10
+                {" · "}Cobertura: {student.coveragePct != null ? `${student.coveragePct.toFixed(0)}%` : "—"}
+                {" · "}Confianza: {pred.confidence}%
+              </div>
+            </div>
+            <div style={{ textAlign: "right", flexShrink: 0 }}>
+              <div style={{ fontSize: 9, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase" }}>Proyección</div>
+              <div style={{ fontSize: 18, fontWeight: 900, fontFamily: "var(--font-mono)", color: color, lineHeight: 1 }}>
+                {grade10}
+              </div>
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  </div>
+);
 
 /**
  * Class-level grade prediction summary.
@@ -29,6 +86,10 @@ function GradePredictions({
   variant = "compact",
 }) {
   const [showHelp, setShowHelp] = useState(false);
+  // Instante de referencia para el avance del periodo. Se fija al montar
+  // (inicializador de useState) para que el render sea puro; la precisión
+  // que se muestra es de días, así que no cambia lo que ve el usuario.
+  const [now] = useState(() => Date.now());
 
   const { willFail, borderline, willPass, total } = useMemo(
     () => predictClassFailures(studentRows),
@@ -54,7 +115,6 @@ function GradePredictions({
     try {
       const start = new Date(courseInfo.StartDate).getTime();
       const end = new Date(courseInfo.EndDate).getTime();
-      const now = Date.now();
       if (Number.isNaN(start) || Number.isNaN(end) || end <= start) {
         return { daysElapsed: null, daysRemaining: null, progressPct: null };
       }
@@ -69,7 +129,7 @@ function GradePredictions({
     } catch {
       return { daysElapsed: null, daysRemaining: null, progressPct: null };
     }
-  }, [courseInfo]);
+  }, [courseInfo, now]);
 
   // Average confidence across students
   const avgConfidence = useMemo(() => {
@@ -95,61 +155,6 @@ function GradePredictions({
   const failPct = Math.round((willFail.length / total) * 100);
   const borderPct = Math.round((borderline.length / total) * 100);
   const passPct = Math.round((willPass.length / total) * 100);
-
-  const StudentList = ({ list, color, bgColor, borderColor, label, icon }) => (
-    <div style={{
-      padding: 14, background: bgColor, border: `1px solid ${borderColor}`,
-      borderRadius: 12, marginBottom: 12,
-    }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-        <span style={{ fontSize: 18 }}>{icon}</span>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 12, fontWeight: 800, color: color, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-            {label} ({list.length})
-          </div>
-        </div>
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 5, maxHeight: variant === "full" ? 360 : 200, overflowY: "auto" }}>
-        {list.map(({ student, pred }) => {
-          const grade10 = pred.expectedGrade10.toFixed(1);
-          return (
-            <button
-              key={student.userId}
-              onClick={() => onStudentClick(student.userId)}
-              style={{
-                display: "flex", alignItems: "center", gap: 10,
-                padding: "8px 12px", borderRadius: 8,
-                background: "rgba(255,255,255,0.6)",
-                border: "1px solid rgba(255,255,255,0.4)",
-                cursor: "pointer",
-                fontSize: 12, fontFamily: "var(--font)", textAlign: "left",
-                transition: "background 0.12s",
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.95)"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.6)"; }}
-            >
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 700, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {student.displayName}
-                </div>
-                <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>
-                  Nota actual: {student.currentPerformancePct != null ? (student.currentPerformancePct / 10).toFixed(1) : "—"}/10
-                  {" · "}Cobertura: {student.coveragePct != null ? `${student.coveragePct.toFixed(0)}%` : "—"}
-                  {" · "}Confianza: {pred.confidence}%
-                </div>
-              </div>
-              <div style={{ textAlign: "right", flexShrink: 0 }}>
-                <div style={{ fontSize: 9, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase" }}>Proyección</div>
-                <div style={{ fontSize: 18, fontWeight: 900, fontFamily: "var(--font-mono)", color: color, lineHeight: 1 }}>
-                  {grade10}
-                </div>
-              </div>
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
 
   return (
     <div>
@@ -179,7 +184,7 @@ function GradePredictions({
           </div>
           {progressPct != null && (
             <div>
-              <div style={{ height: 8, borderRadius: 99, background: "rgba(255,255,255,0.6)", overflow: "hidden", marginBottom: 6 }}>
+              <div style={{ height: 8, borderRadius: 99, background: "color-mix(in srgb, var(--card) 60%, transparent)", overflow: "hidden", marginBottom: 6 }}>
                 <div style={{ width: `${progressPct}%`, height: "100%", background: "var(--brand)", borderRadius: 99 }} />
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--muted)" }}>
@@ -210,7 +215,7 @@ function GradePredictions({
             padding: 0,
           }}
         >
-          <span>{showHelp ? "▾" : "▸"}</span>
+          <span aria-hidden="true">{showHelp ? "▾" : "▸"}</span>
           <span>¿Cómo funciona la predicción?</span>
         </button>
         {showHelp && (
@@ -297,6 +302,8 @@ function GradePredictions({
       {/* Detailed lists */}
       {willFail.length > 0 && (
         <StudentList
+          variant={variant}
+          onStudentClick={onStudentClick}
           list={variant === "full" ? willFail : willFail.slice(0, 5)}
           color={COLORS.critical}
           bgColor="var(--critical-bg)"
@@ -308,6 +315,8 @@ function GradePredictions({
 
       {borderline.length > 0 && (
         <StudentList
+          variant={variant}
+          onStudentClick={onStudentClick}
           list={variant === "full" ? borderline : borderline.slice(0, 5)}
           color={COLORS.watch}
           bgColor="var(--watch-bg)"
@@ -319,6 +328,8 @@ function GradePredictions({
 
       {variant === "full" && willPass.length > 0 && (
         <StudentList
+          variant={variant}
+          onStudentClick={onStudentClick}
           list={willPass}
           color={COLORS.ok}
           bgColor="var(--ok-bg)"

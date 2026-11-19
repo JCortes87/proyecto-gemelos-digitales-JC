@@ -19,7 +19,6 @@ Configuración por variables de entorno (nada hardcodeado):
 Si no hay configuración SMTP, `smtp_configured()` devuelve False y los
 llamadores pueden degradar con gracia (ej: el frontend cae a un mailto).
 """
-import os
 import ssl
 import smtplib
 import logging
@@ -27,20 +26,22 @@ from email.message import EmailMessage
 from email.utils import formataddr
 from typing import List, Optional, Dict, Any
 
+from app.config import settings
+
 logger = logging.getLogger("uvicorn.error")
 
 
 def _cfg() -> Dict[str, Any]:
     # Default Office365 (smtp.office365.com:587 STARTTLS). Se puede sobreescribir
     # con SMTP_HOST/SMTP_PORT para otro proveedor.
-    host = os.getenv("SMTP_HOST", "smtp.office365.com").strip()
-    user = os.getenv("SMTP_USER", "").strip()
-    password = os.getenv("SMTP_PASSWORD", "")
-    port = int(os.getenv("SMTP_PORT", "587") or "587")
-    from_addr = os.getenv("SMTP_FROM", "").strip() or user
-    from_name = os.getenv("SMTP_FROM_NAME", "G.D CESA").strip()
-    use_ssl = os.getenv("SMTP_USE_SSL", "").strip() == "1"
-    timeout = int(os.getenv("SMTP_TIMEOUT", "20") or "20")
+    host = settings.smtp_host.strip()
+    user = settings.smtp_user.strip()
+    password = settings.smtp_password
+    port = int(settings.smtp_port or "587")
+    from_addr = settings.smtp_from.strip() or user
+    from_name = settings.smtp_from_name.strip()
+    use_ssl = settings.smtp_use_ssl.strip() == "1"
+    timeout = int(settings.smtp_timeout or "20")
     return {
         "host": host, "port": port, "user": user, "password": password,
         "from_addr": from_addr, "from_name": from_name,

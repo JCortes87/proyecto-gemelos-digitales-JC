@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, lazy, Suspense } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef, lazy, Suspense } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Search, GraduationCap, Presentation, Eye, LayoutGrid, LogOut,
@@ -6,11 +6,13 @@ import {
   Ban, ExternalLink, Crown, Clock, ChevronDown, ChevronUp, Filter, Megaphone, Send,
   Target, ListChecks, Activity,
 } from "lucide-react";
-import { useAuth } from "../context/AuthContext";
+import { useAuth } from "../context/useAuth";
 import { apiGet, apiPost } from "../utils/api";
 import { injectStyles } from "../styles/global";
 import { isStudentRole } from "../utils/roles";
 import CesaLoader from "../components/ui/CesaLoader";
+import { pickDefaultSemester } from "./coordinator/coordinatorUtils";
+import { fetchSemesterCourses } from "./coordinator/useCoordinatorData";
 
 const StudentOverviewPanel = lazy(() => import("./StudentOverviewPanel"));
 
@@ -45,6 +47,18 @@ function AdminClock() {
 // constante de "Cursos recientes" en la vista admin. (Mismo patrón
 // que AdminClock, ver comentario arriba.)
 // ────────────────────────────────────────────────────────────────
+
+// Activos primero y luego alfabético (un curso sin `isActive` cuenta como activo).
+function sortCourses(a, b) {
+  const aa = a.isActive !== false;
+  const bb = b.isActive !== false;
+  if (aa !== bb) return aa ? -1 : 1;
+  return String(a.name || "").localeCompare(String(b.name || ""), "es", { sensitivity: "base" });
+}
+
+// Cuántas tarjetas de un período se pintan de una vez (un superadmin puede
+// recibir 600+ cursos de un semestre; no se renderizan todos a la vez).
+const SEMESTER_PAGE_SIZE = 60;
 
 // ============ CARD DE CURSO REDISEÑADA ============
 const CourseCard = React.memo(function CourseCard({ course, role, onSelect }) {
@@ -137,8 +151,11 @@ export default function RoleHome() {
   const lazyMode = isSuperAdmin || isAdminRole;
   const [myCoursesRequested, setMyCoursesRequested] = useState(false);
 
-  // Instructor course filtering (semester + collapse)
-  const [filterSemester, setFilterSemester] = useState("");
+  // Filtro de período del panel docente. `null` = sin elección explícita
+  // (se usa el semestre por defecto); "all" = Todos mis cursos;
+  // "sem:<id>" = semestre real de Brightspace; "code:<202610>" = respaldo
+  // por regex cuando no se pudieron cargar los semestres.
+  const [semesterChoice, setSemesterChoice] = useState(null);
   const [showAllInst, setShowAllInst] = useState(false);
   const INITIAL_INST_LIMIT = 6;
 
@@ -163,7 +180,7 @@ export default function RoleHome() {
     if (!obj.id || obj.id === "0" || obj.id === "undefined") return;
     setRecentEntries(prev => {
       const next = [obj, ...prev.filter(x => x.id !== obj.id)].slice(0, 5);
-      try { localStorage.setItem(RECENT_KEY, JSON.stringify(next)); } catch {}
+      try { localStorage.setItem(RECENT_KEY, JSON.stringify(next)); } catch { /* storage bloqueado: los recientes quedan solo en memoria */ }
       return next;
     });
   }, []);
@@ -179,16 +196,26 @@ export default function RoleHome() {
   const [overviewPeriod, setOverviewPeriod] = useState("");
   const [overviewStudentSearchId, setOverviewStudentSearchId] = useState("");
 
+  // Semestres reales (unidades organizativas tipo 5), del más reciente al más
+  // antiguo. Los usa el filtro de período del docente y las herramientas del
+  // superadmin.
   const [semesters, setSemesters] = useState([]);
+  const [semestersLoaded, setSemestersLoaded] = useState(false);
+  const needsSemesters = isSuperAdmin || isInstructor;
   useEffect(() => {
-    if (!isSuperAdmin) return;
+    if (!needsSemesters) return;
+    let alive = true;
     (async () => {
       try {
         const data = await apiGet("/brightspace/semesters?min_year=2025");
-        setSemesters(Array.isArray(data?.items) ? data.items : []);
-      } catch { /* silent */ }
+        if (alive) setSemesters(Array.isArray(data?.items) ? data.items : []);
+      } catch { /* silent: se usa el respaldo por nombre de curso */ }
+      finally {
+        if (alive) setSemestersLoaded(true);
+      }
     })();
-  }, [isSuperAdmin]);
+    return () => { alive = false; };
+  }, [needsSemesters]);
 
   // Estadísticas para el hero de administración (Super Admin)
   const [adminStats, setAdminStats] = useState(null);
@@ -258,20 +285,25 @@ export default function RoleHome() {
       else if (rn) inst.push(c);
       else inst.push(c);
     }
-    const sorter = (a, b) => {
-      if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
-      return String(a.name || "").localeCompare(String(b.name || ""), "es", { sensitivity: "base" });
-    };
-    inst.sort(sorter);
-    stud.sort(sorter);
+    inst.sort(sortCourses);
+    stud.sort(sortCourses);
     return { instructorCourses: inst, studentCourses: stud };
   }, [courses]);
 
-  // Semester helpers (same pattern as CoordinatorDashboard)
+  // ── Período del panel docente ─────────────────────────────────────
+  // Los semestres reales de Brightspace son unidades organizativas con
+  // códigos como 202600, 202615, 202620, 202631… y nombres como
+  // "202620 2DO PREGRADO / POSGRADO". Los nombres de los cursos actuales
+  // casi nunca traen ese código y la lista de inscripciones puede venir
+  // truncada y dominada por cursos viejos, así que al elegir un semestre se
+  // piden SUS cursos al backend. El regex sobre el nombre del curso queda
+  // solo como respaldo de "Todos mis cursos" (si no cargan los semestres).
   const extractSemester = useCallback((course) => {
     const hay = `${course?.name || ""} ${course?.code || ""}`;
     const strict = hay.match(/\b(20\d{2})(10|20|30)\b/);
     if (strict) return `${strict[1]}${strict[2]}`;
+    const anyCode = hay.match(/\b(20\d{4})\b/);
+    if (anyCode) return anyCode[1];
     const loose = hay.match(/\b(20\d{2})[\s\-._](\d)\b/);
     if (loose) {
       const q = loose[2];
@@ -309,14 +341,82 @@ export default function RoleHome() {
 
   const filteredStud = filterCourses(studentCourses);
 
-  // Instructor courses: apply search + semester filter
+  // Admin en modo "lazy": no se consulta nada hasta que pida sus cursos.
+  const instListEnabled = isInstructor && (!lazyMode || myCoursesRequested);
+
+  // Selección efectiva (derivada, sin setState en efectos): la elección del
+  // usuario o, si no ha elegido, el último semestre de pregrado/posgrado.
+  const defaultSemester = useMemo(() => pickDefaultSemester(semesters), [semesters]);
+  const defaultSemesterKey = defaultSemester ? `sem:${defaultSemester.id}` : "all";
+  const semesterKey = semesterChoice ?? (semestersLoaded ? defaultSemesterKey : "pending");
+  const selectedSemesterId = semesterKey.startsWith("sem:") ? semesterKey.slice(4) : null;
+  const legacyCode = semesterKey.startsWith("code:") ? semesterKey.slice(5) : "";
+  const selectedSemester = selectedSemesterId
+    ? semesters.find(s => String(s.id) === selectedSemesterId) || null
+    : null;
+
+  // Cursos por semestre, cacheados durante la sesión de la página: volver a
+  // un período ya consultado es instantáneo. `requestedSemRef` evita pedir
+  // dos veces el mismo semestre (también con el doble efecto de StrictMode).
+  const [semesterCache, setSemesterCache] = useState({}); // id → {items} | {error}
+  const requestedSemRef = useRef(new Set());
+  const loadSemesterCourses = useCallback((id) => {
+    requestedSemRef.current.add(id);
+    fetchSemesterCourses(id)
+      .then(items => setSemesterCache(prev => ({ ...prev, [id]: { items } })))
+      .catch(() => {
+        requestedSemRef.current.delete(id);
+        setSemesterCache(prev => ({ ...prev, [id]: { error: true } }));
+      });
+  }, []);
+  const semesterFetchId = instListEnabled ? selectedSemesterId : null;
+  useEffect(() => {
+    if (!semesterFetchId || requestedSemRef.current.has(semesterFetchId)) return;
+    loadSemesterCourses(semesterFetchId);
+  }, [semesterFetchId, loadSemesterCourses]);
+  const retrySemester = useCallback(() => {
+    if (!selectedSemesterId) return;
+    setSemesterCache(prev => {
+      const next = { ...prev };
+      delete next[selectedSemesterId];
+      return next;
+    });
+    loadSemesterCourses(selectedSemesterId);
+  }, [selectedSemesterId, loadSemesterCourses]);
+
+  const semesterEntry = selectedSemesterId ? semesterCache[selectedSemesterId] : undefined;
+  const semesterLoading = instListEnabled && (semesterKey === "pending" || (!!selectedSemesterId && !semesterEntry));
+  const semesterError = !!semesterEntry?.error;
+
+  // Cursos del semestre enriquecidos con los datos del catálogo (isActive,
+  // roleName…) cuando el mismo curso aparece en las inscripciones.
+  const semesterCourses = useMemo(() => {
+    const items = semesterEntry?.items;
+    if (!Array.isArray(items)) return [];
+    const known = new Map(instructorCourses.map(c => [String(c.id), c]));
+    return items
+      .map(c => ({ ...c, ...(known.get(String(c.id)) || {}) }))
+      .sort(sortCourses);
+  }, [semesterEntry, instructorCourses]);
+
+  // Instructor courses: búsqueda + período (semestre real o respaldo regex)
+  const instSource = selectedSemesterId ? semesterCourses : instructorCourses;
   const filteredInst = useMemo(() => {
-    let list = filterCourses(instructorCourses);
-    if (filterSemester) {
-      list = list.filter(c => extractSemester(c) === filterSemester);
+    let list = filterCourses(instSource);
+    if (legacyCode) {
+      list = list.filter(c => extractSemester(c) === legacyCode);
     }
     return list;
-  }, [instructorCourses, filterCourses, filterSemester, extractSemester]);
+  }, [instSource, filterCourses, legacyCode, extractSemester]);
+
+  // Tope de tarjetas: se reinicia al cambiar de período o de búsqueda
+  // (derivado de la clave, sin efectos).
+  const capKey = `${semesterKey}|${search.trim().toLowerCase()}`;
+  const [instCapState, setInstCapState] = useState({ key: "", n: SEMESTER_PAGE_SIZE });
+  const instCap = instCapState.key === capKey ? instCapState.n : SEMESTER_PAGE_SIZE;
+  const showMoreInst = useCallback(() => {
+    setInstCapState({ key: capKey, n: instCap + SEMESTER_PAGE_SIZE });
+  }, [capKey, instCap]);
 
   // Recently visited instructor courses (from localStorage).
   // Con lista cargada: preferimos los datos frescos del curso. En modo admin
@@ -335,15 +435,20 @@ export default function RoleHome() {
       .slice(0, lazyMode ? 5 : 4);
   }, [recentEntries, instructorCourses, lazyMode]);
 
-  const shouldCollapse = filteredInst.length > INITIAL_INST_LIMIT && !search && !filterSemester;
+  // "Todos mis cursos" sin búsqueda: se colapsa a 6 con "Ver todos".
+  // En los demás casos se pintan hasta `instCap` tarjetas con "Mostrar más".
+  const shouldCollapse = semesterKey === "all" && filteredInst.length > INITIAL_INST_LIMIT && !search;
   const visibleInst = (shouldCollapse && !showAllInst)
     ? filteredInst.slice(0, INITIAL_INST_LIMIT)
-    : filteredInst;
+    : filteredInst.slice(0, instCap);
+  const hiddenInstCount = (shouldCollapse && !showAllInst) ? 0 : Math.max(0, filteredInst.length - visibleInst.length);
+  const showSemesterFilter = semesters.length > 0 || availableSemesters.length >= 2;
 
   const handleSelectCourse = useCallback((courseId, asRole) => {
     const idStr = String(courseId);
     const isStudentInCourse = studentCourses.some(c => String(c.id) === idStr);
-    const isInstructorInCourse = instructorCourses.some(c => String(c.id) === idStr);
+    const isInstructorInCourse = instructorCourses.some(c => String(c.id) === idStr)
+      || semesterCourses.some(c => String(c.id) === idStr);
 
     let targetRole = asRole;
     if (isStudentInCourse && !isInstructorInCourse) targetRole = "student";
@@ -354,6 +459,7 @@ export default function RoleHome() {
     const gMeta = (globalResults || []).find(c => String(c.id || c.Identifier) === idStr);
     const meta =
       instructorCourses.find(c => String(c.id) === idStr) ||
+      semesterCourses.find(c => String(c.id) === idStr) ||
       studentCourses.find(c => String(c.id) === idStr) ||
       recentInstCourses.find(c => String(c.id) === idStr) ||
       (gMeta ? { id: idStr, name: gMeta.name || gMeta.Name || "", code: gMeta.code || gMeta.Code || "" } : null);
@@ -361,14 +467,14 @@ export default function RoleHome() {
     sessionStorage.setItem("gemelo_pending_org", String(courseId));
     const target = targetRole === "student" ? "/portal" : "/dashboard";
     window.location.href = window.location.origin + target;
-  }, [studentCourses, instructorCourses, globalResults, recentInstCourses, pushRecent]);
+  }, [studentCourses, instructorCourses, semesterCourses, globalResults, recentInstCourses, pushRecent]);
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--bg)", fontFamily: "var(--font)" }}>
       {/* ==================== TOP BAR ==================== */}
       <header style={{
         position: "sticky", top: 0, zIndex: 50,
-        background: "rgba(255,255,255,0.85)", backdropFilter: "blur(16px) saturate(180%)",
+        background: "color-mix(in srgb, var(--card) 85%, transparent)", backdropFilter: "blur(16px) saturate(180%)",
         WebkitBackdropFilter: "blur(16px) saturate(180%)",
         borderBottom: "1px solid var(--border)",
         display: "flex", alignItems: "center", justifyContent: "space-between",
@@ -379,7 +485,7 @@ export default function RoleHome() {
             width: 36, height: 36, borderRadius: 10,
             background: "linear-gradient(135deg, var(--brand) 0%, #1e40af 100%)",
             display: "flex", alignItems: "center", justifyContent: "center",
-            color: "#fff", fontSize: 10, fontWeight: 900, letterSpacing: "0.05em",
+            color: "var(--on-brand)", fontSize: 10, fontWeight: 900, letterSpacing: "0.05em",
             boxShadow: "0 4px 14px -4px rgba(11, 95, 255, 0.5)",
           }}>CESA</div>
           <div>
@@ -395,7 +501,7 @@ export default function RoleHome() {
           <div style={{
             width: 34, height: 34, borderRadius: "50%",
             background: "linear-gradient(135deg, var(--brand) 0%, #1e40af 100%)",
-            color: "#fff", display: "flex", alignItems: "center", justifyContent: "center",
+            color: "var(--on-brand)", display: "flex", alignItems: "center", justifyContent: "center",
             fontSize: 13, fontWeight: 800,
             boxShadow: "0 3px 10px -3px rgba(11, 95, 255, 0.4)",
           }}>
@@ -498,7 +604,7 @@ export default function RoleHome() {
         )}
 
         {/* ── Search bar ── */}
-        {!loading && (courses.length > 0 || lazyMode) && (
+        {!loading && (courses.length > 0 || lazyMode || semesterCourses.length > 0) && (
           <div style={{
             position: "relative", marginBottom: 24, maxWidth: 640,
             marginLeft: "auto", marginRight: "auto",
@@ -510,6 +616,7 @@ export default function RoleHome() {
             }} />
             <input
               type="text"
+              aria-label="Buscar cursos por nombre, código o ID"
               placeholder={lazyMode && courses.length === 0
                 ? "Buscar en todos los cursos por nombre, código o ID (mín. 3 caracteres)..."
                 : "Buscar por nombre, código o ID..."}
@@ -556,7 +663,7 @@ export default function RoleHome() {
           <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
 
             {/* ── Recientes (con historial; en modo admin siempre que existan) ── */}
-            {isInstructor && recentInstCourses.length > 0 && (lazyMode || instructorCourses.length > INITIAL_INST_LIMIT) && !search && !filterSemester && (
+            {isInstructor && recentInstCourses.length > 0 && (lazyMode || instructorCourses.length > INITIAL_INST_LIMIT) && !search && (
               <section className="home-panel" style={{ animationDelay: "0.06s" }}>
                 <div className="section-header-v2">
                   <div className="section-header-icon-wrap">
@@ -622,61 +729,93 @@ export default function RoleHome() {
             )}
 
             {/* ── Cursos como Profesor ── */}
-            {isInstructor && (filteredInst.length > 0 || (instructorCourses.length > 0 && filterSemester)) && (
-              <section className="home-panel" style={{ animationDelay: "0.08s" }}>
+            {instListEnabled && (filteredInst.length > 0 || semesterKey !== "all") && (
+              <section className="home-panel" style={{ animationDelay: "0.08s" }} aria-busy={semesterLoading || undefined}>
                 <SectionHeader
                   Icon={Presentation}
-                  title="Mis cursos como Profesor"
+                  title={isSuperAdmin && selectedSemesterId ? "Cursos del período" : "Mis cursos como Profesor"}
                   count={filteredInst.length}
                   variant="instructor"
                 />
 
-                {/* Semester filter — solo se muestra cuando hay muchos cursos y ≥ 2 semestres */}
-                {instructorCourses.length > INITIAL_INST_LIMIT && availableSemesters.length >= 2 && (
+                {/* Filtro de período: semestres reales de Brightspace + "Todos mis cursos" */}
+                {semesterKey !== "pending" && showSemesterFilter && (
                   <div style={{
                     display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
                     padding: "10px 12px", marginBottom: 14,
                     background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 10,
                   }}>
-                    <Filter size={14} strokeWidth={2.4} style={{ color: "var(--muted)" }} />
-                    <span style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                      Filtrar por período
-                    </span>
+                    <Filter size={14} strokeWidth={2.4} style={{ color: "var(--muted)" }} aria-hidden="true" />
+                    <label
+                      htmlFor="rolehome-period-filter"
+                      style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}
+                    >
+                      Período
+                    </label>
                     <select
-                      value={filterSemester}
-                      onChange={(e) => { setFilterSemester(e.target.value); setShowAllInst(false); }}
+                      id="rolehome-period-filter"
+                      aria-label="Filtrar por período"
+                      value={semesterKey}
+                      onChange={(e) => {
+                        setSemesterChoice(e.target.value);
+                        setShowAllInst(false);
+                        setInstCapState({ key: "", n: SEMESTER_PAGE_SIZE });
+                      }}
                       style={{
                         padding: "6px 12px", borderRadius: 8, border: "1px solid var(--border)",
-                        background: "var(--card)", color: "var(--text)",
+                        background: "var(--card)", color: "var(--text)", maxWidth: "100%", minWidth: 0,
                         fontSize: 12, fontFamily: "var(--font)", fontWeight: 600, outline: "none", cursor: "pointer",
                       }}
                     >
-                      <option value="">Todos los períodos</option>
-                      {availableSemesters.map(code => (
-                        <option key={code} value={code}>{formatSemester(code)}</option>
-                      ))}
+                      {semesters.length > 0
+                        ? semesters.map(s => (
+                          <option key={s.id} value={`sem:${s.id}`}>{s.name || s.code || `Semestre ${s.id}`}</option>
+                        ))
+                        : availableSemesters.map(code => (
+                          <option key={code} value={`code:${code}`}>{formatSemester(code)}</option>
+                        ))}
+                      <option value="all">Todos mis cursos</option>
                     </select>
-                    {filterSemester && (
-                      <button
-                        onClick={() => setFilterSemester("")}
-                        style={{
-                          display: "inline-flex", alignItems: "center", gap: 4,
-                          background: "var(--brand-light)", color: "var(--brand)", border: "none",
-                          borderRadius: 6, padding: "4px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer",
-                        }}
-                      >
-                        <X size={11} strokeWidth={2.5} /> Limpiar
-                      </button>
-                    )}
                     <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--muted)", fontWeight: 600 }}>
-                      {filteredInst.length} de {instructorCourses.length}
+                      {semesterLoading
+                        ? "Cargando…"
+                        : selectedSemesterId
+                          ? `${filteredInst.length} en el período`
+                          : `${filteredInst.length} de ${instructorCourses.length}`}
                     </span>
                   </div>
                 )}
 
-                {filteredInst.length === 0 ? (
+                {semesterLoading ? (
+                  <div role="status" style={{
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+                    padding: "24px 0", color: "var(--muted)", fontSize: 13, fontWeight: 600,
+                  }}>
+                    <Loader2 size={18} strokeWidth={2.4} style={{ animation: "rotateGlow 1s linear infinite", color: "var(--brand)" }} aria-hidden="true" />
+                    Cargando cursos{selectedSemester ? ` de ${selectedSemester.name || selectedSemester.code}` : " del período"}…
+                  </div>
+                ) : semesterError ? (
+                  <div role="alert" style={{ padding: "20px 0", textAlign: "center", color: "var(--muted)", fontSize: 13 }}>
+                    No se pudieron cargar los cursos del período.
+                    <div style={{ marginTop: 10 }}>
+                      <button
+                        type="button"
+                        onClick={retrySemester}
+                        style={{
+                          background: "var(--bg)", border: "1.5px solid var(--border)", borderRadius: 10,
+                          padding: "7px 14px", fontSize: 12, fontWeight: 800, color: "var(--brand)",
+                          cursor: "pointer", fontFamily: "var(--font)",
+                        }}
+                      >
+                        Reintentar
+                      </button>
+                    </div>
+                  </div>
+                ) : filteredInst.length === 0 ? (
                   <div style={{ padding: "24px 0", textAlign: "center", color: "var(--muted)", fontSize: 13 }}>
-                    Sin cursos en el período seleccionado.
+                    {search.trim()
+                      ? `Sin cursos que coincidan con "${search.trim()}" en el período seleccionado.`
+                      : "Sin cursos en el período seleccionado."}
                   </div>
                 ) : (
                   <>
@@ -685,6 +824,28 @@ export default function RoleHome() {
                         <CourseCard key={`inst-${c.id}`} course={c} role="instructor" onSelect={handleSelectCourse} />
                       ))}
                     </div>
+
+                    {hiddenInstCount > 0 && (
+                      <div style={{ textAlign: "center", marginTop: 14 }}>
+                        <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 8 }}>
+                          Mostrando {visibleInst.length} de {filteredInst.length}. Usa el buscador para refinar la lista.
+                        </div>
+                        <button
+                          type="button"
+                          onClick={showMoreInst}
+                          style={{
+                            display: "inline-flex", alignItems: "center", gap: 6,
+                            background: "var(--bg)", border: "1.5px solid var(--border)", borderRadius: 10,
+                            padding: "8px 16px", fontSize: 12, fontWeight: 800, color: "var(--brand)",
+                            cursor: "pointer", transition: "all 0.15s", fontFamily: "var(--font)",
+                          }}
+                          onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--brand)"; e.currentTarget.style.background = "var(--brand-light)"; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.background = "var(--bg)"; }}
+                        >
+                          <ChevronDown size={14} strokeWidth={2.5} /> Mostrar más ({Math.min(SEMESTER_PAGE_SIZE, hiddenInstCount)} de {hiddenInstCount} restantes)
+                        </button>
+                      </div>
+                    )}
 
                     {shouldCollapse && (
                       <div style={{ textAlign: "center", marginTop: 14 }}>
@@ -760,12 +921,14 @@ export default function RoleHome() {
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
                   <input
                     type="number"
+                    aria-label="ID del estudiante"
                     placeholder="ID del estudiante"
                     value={overviewStudentSearchId}
                     onChange={e => setOverviewStudentSearchId(e.target.value)}
                     style={{ flex: "1 1 160px", minWidth: 0, maxWidth: "100%", padding: "10px 14px", borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13, fontFamily: "var(--font)", outline: "none", fontWeight: 500 }}
                   />
                   <select
+                    aria-label="Período académico"
                     value={impersonatePeriod}
                     onChange={e => setImpersonatePeriod(e.target.value)}
                     style={{ flex: "1 1 160px", minWidth: 0, maxWidth: "100%", textOverflow: "ellipsis", padding: "10px 14px", borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13, fontFamily: "var(--font)", outline: "none", cursor: "pointer", fontWeight: 500 }}
@@ -790,7 +953,7 @@ export default function RoleHome() {
                     background: overviewStudentSearchId
                       ? "linear-gradient(135deg, var(--brand) 0%, #1e40af 100%)"
                       : "var(--bg)",
-                    color: overviewStudentSearchId ? "#fff" : "var(--muted)",
+                    color: overviewStudentSearchId ? "var(--on-brand)" : "var(--muted)",
                     fontSize: 14, fontWeight: 800, fontFamily: "var(--font)",
                     display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8,
                     transition: "transform 0.15s, box-shadow 0.2s",
@@ -818,22 +981,24 @@ export default function RoleHome() {
                 </div>
                 <div style={{
                   fontSize: 12, color: "var(--muted)", marginBottom: 14,
-                  padding: "10px 14px", background: "rgba(255, 170, 0, 0.08)",
-                  borderRadius: 10, borderLeft: "3px solid #f59e0b",
+                  padding: "10px 14px", background: "var(--warning-bg)",
+                  borderRadius: 10, borderLeft: "3px solid var(--watch)",
                   display: "flex", alignItems: "flex-start", gap: 8, lineHeight: 1.5,
                 }}>
-                  <Crown size={16} strokeWidth={2.2} style={{ color: "#f59e0b", flexShrink: 0, marginTop: 1 }} />
+                  <Crown size={16} strokeWidth={2.2} style={{ color: "var(--watch)", flexShrink: 0, marginTop: 1 }} />
                   <span>Abre un curso como si fueras un profesor o estudiante específico. Para "Como Estudiante" debes ingresar el ID del estudiante.</span>
                 </div>
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
                   <input
                     type="number"
+                    aria-label="ID del curso"
                     placeholder="ID del curso"
                     value={impersonateOrgId}
                     onChange={e => setImpersonateOrgId(e.target.value)}
                     style={{ flex: "1 1 120px", padding: "10px 14px", borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13, fontFamily: "var(--font)", outline: "none", fontWeight: 500 }}
                   />
                   <select
+                    aria-label="Rol a suplantar"
                     value={impersonateRole}
                     onChange={e => setImpersonateRole(e.target.value)}
                     style={{ padding: "10px 14px", borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13, fontFamily: "var(--font)", outline: "none", cursor: "pointer", fontWeight: 500 }}
@@ -844,6 +1009,7 @@ export default function RoleHome() {
                   {impersonateRole === "student" && (
                     <input
                       type="number"
+                      aria-label="ID del estudiante a suplantar"
                       placeholder="ID del estudiante"
                       value={impersonateUserId}
                       onChange={e => setImpersonateUserId(e.target.value)}
@@ -920,7 +1086,7 @@ export default function RoleHome() {
                     width: "100%", padding: "12px 16px", borderRadius: 12,
                     border: "none", cursor: "pointer",
                     background: "linear-gradient(135deg, var(--brand) 0%, #1e40af 100%)",
-                    color: "#fff", fontSize: 14, fontWeight: 800, fontFamily: "var(--font)",
+                    color: "var(--on-brand)", fontSize: 14, fontWeight: 800, fontFamily: "var(--font)",
                     display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8,
                     transition: "transform 0.15s, box-shadow 0.2s",
                     boxShadow: "0 6px 16px -6px rgba(11, 95, 255, 0.5)",
@@ -961,7 +1127,7 @@ export default function RoleHome() {
                     width: "100%", padding: "12px 16px", borderRadius: 12,
                     border: "none", cursor: "pointer",
                     background: "linear-gradient(135deg, var(--brand) 0%, #1e40af 100%)",
-                    color: "#fff", fontSize: 14, fontWeight: 800, fontFamily: "var(--font)",
+                    color: "var(--on-brand)", fontSize: 14, fontWeight: 800, fontFamily: "var(--font)",
                     display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8,
                     transition: "transform 0.15s, box-shadow 0.2s",
                     boxShadow: "0 6px 16px -6px rgba(11, 95, 255, 0.5)",
@@ -1073,7 +1239,7 @@ export default function RoleHome() {
                     {isSuperAdmin && (
                       <div style={{
                         marginBottom: 12, padding: "12px 14px",
-                        background: "rgba(255, 170, 0, 0.08)", border: "1px solid rgba(255, 170, 0, 0.3)",
+                        background: "var(--warning-bg)", border: "1px solid var(--warning-border)",
                         borderRadius: 12, fontSize: 12, color: "var(--text)", maxWidth: 460,
                       }}>
                         <div style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--muted)", marginBottom: 8 }}>
@@ -1106,7 +1272,7 @@ export default function RoleHome() {
                 <button
                   onClick={() => setSearch("")}
                   style={{
-                    background: "var(--brand)", color: "#fff", border: "none",
+                    background: "var(--brand)", color: "var(--on-brand)", border: "none",
                     borderRadius: 10, padding: "8px 18px", fontSize: 12, fontWeight: 800, cursor: "pointer",
                     marginTop: 8, transition: "transform 0.15s",
                   }}
@@ -1258,18 +1424,20 @@ function AdminAnnounce() {
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
         <input
           type="text"
+          aria-label="Asunto del anuncio"
           placeholder="Asunto del anuncio"
           value={subject}
           maxLength={140}
           onChange={e => setSubject(e.target.value)}
           style={{ ...inputStyle, flex: "2 1 220px" }}
         />
-        <select value={tag} onChange={e => setTag(e.target.value)} style={{ ...inputStyle, flex: "1 1 140px", cursor: "pointer" }}>
+        <select aria-label="Etiqueta del anuncio" value={tag} onChange={e => setTag(e.target.value)} style={{ ...inputStyle, flex: "1 1 140px", cursor: "pointer" }}>
           {TAGS.map(t => <option key={t} value={t}>{t}</option>)}
         </select>
       </div>
 
       <textarea
+        aria-label="Mensaje del anuncio"
         placeholder="Escribe el mensaje… (ej: nueva actualización de la plataforma, mantenimiento programado, reforma importante…)"
         value={message}
         onChange={e => setMessage(e.target.value)}
@@ -1284,7 +1452,7 @@ function AdminAnnounce() {
           width: "100%", padding: "12px 16px", borderRadius: 12,
           border: "none", cursor: canSend ? "pointer" : "not-allowed",
           background: canSend ? "linear-gradient(135deg, var(--brand) 0%, #1e40af 100%)" : "var(--bg)",
-          color: canSend ? "#fff" : "var(--muted)",
+          color: canSend ? "var(--on-brand)" : "var(--muted)",
           fontSize: 14, fontWeight: 800, fontFamily: "var(--font)",
           display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8,
           boxShadow: canSend ? "0 6px 16px -6px rgba(11, 95, 255, 0.5)" : "none",
@@ -1296,8 +1464,8 @@ function AdminAnnounce() {
       {result && (
         <div style={{
           marginTop: 12, padding: "10px 14px", borderRadius: 10, fontSize: 12, lineHeight: 1.5,
-          background: result.ok ? "rgba(22,163,74,0.08)" : "rgba(220,38,38,0.08)",
-          border: `1px solid ${result.ok ? "rgba(22,163,74,0.3)" : "rgba(220,38,38,0.3)"}`,
+          background: result.ok ? "var(--success-bg)" : "var(--danger-bg)",
+          border: `1px solid ${result.ok ? "var(--success-border)" : "var(--danger-border)"}`,
           color: "var(--text)",
         }}>
           {result.ok ? (

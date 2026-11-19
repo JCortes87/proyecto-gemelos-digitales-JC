@@ -1,8 +1,8 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useId } from "react";
 import { apiGet, apiGetCached, apiDownload, apiUrl } from "../../utils/api";
 import { exportInstitutionalFeedbackPdf } from "../../utils/export";
-import { COLORS, colorForPct } from "../../utils/colors";
-import { fmtPct, fmtGrade10FromPct, computeRiskFromPct } from "../../utils/helpers";
+import { COLORS, colorForPct, withAlpha } from "../../utils/colors";
+import useDialogA11y from "../../hooks/useDialogA11y";
 import { sanitizeHtml } from "../../utils/sanitize";
 import StudentAvatar from "../ui/StudentAvatar";
 
@@ -26,6 +26,9 @@ export default function EvidenceReports({
   const [details, setDetails] = useState({}); // userId → { evidences, loading, error }
   const [expanded, setExpanded] = useState({}); // userId → bool (show all evidences)
   const [feedbackModal, setFeedbackModal] = useState(null); // { studentName, evidenceName, loading, data, error }
+  // Modal de retroalimentación: foco, trampa de Tab, Esc y scroll lock (hook antes de cualquier return)
+  const feedbackDialogRef = useDialogA11y({ open: !!feedbackModal, onClose: () => setFeedbackModal(null) });
+  const feedbackTitleId = useId();
 
   const openFeedback = async (student, evidence) => {
     if (!evidence.linkedDropboxId) return;
@@ -65,7 +68,6 @@ export default function EvidenceReports({
 
     const pickRandom = (arr) => arr.length === 0 ? null : arr[Math.floor(Math.random() * arr.length)];
 
-    // eslint-disable-next-line no-unused-vars
     const _ = seed; // dependency to retrigger on seed change
     return {
       high: pickRandom(high),
@@ -73,7 +75,6 @@ export default function EvidenceReports({
       low: pickRandom(low),
       counts: { high: high.length, mid: mid.length, low: low.length },
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [studentRows, seed]);
 
   // Fetch evidences for each sampled student
@@ -158,7 +159,7 @@ export default function EvidenceReports({
             </div>
             <div style={{ fontSize: 10, color: "var(--muted)" }}>{description}</div>
           </div>
-          <span className="tag" style={{ background: color + "22", color: color }}>
+          <span className="tag" style={{ background: withAlpha(color, 13), color: color }}>
             {count} estudiante{count !== 1 ? "s" : ""}
           </span>
         </div>
@@ -169,8 +170,8 @@ export default function EvidenceReports({
           style={{
             display: "flex", alignItems: "center", gap: 12,
             padding: "10px 12px", borderRadius: 10,
-            background: "rgba(255,255,255,0.7)",
-            border: "1px solid rgba(255,255,255,0.5)",
+            background: withAlpha("var(--card)", 70),
+            border: `1px solid ${withAlpha("var(--card)", 50)}`,
             cursor: "pointer", textAlign: "left",
             fontFamily: "var(--font)",
           }}
@@ -222,7 +223,7 @@ export default function EvidenceReports({
                   <div key={i} style={{
                     display: "flex", alignItems: "center", gap: 8,
                     padding: "6px 10px", borderRadius: 8,
-                    background: "rgba(255,255,255,0.5)",
+                    background: withAlpha("var(--card)", 50),
                     fontSize: 11,
                   }}>
                     <span style={{
@@ -248,13 +249,14 @@ export default function EvidenceReports({
                         <button
                           type="button"
                           title="Descargar entrega del estudiante (ZIP)"
+                          aria-label="Descargar entrega del estudiante (ZIP)"
                           style={{
                             fontSize: 10, fontWeight: 700,
                             padding: "3px 7px", borderRadius: 6,
-                            background: "rgba(52, 120, 246, 0.12)",
+                            background: "var(--info-bg)",
                             color: "var(--brand)",
                             textDecoration: "none",
-                            border: "1px solid rgba(52, 120, 246, 0.25)",
+                            border: "1px solid var(--info-border)",
                             flexShrink: 0, cursor: "pointer",
                           }}
                           onClick={(ev) => {
@@ -268,13 +270,14 @@ export default function EvidenceReports({
                         <button
                           type="button"
                           title="Ver retroalimentación del docente"
+                          aria-label="Ver retroalimentación del docente"
                           onClick={(ev) => { ev.stopPropagation(); openFeedback(student, e); }}
                           style={{
                             fontSize: 10, fontWeight: 700,
                             padding: "3px 7px", borderRadius: 6,
-                            background: "rgba(255, 170, 0, 0.15)",
-                            color: "#b27300",
-                            border: "1px solid rgba(255, 170, 0, 0.3)",
+                            background: "var(--warning-bg)",
+                            color: "var(--warning-fg)",
+                            border: "1px solid var(--warning-border)",
                             cursor: "pointer",
                             flexShrink: 0,
                             fontFamily: "var(--font)",
@@ -294,8 +297,8 @@ export default function EvidenceReports({
                   style={{
                     fontSize: 11, fontWeight: 700, color: "var(--brand)",
                     textAlign: "center", padding: "6px 0", marginTop: 2,
-                    background: "rgba(52,120,246,0.08)",
-                    border: "1px solid rgba(52,120,246,0.2)",
+                    background: "var(--info-bg)",
+                    border: "1px solid var(--info-border)",
                     borderRadius: 8, cursor: "pointer",
                     fontFamily: "var(--font)",
                   }}
@@ -383,7 +386,7 @@ export default function EvidenceReports({
           onClick={() => setFeedbackModal(null)}
           style={{
             position: "fixed", inset: 0, zIndex: 1000,
-            background: "rgba(15, 23, 42, 0.55)",
+            background: "var(--overlay)",
             backdropFilter: "blur(4px)",
             display: "flex", alignItems: "center", justifyContent: "center",
             padding: 20,
@@ -391,8 +394,14 @@ export default function EvidenceReports({
         >
           <div
             className="feedback-print-card"
+            ref={feedbackDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={feedbackTitleId}
+            tabIndex={-1}
             onClick={(e) => e.stopPropagation()}
             style={{
+              outline: "none",
               background: "var(--card)",
               borderRadius: 14,
               border: "1px solid var(--border)",
@@ -412,7 +421,7 @@ export default function EvidenceReports({
                 <div style={{ fontSize: 10, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
                   Retroalimentación del docente
                 </div>
-                <div style={{ fontSize: 15, fontWeight: 800, color: "var(--text)", marginTop: 3, lineHeight: 1.2 }}>
+                <div id={feedbackTitleId} style={{ fontSize: 15, fontWeight: 800, color: "var(--text)", marginTop: 3, lineHeight: 1.2 }}>
                   {feedbackModal.evidenceName}
                 </div>
                 <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>
@@ -430,7 +439,7 @@ export default function EvidenceReports({
                     }}
                     title="Descargar entrega del estudiante"
                     style={{
-                      background: "rgba(52,120,246,0.08)", border: "1px solid rgba(52,120,246,0.25)",
+                      background: "var(--info-bg)", border: "1px solid var(--info-border)",
                       color: "var(--brand)", borderRadius: 8,
                       fontSize: 11, fontWeight: 700,
                       padding: "6px 10px", cursor: "pointer",
@@ -458,7 +467,7 @@ export default function EvidenceReports({
                   style={{
                     background: "linear-gradient(135deg, #0B2D5C 0%, #0B5FFF 100%)",
                     border: "1px solid #0B2D5C",
-                    color: "#fff", borderRadius: 8,
+                    color: "var(--on-brand)", borderRadius: 8,
                     fontSize: 11, fontWeight: 800,
                     padding: "6px 10px",
                     cursor: (feedbackModal.loading || !feedbackModal.data) ? "not-allowed" : "pointer",
@@ -512,9 +521,9 @@ export default function EvidenceReports({
                 const levelColor = (level) => {
                   if (!level) return "var(--muted)";
                   const l = level.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-                  if (l.includes("sobresali") || l.includes("avanz") || l.includes("excelent") || l.includes("superior") || l.includes("logrado")) return "#16a34a";
+                  if (l.includes("sobresali") || l.includes("avanz") || l.includes("excelent") || l.includes("superior") || l.includes("logrado")) return "var(--success-fg)";
                   if (l.includes("interm") || l.includes("satisf") || l.includes("aceptable") || l.includes("proficien")) return "var(--brand)";
-                  if (l.includes("basi") || l.includes("elemental") || l.includes("suficiente") || l.includes("developing")) return "#d97706";
+                  if (l.includes("basi") || l.includes("elemental") || l.includes("suficiente") || l.includes("developing")) return "var(--warning-fg)";
                   if (l.includes("inicial") || l.includes("no cumple") || l.includes("deficiente") || l.includes("insuficiente") || l.includes("beginning")) return "var(--critical)";
                   return "var(--muted)";
                 };
@@ -537,7 +546,7 @@ export default function EvidenceReports({
                     {(score != null || outOf != null) && (
                       <div style={{
                         padding: "14px 16px", borderRadius: 12,
-                        background: "linear-gradient(135deg, var(--brand-light) 0%, rgba(255,255,255,0) 100%)",
+                        background: "linear-gradient(135deg, var(--brand-light) 0%, transparent 100%)",
                         border: "1px solid var(--brand-light2, #D6E4FF)",
                         display: "flex", alignItems: "center", gap: 14,
                       }}>
@@ -546,7 +555,7 @@ export default function EvidenceReports({
                             Calificación total
                           </div>
                           {score != null && outOf != null && (
-                            <div style={{ height: 6, background: "rgba(52,120,246,0.15)", borderRadius: 99, overflow: "hidden" }}>
+                            <div style={{ height: 6, background: withAlpha("var(--brand)", 15), borderRadius: 99, overflow: "hidden" }}>
                               <div style={{ height: "100%", width: `${Math.min(100, (score / outOf) * 100)}%`, background: "var(--brand)", borderRadius: 99, transition: "width 0.6s ease" }} />
                             </div>
                           )}
@@ -582,8 +591,8 @@ export default function EvidenceReports({
                                 <span style={{
                                   fontSize: 10, fontWeight: 900, fontFamily: "var(--font-mono)",
                                   padding: "2px 8px", borderRadius: 6,
-                                  background: "rgba(52,120,246,0.12)", color: "var(--brand)",
-                                  border: "1px solid rgba(52,120,246,0.25)", flexShrink: 0,
+                                  background: "var(--info-bg)", color: "var(--brand)",
+                                  border: "1px solid var(--info-border)", flexShrink: 0,
                                   whiteSpace: "nowrap",
                                 }}>
                                   {o.code}
@@ -639,8 +648,8 @@ export default function EvidenceReports({
                                   <span key={oi} title={o.label || o.code || ""} style={{
                                     fontSize: 9, fontWeight: 800, fontFamily: "var(--font-mono)",
                                     padding: "2px 6px", borderRadius: 5,
-                                    background: "rgba(52,120,246,0.1)", color: "var(--brand)",
-                                    border: "1px solid rgba(52,120,246,0.22)",
+                                    background: "var(--info-bg)", color: "var(--brand)",
+                                    border: "1px solid var(--info-border)",
                                   }}>
                                     🎯 {o.code || "RA"}
                                   </span>
@@ -660,9 +669,9 @@ export default function EvidenceReports({
                                   <div style={{
                                     fontSize: 10, fontWeight: 800, marginTop: 3,
                                     padding: "2px 8px", borderRadius: 99, display: "inline-block",
-                                    background: levelColor(computedLevel) + "18",
+                                    background: withAlpha(levelColor(computedLevel), 9),
                                     color: levelColor(computedLevel),
-                                    border: "1px solid " + levelColor(computedLevel) + "40",
+                                    border: "1px solid " + withAlpha(levelColor(computedLevel), 25),
                                   }}>
                                     {computedLevel}
                                   </div>
@@ -700,9 +709,9 @@ export default function EvidenceReports({
                                         <span style={{
                                           fontSize: 10, fontWeight: 800,
                                           padding: "2px 8px", borderRadius: 99,
-                                          background: cColor + "18",
+                                          background: withAlpha(cColor, 9),
                                           color: cColor,
-                                          border: "1px solid " + cColor + "40",
+                                          border: "1px solid " + withAlpha(cColor, 25),
                                           whiteSpace: "nowrap",
                                         }}>
                                           {c.level}
@@ -725,7 +734,7 @@ export default function EvidenceReports({
                                         fontSize: 12, color: "var(--text)",
                                         lineHeight: 1.55,
                                         padding: "7px 10px",
-                                        background: cColor + "10",
+                                        background: withAlpha(cColor, 6),
                                         borderRadius: 7,
                                         borderLeft: "2px solid " + cColor,
                                         marginBottom: c.comment ? 6 : 0,
@@ -741,7 +750,7 @@ export default function EvidenceReports({
                                         padding: "7px 10px",
                                         background: "var(--bg)",
                                         borderRadius: 7,
-                                        borderLeft: "2px solid " + cColor + "60",
+                                        borderLeft: "2px solid " + withAlpha(cColor, 38),
                                       }}
                                       dangerouslySetInnerHTML={{ __html: sanitizeHtml(c.comment) }}
                                     />

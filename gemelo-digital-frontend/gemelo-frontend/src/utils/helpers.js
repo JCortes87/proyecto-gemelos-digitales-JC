@@ -376,7 +376,7 @@ export function parseFormulaReferences(formula) {
       txt.innerHTML = formula;
       decoded = txt.value;
     }
-  } catch {}
+  } catch { /* sin DOM utilizable: se usa la fórmula sin decodificar */ }
   const re = /\[([^\]]+?)\.(?:Puntos recibidos|Points Received|Puntos Recibidos|Puntos|Points|Calificaci[óo]n|Grade|Score|Max Points|Puntaje)\]/gi;
   const names = [];
   let m;
@@ -452,9 +452,6 @@ export function detectCortePeriod(name) {
 export function buildCorteGroups(evidences, gradeCategories) {
   const list = Array.isArray(evidences) ? evidences : [];
   if (list.length === 0) return [];
-
-  const corteItems = list.filter((e) => e?.isCorte === true);
-  const nonCorteItems = list.filter((e) => e?.isCorte !== true);
 
   // ── Path 1: categories (ONLY those named "Corte N") ──────────────────
   // When the course uses categories, we ONLY surface those whose name

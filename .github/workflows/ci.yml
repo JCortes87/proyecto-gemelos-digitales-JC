@@ -1,0 +1,104 @@
+# ----------------------------------------------------------------------------
+# CI: tests de backend (pytest) y frontend (vitest + build).
+#
+# Se dispara en:
+#   - pull_request (cualquier rama destino)
+#   - push a main
+#   - workflow_call: los workflows de deploy lo invocan como job previo
+#     (`needs:`), asi nunca se despliega un commit con tests rotos.
+#     Los inputs permiten correr solo la mitad relevante.
+# ----------------------------------------------------------------------------
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      backend:
+        description: Correr el job de backend
+        type: boolean
+        default: true
+      frontend:
+        description: Correr el job de frontend
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+# En PRs, un push nuevo cancela la corrida anterior. Fuera de PRs el grupo es
+# unico por corrida (run_id), asi nunca se cancela ni se descarta una corrida
+# de main (ni la invocada desde un deploy).
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  backend:
+    name: Backend (pytest)
+    # En pull_request/push `inputs.backend` es null. Ojo: en expresiones de
+    # Actions null == false (ambos se convierten a 0), por eso se compara como
+    # texto: solo se salta el job si el caller paso explicitamente false.
+    if: ${{ format('{0}', inputs.backend) != 'false' }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gemelo-digital-backend
+    steps:
+      - name: Checkout del repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: |
+            gemelo-digital-backend/requirements.txt
+            gemelo-digital-backend/requirements-dev.txt
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+
+      - name: Correr tests
+        run: python -m pytest -q
+
+  frontend:
+    name: Frontend (vitest + build)
+    if: ${{ format('{0}', inputs.frontend) != 'false' }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gemelo-digital-frontend/gemelo-frontend
+    steps:
+      - name: Checkout del repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: gemelo-digital-frontend/gemelo-frontend/package-lock.json
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      # Hay ~64 errores de lint conocidos: se reporta pero no bloquea.
+      # Quitar continue-on-error cuando el lint quede en verde.
+      - name: Lint (informativo)
+        continue-on-error: true
+        run: npm run lint
+
+      - name: Tests
+        run: npm test -- --run
+
+      - name: Build
+        run: npm run build

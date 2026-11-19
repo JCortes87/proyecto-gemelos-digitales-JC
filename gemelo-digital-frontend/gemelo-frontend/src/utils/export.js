@@ -17,12 +17,32 @@ function colorForRiskPct(pct) {
   return COLORS.pending;
 }
 
+// Caracteres que Excel/LibreOffice/Sheets interpretan como inicio de fórmula.
+const CSV_FORMULA_PREFIX = /^[=+\-@\t\r]/;
+// Números "puros" en texto (p.ej. "-3.5", "-12%"): no son fórmulas y se dejan
+// intactos para no romper valores negativos legítimos.
+const CSV_PLAIN_NUMBER = /^-\d+(?:[.,]\d+)?%?$/;
+
 /**
- * Escape a CSV field (wrap in quotes if contains comma/quote/newline).
+ * Neutraliza la inyección de fórmulas (CSV injection, recomendación OWASP):
+ * si una celda de TEXTO empieza por =, +, -, @, tabulador o retorno de carro
+ * se le antepone una comilla simple para que la hoja de cálculo la trate como
+ * texto. Los nombres vienen de Brightspace y no son confiables. Los números
+ * JS (typeof "number") nunca se alteran.
  */
-function escCsv(v) {
+export function neutralizeCsvFormula(v) {
+  if (typeof v !== "string") return v;
+  if (CSV_FORMULA_PREFIX.test(v) && !CSV_PLAIN_NUMBER.test(v)) return `'${v}`;
+  return v;
+}
+
+/**
+ * Escape a CSV field (wrap in quotes if contains comma/quote/newline),
+ * neutralizando antes posibles fórmulas. Todo export CSV debe pasar por aquí.
+ */
+export function escCsv(v) {
   if (v == null) return "";
-  const s = String(v);
+  const s = String(neutralizeCsvFormula(v));
   if (/[",\n\r]/.test(s)) {
     return `"${s.replace(/"/g, '""')}"`;
   }
@@ -349,7 +369,6 @@ export function exportInstitutionalFeedbackPdf({
   const rubricsHtml = rubrics.map((r) => {
     const rPct = (r.score != null && r.outOf != null && r.outOf > 0)
       ? Math.min(100, (r.score / r.outOf) * 100) : null;
-    const rColor = levelColorHex(r.level);
     const criteriaHtml = (Array.isArray(r.criteria) ? r.criteria : []).map((c) => {
       const cColor = levelColorHex(c.level);
       return `

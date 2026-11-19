@@ -42,7 +42,7 @@ Monorepo con dos proyectos independientes:
 gemelo-frontend/
 ├── gemelo-digital-frontend/gemelo-frontend/   # SPA React (Vite)
 ├── gemelo-digital-backend/                    # API FastAPI (Python)
-├── .github/workflows/                         # CI/CD (deploy-backend, deploy-frontend)
+├── .github/workflows/                         # CI (ci.yml) y deploy (deploy-backend, deploy-frontend)
 ├── docs/                                      # Documentación técnica
 └── CLAUDE.md                                  # Guía para Claude Code
 ```
@@ -69,7 +69,7 @@ gemelo-frontend/
 - **Frontend:** S3 (`gemelo-frontend-prod`) + CloudFront (`E32WDBCT7SFCRD`)
 - **Backend:** ECS Fargate (`cluster: default`, `service: gemelo-digital-api`) + ECR (`gemelo-backend`)
 - **Base de datos:** RDS Postgres
-- **CI/CD:** GitHub Actions con OIDC (`GemeloDigitalDeployerRole`) — ⚠️ **actualmente roto**, se despliega manualmente (ver sección [Deploy](#deploy))
+- **CI/CD:** GitHub Actions. El CI (`ci.yml`: pytest + vitest + build) funciona; el deploy con OIDC (`GemeloDigitalDeployerRole`) — ⚠️ **está roto hasta corregir la trust policy**, se despliega manualmente (ver sección [Deploy](#deploy))
 
 ---
 
@@ -90,10 +90,10 @@ gemelo-frontend/
 ```bash
 cd gemelo-digital-frontend/gemelo-frontend
 npm install
-npm run dev              # http://localhost:5174
+npm run dev              # http://localhost:5173
 ```
 
-El dev server proxifica automáticamente `/gemelo`, `/brightspace`, `/auth`, `/lti`, `/health`, `/debug`, `/.well-known`, `/speech` a `http://localhost:8000` (ver `vite.config.js`).
+El dev server proxifica automáticamente `/gemelo`, `/brightspace`, `/auth`, `/lti`, `/health`, `/debug`, `/.well-known`, `/speech` a `https://localhost:8000` (ver `vite.config.js`; el backend local corre con los certificados `localhost-*.pem`).
 
 > **Nota:** Si defines `VITE_API_BASE_URL` en un `.env`, el frontend hará las llamadas a esa URL (por ejemplo, la API de AWS) en vez de al backend local, y el proxy no aplicará.
 
@@ -105,7 +105,7 @@ python -m venv .venv
 source .venv/Scripts/activate    # Windows Git Bash
 pip install -r requirements.txt
 cp .env.example .env             # completar credenciales Brightspace
-uvicorn app.main:app --reload --port 8000
+uvicorn main:app --reload --port 8000 --ssl-keyfile localhost-key.pem --ssl-certfile localhost-cert.pem
 ```
 
 Requiere Postgres corriendo. Aplicar migraciones:
@@ -149,13 +149,15 @@ alembic upgrade head
 ```bash
 npm run dev        # Dev server con HMR
 npm run build      # Build producción → dist/
-npm run lint       # ESLint 9 (flat config)
+npm run lint       # ESLint 9 (flat config) — debe quedar en 0 errores / 0 warnings
+npm test           # Vitest (jsdom)
 npm run preview    # Preview del build
 ```
 
 ### Backend
 ```bash
-uvicorn app.main:app --reload --port 8000    # Dev
+uvicorn main:app --reload --port 8000 --ssl-keyfile localhost-key.pem --ssl-certfile localhost-cert.pem  # Dev
+python -m pytest -q                           # Tests (pip install -r requirements-dev.txt)
 alembic upgrade head                          # Aplicar migraciones
 alembic revision --autogenerate -m "msg"      # Crear nueva migración
 ```
@@ -238,7 +240,42 @@ También hay entrada vía LTI 1.3 desde Brightspace (ver `app/api/lti.py`).
 
 ## Deploy
 
-> ⚠️ **El CI/CD automático está roto.** Los workflows `deploy-backend.yml` / `deploy-frontend.yml` fallan en el step *"Configurar credenciales AWS (via OIDC)"* porque la *trust policy* del rol IAM `GemeloDigitalDeployerRole` no acepta el token OIDC de este repo. **Hasta que se arregle (requiere acceso a AWS IAM), se despliega manualmente desde local** con el AWS CLI + Docker. Todo lo de abajo asume que ya hiciste `aws configure` con un IAM user con permisos de ECR/ECS/S3/CloudFront (cuenta `718624265053`, región `us-east-1`).
+> ⚠️ **El CD automático (deploy) está roto; el CI (tests) sí funciona.** Los workflows `deploy-backend.yml` / `deploy-frontend.yml` fallan en el step *"Configurar credenciales AWS (via OIDC)"* porque la *trust policy* del rol IAM `GemeloDigitalDeployerRole` no acepta el token OIDC de este repo (ver [Arreglar el OIDC](#arreglar-el-oidc-requiere-aws-iam)). **Hasta que se arregle (requiere acceso a AWS IAM), se despliega manualmente desde local** con el AWS CLI + Docker. Todo lo de abajo asume que ya hiciste `aws configure` con un IAM user con permisos de ECR/ECS/S3/CloudFront (cuenta `718624265053`, región `us-east-1`).
+
+### CI y workflows (`.github/workflows/`)
+
+| Workflow | Disparo | Qué hace |
+|---|---|---|
+| `ci.yml` | `pull_request`, push a `main`, manual, y `workflow_call` | **Backend:** Python 3.11, `pip install -r requirements.txt` + `requirements-dev.txt`, `python -m pytest -q`. **Frontend:** Node 22, `npm ci`, `npm run lint` (informativo, `continue-on-error` por ~64 errores conocidos), `npm test -- --run`, `npm run build`. |
+| `deploy-backend.yml` | push a `main` en `gemelo-digital-backend/**`, manual | Job `tests` (llama `ci.yml` solo backend) → `deploy` (`needs: tests`): build `linux/amd64` sin provenance/sbom, push a ECR con tag `<git SHA>` + `latest`, **registra una nueva revisión de la task definition actual del servicio con la imagen fijada por digest** (`gemelo-backend@sha256:...`) y hace `update-service --task-definition <nueva revisión>` (canary + circuit breaker como siempre). |
+| `deploy-frontend.yml` | push a `main` en `gemelo-digital-frontend/**`, manual | Job `tests` (llama `ci.yml` solo frontend) → `deploy` (`needs: tests`): build con Node 22, `s3 sync` **sin `--delete`** (assets inmutables + `index.html` no-cache) e invalidación de CloudFront. |
+
+Un deploy nunca corre si fallan sus tests. Si se quiere además bloquear merges, activar en GitHub *Settings → Branches → Branch protection* para `main` los checks requeridos `Backend (pytest)` y `Frontend (vitest + build)`.
+
+### Arreglar el OIDC (requiere AWS IAM)
+
+El repo vive en **dos remotos**: `origin` = `juandavid639/Proyecto-Gemelos-Digitales` y `jc` = `JCortes87/proyecto-gemelos-digitales-JC`. **`jc/main` es la línea de producción**, así que los workflows que importan son los que corren en ese repo. El token OIDC de GitHub trae `sub = repo:<owner>/<repo>:ref:refs/heads/main` (owner/repo tal cual aparecen en GitHub; la comparación de `StringEquals` distingue mayúsculas). La trust policy de `GemeloDigitalDeployerRole` debe quedar así (proveedor OIDC `token.actions.githubusercontent.com` ya registrado en la cuenta):
+
+```json
+{
+  "Effect": "Allow",
+  "Principal": { "Federated": "arn:aws:iam::718624265053:oidc-provider/token.actions.githubusercontent.com" },
+  "Action": "sts:AssumeRoleWithWebIdentity",
+  "Condition": {
+    "StringEquals": {
+      "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+      "token.actions.githubusercontent.com:sub": [
+        "repo:JCortes87/proyecto-gemelos-digitales-JC:ref:refs/heads/main"
+      ]
+    }
+  }
+}
+```
+
+- Si también se quiere desplegar desde `origin`, agregar `"repo:juandavid639/Proyecto-Gemelos-Digitales:ref:refs/heads/main"` a la lista `sub` (sin comodines: así ninguna rama/PR puede asumir el rol).
+- Ojo: el deploy llama a `ci.yml` como *reusable workflow*; eso **no** cambia el `sub` del token (lo emite el job `deploy` del workflow que dispara el push).
+- Si la org/repo tiene personalizado el claim `sub` (API `actions/oidc/customization/sub`), el formato cambia; verificarlo en GitHub antes de tocar IAM.
+- **Permisos IAM adicionales** que necesita el rol para el nuevo paso de deploy por digest (además de ECR push y `ecs:UpdateService`/`DescribeServices`): `ecs:DescribeTaskDefinition`, `ecs:RegisterTaskDefinition` y `iam:PassRole` sobre el *task role* y el `ecsTaskExecutionRole` de la task definition (condición `iam:PassedToService = ecs-tasks.amazonaws.com`). Si `ecr:DescribeImages` está permitido se usa como respaldo para obtener el digest.
 
 **Referencia rápida de recursos AWS:**
 
@@ -259,9 +296,14 @@ cd gemelo-digital-frontend/gemelo-frontend
 npm run build                      # genera dist/ con un bundle content-hashed (ej: index-XXXX.js)
 ```
 
-**2) Deploy del frontend (S3 + CloudFront):**
+**2) Deploy del frontend (S3 + CloudFront)** — igual que `deploy-frontend.yml`. **No usar `--delete`:** los chunks viejos deben seguir existiendo para navegadores que aún tienen el `index.html` anterior (típico en el iframe LTI de Brightspace); si se borran, la app se rompe con *"error loading dynamically imported module"*.
 ```bash
-aws s3 sync ./dist/ s3://gemelo-frontend-prod --delete --region us-east-1
+# assets con hash: inmutables, cache larga, SIN --delete
+aws s3 sync ./dist/assets/ s3://gemelo-frontend-prod/assets/ \
+  --cache-control "public,max-age=31536000,immutable" --region us-east-1
+# resto (index.html, favicon...): no-cache para que tome los chunks nuevos ya
+aws s3 sync ./dist/ s3://gemelo-frontend-prod --exclude "assets/*" \
+  --cache-control "no-cache" --region us-east-1
 aws cloudfront create-invalidation --distribution-id E32WDBCT7SFCRD --paths "/*" --region us-east-1
 ```
 
@@ -282,17 +324,36 @@ aws ecr get-login-password --region us-east-1 \
 # Fargate SOLO acepta un manifiesto Docker v2 de una plataforma. BuildKit por
 # defecto agrega provenance/attestation (OCI image index) y Fargate lo rechaza
 # con "tasks failed to start". Por eso: --provenance=false --sbom=false --platform linux/amd64
+REPO=718624265053.dkr.ecr.us-east-1.amazonaws.com/gemelo-backend
+SHA=$(git rev-parse HEAD)
 docker buildx build \
   --platform linux/amd64 --provenance=false --sbom=false \
-  -t 718624265053.dkr.ecr.us-east-1.amazonaws.com/gemelo-backend:latest \
+  -t $REPO:$SHA -t $REPO:latest \
   --push .
 ```
 
-**5) Forzar el redeploy en ECS:**
+**5) Redeploy en ECS.** Opción rápida (la task definition actual apunta a `:latest`, así que relee esa etiqueta):
 ```bash
 aws ecs update-service --cluster default --service gemelo-digital-api \
   --force-new-deployment --region us-east-1
 ```
+Opción recomendada (la misma que hace `deploy-backend.yml`): registrar una revisión de la task definition con la imagen **por digest** (`$REPO@sha256:...`, obtenido con `aws ecr describe-images --repository-name gemelo-backend --image-ids imageTag=$SHA --query 'imageDetails[0].imageDigest'`) y hacer `update-service --task-definition <nueva revisión>`. Así cada revisión identifica exactamente qué imagen corre y un rollback del circuit breaker vuelve a la imagen anterior de verdad (con `:latest` un rollback/escala relee la etiqueta movida).
+
+#### Imagen Docker del backend (resumen)
+
+- Base fijada `python:3.11.16-slim-trixie` (subir el parche a propósito), `WORKDIR /app`, `PYTHONDONTWRITEBYTECODE`/`PYTHONUNBUFFERED`, requirements en capa cacheada con `--no-cache-dir`.
+- Corre como usuario **no-root** `app` (uid/gid `10001`). El código es de root y de solo lectura; los únicos directorios escribibles son `/app/data` (`GEMELO_DATA_DIR`: `announcements.json`, `known_users.json`, `bug_reports.jsonl` best-effort) y `/app/keys` (ruta por defecto de la llave LTI si no hay `LTI_PRIVATE_KEY_PEM`).
+- El SPA se copia de `gemelo-digital-backend/frontend_dist/` a **`/frontend_dist`** (no dentro de `/app`): `main.py` lo busca en `<dir de main.py>/../frontend_dist`.
+- **El SPA no se compila dentro de la imagen** porque el contexto de build (workflow y deploy manual) es `gemelo-digital-backend/` y no ve el código del frontend. Por eso sigue siendo obligatorio el paso 3 (refrescar `frontend_dist`). Pasar a un build multi-etapa con Node exigiría usar la raíz del repo como contexto (`docker build -f gemelo-digital-backend/Dockerfile .`) en el workflow y en este README.
+- `HEALTHCHECK` contra `http://127.0.0.1:8000/health` (con python; la imagen no trae curl). **ECS Fargate ignora el `HEALTHCHECK` del Dockerfile**: para usarlo hay que agregar a la task definition en `containerDefinitions[0]`:
+  ```json
+  "healthCheck": {
+    "command": ["CMD", "python", "-c", "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status == 200 else 1)"],
+    "interval": 30, "timeout": 5, "retries": 3, "startPeriod": 60
+  }
+  ```
+- `.dockerignore` deja fuera `.env*`, `*.pem`, datos locales (`.session_store.json`, `known_users.json`, `announcements.json`), `tests/`, `taskdef*.json`, `Dockerfile copy`, etc.
+- Validar localmente: `docker build -t gemelo-backend-check gemelo-digital-backend && docker run --rm -e TOOL_BASE_URL=http://localhost -e DATABASE_URL=postgresql+psycopg://u:p@127.0.0.1:5432/db --entrypoint python gemelo-backend-check -c "import main"`.
 
 **6) Esperar a que quede estable y verificar:**
 ```bash
@@ -316,7 +377,7 @@ curl -s -o /dev/null -w "%{http_code}\n" "$BASE/assets/index-XXXX.js"
   aws secretsmanager create-secret --name gemelo/database-url            --secret-string "postgresql+psycopg://..." --region us-east-1
   aws secretsmanager create-secret --name gemelo/elevenlabs-api-key      --secret-string "<VALOR>" --region us-east-1
   ```
-  y verificar que `ecsTaskExecutionRole` tenga `secretsmanager:GetSecretValue` sobre `arn:aws:secretsmanager:us-east-1:718624265053:secret:gemelo/*`. Registrar con `aws ecs register-task-definition --cli-input-json file://taskdef-clean.json` y apuntar el servicio a la nueva revisión.
+  y verificar que `ecsTaskExecutionRole` tenga `secretsmanager:GetSecretValue` sobre `arn:aws:secretsmanager:us-east-1:718624265053:secret:gemelo/*`. Registrar con `aws ecs register-task-definition --cli-input-json file://taskdef-clean.json` y apuntar el servicio a la nueva revisión. Ojo: `taskdef-clean.json` tiene `image: ...gemelo-backend:latest`; cambiarlo por `gemelo-backend@sha256:<digest>` (o el tag `<git SHA>`) antes de registrar, y de paso agregar el `healthCheck` descrito arriba. Tras el primer deploy del workflow, la task definition vigente ya queda con digest.
 - **⚠️ `secrets[].valueFrom` requiere el ARN COMPLETO con sufijo** (ej. `...secret:gemelo/database-url-gJuD2u`). Con el ARN parcial (sin el sufijo aleatorio de 6 caracteres) las tareas Fargate fallan con `ResourceNotFoundException: Secrets Manager can't find the specified secret` y el circuit breaker hace rollback. Obtén los ARNs completos con `aws secretsmanager list-secrets --region us-east-1 --query "SecretList[?starts_with(Name,'gemelo/')].ARN"`. El `taskdef-clean.json` ya los tiene.
 - **🔴 ROTAR credenciales expuestas:** el `BRIGHTSPACE_CLIENT_SECRET`, el `DATABASE_URL` (contraseña de RDS) y el `ELEVENLABS_API_KEY` estuvieron commiteados en texto plano en `taskdef*.json` y quedaron en el **historial de git**. Hay que rotarlos (Brightspace → Manage Extensibility → OAuth 2.0; RDS → modify master password; ElevenLabs → regenerar API key) y cargar los valores nuevos en Secrets Manager.
 - **Endpoints `/debug/*` ahora responden 404** salvo que el task definition tenga `DEBUG_ENDPOINTS_ENABLED=1`. Para los syncs manuales (`/debug/sync/*`) habilita la variable temporalmente o ejecútalos desde un entorno local apuntando a la BD.
@@ -348,7 +409,7 @@ curl -s -X POST "$BASE/gemelo/admin/announcement" \
 
 Dos limitaciones actuales en prod:
 - **Sin SMTP en el task definition** de ECS → `send_email:true` no envía nada (`smtp_configured()` es false). Las credenciales de `desarrolloprofesoral@cesa.edu.co` sí funcionan vía `smtp.office365.com:587` (STARTTLS); para habilitar correo hay que agregar `SMTP_HOST/PORT/USER/PASSWORD/SMTP_FROM(_NAME)` al task definition y redeployar.
-- **Sistema de archivos efímero** → los avisos in-app se guardan en `frontend_dist/../announcements.json` dentro del contenedor y **se pierden en el próximo redeploy** (no hay `GEMELO_DATA_DIR` con volumen persistente). Para persistirlos habría que montar un volumen o moverlos a la base de datos.
+- **Sistema de archivos efímero** → si la BD no está disponible, los avisos in-app caen a `/app/data/announcements.json` (`GEMELO_DATA_DIR`, fijado en el Dockerfile) dentro del contenedor y **se pierden en el próximo redeploy** (no hay volumen persistente). Para persistirlos habría que montar un volumen o moverlos a la base de datos.
 
 ### Ver logs backend
 

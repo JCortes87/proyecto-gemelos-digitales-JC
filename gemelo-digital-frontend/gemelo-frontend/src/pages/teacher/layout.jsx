@@ -1,7 +1,7 @@
 // Sidebar y topbar del dashboard docente (extraído de TeacherDashboard.jsx, #15).
 import { useState } from "react";
-import { useI18n } from "../../context/I18nContext";
-import { apiUrl } from "../../utils/api";
+import { useI18n } from "../../context/useI18n";
+import { useAuth } from "../../context/useAuth";
 export function AppSidebar({ activeTab, setActiveTab, currentCourseName, mobileOpen, collapsed, onClose }) {
   const { t } = useI18n();
   const NAV = [
@@ -92,7 +92,6 @@ export function AppSidebar({ activeTab, setActiveTab, currentCourseName, mobileO
 export function AppTopbar({
   isMobile, showSidebarToggle, sidebarCollapsed, sidebarVisible,
   onOpenSidebar, darkMode, setDarkMode,
-  locale, toggleLocale,
   orgUnitInput, setOrgUnitInput, setOrgUnitId,
   handleOpenCoursePanel,
   authUser, isDualRole, onGoHome,
@@ -103,6 +102,8 @@ export function AppTopbar({
 }) {
   const [showMainMenu, setShowMainMenu] = useState(false);
   const { t } = useI18n();
+  // Logout centralizado en AuthContext (POST /auth/logout + limpiar sesión)
+  const { logout } = useAuth();
   return (
     <header className={`app-topbar${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
       {/* Left */}
@@ -124,8 +125,9 @@ export function AppTopbar({
 
         {/* Course search */}
         <div className="topbar-search" data-tour="topbar-search">
-          <span style={{ color: "var(--muted)", fontSize: 14 }}>🔍</span>
+          <span aria-hidden="true" style={{ color: "var(--muted)", fontSize: 14 }}>🔍</span>
           <input
+            aria-label={t("topbar.courseIdPlaceholder", "ID de curso…")}
             value={orgUnitInput}
             onChange={(e) => setOrgUnitInput(e.target.value)}
             placeholder={t("topbar.courseIdPlaceholder", "ID de curso…")}
@@ -170,7 +172,7 @@ export function AppTopbar({
                   padding: "5px 10px", borderRadius: 8,
                   display: "inline-flex", alignItems: "center", gap: 5,
                   background: active ? "var(--brand)" : "transparent",
-                  color: active ? "#fff" : "var(--muted-strong)",
+                  color: active ? "var(--on-brand)" : "var(--muted-strong)",
                   transition: "background 0.15s",
                 }}
               >
@@ -242,11 +244,6 @@ export function AppTopbar({
                     action: () => { setShowMainMenu(false); onOpenCoordinator(); },
                   }] : []),
                   {
-                    key: "locale", icon: "🌐",
-                    label: `${t("topbar.language", "Idioma")}: ${locale === "es" ? "Español" : "English"}`,
-                    action: () => toggleLocale(),
-                  },
-                  {
                     key: "theme", icon: darkMode ? "☀️" : "🌙",
                     label: darkMode ? t("topbar.lightMode", "Tema claro") : t("topbar.darkMode", "Tema oscuro"),
                     action: () => setDarkMode((v) => !v),
@@ -304,16 +301,7 @@ export function AppTopbar({
             </span>
           )}
           <button
-            onClick={async () => {
-              try {
-                const _sid2 = localStorage.getItem("gemelo_sid");
-                const _lh = _sid2 ? { "Authorization": `Bearer ${_sid2}` } : {};
-                await fetch(apiUrl("/auth/logout"), { method: "POST", credentials: "include", headers: _lh });
-              } catch {}
-              localStorage.removeItem("gemelo_sid");
-              sessionStorage.clear();
-              window.location.href = window.location.origin + "/";
-            }}
+            onClick={logout}
             title="Cerrar sesión"
             style={{ background: "none", border: "1px solid var(--border)", borderRadius: 7, padding: "4px 8px", fontSize: 10, fontWeight: 700, color: "var(--muted)", cursor: "pointer" }}
           >

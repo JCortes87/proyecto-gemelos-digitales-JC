@@ -16,12 +16,13 @@ reutilizada desde:
 """
 from __future__ import annotations
 
-import os
 import logging
 import time
 from typing import Any, Dict, Optional
 
 import httpx
+
+from app.config import settings
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -31,16 +32,13 @@ logger = logging.getLogger("uvicorn.error")
 # en testing y para que este modulo no falle al import si el env no esta
 # completo (ej. tooling estatico).
 def _bs_token_url() -> str:
-    return os.getenv(
-        "BRIGHTSPACE_TOKEN_URL",
-        "https://auth.brightspace.com/core/connect/token",
-    )
+    return settings.brightspace_token_url
 
 def _bs_client_id() -> str:
-    return os.getenv("BRIGHTSPACE_CLIENT_ID", "")
+    return settings.brightspace_client_id
 
 def _bs_client_secret() -> str:
-    return os.getenv("BRIGHTSPACE_CLIENT_SECRET", "")
+    return settings.brightspace_client_secret
 
 
 #|---------- Helper publico: mintar access_token desde refresh_token ----------|

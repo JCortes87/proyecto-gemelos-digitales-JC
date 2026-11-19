@@ -24,30 +24,26 @@ from app.db.session import SessionLocal, engine
 logger = logging.getLogger("uvicorn.error")
 
 
-def ensure_tables() -> None:
-    """Crea known_users / login_events / app_sessions / announcements /
-    bug_reports si no existen (idempotente, no toca las demás tablas).
-    Se llama en el startup de la app."""
+USAGE_TABLES = ("known_users", "login_events", "app_sessions", "announcements", "bug_reports")
+
+
+def check_tables() -> None:
+    """Verifica que existan las tablas de uso/sesiones. Ya NO las crea: el
+    esquema lo gestiona Alembic (revisión d4e5f6a7b8c9; start.sh corre
+    `alembic upgrade head` antes de levantar la app). Se llama en el startup
+    y solo avisa en el log si falta alguna."""
     try:
-        from app.db.base import Base
-        from app.db.models import Announcement, AppSession, BugReport
-        Base.metadata.create_all(
-            bind=engine,
-            tables=[
-                KnownUser.__table__,
-                LoginEvent.__table__,
-                AppSession.__table__,
-                Announcement.__table__,
-                BugReport.__table__,
-            ],
-            checkfirst=True,
-        )
-        logger.info(
-            "usage_tracking: tablas known_users/login_events/app_sessions/"
-            "announcements/bug_reports verificadas"
-        )
+        from sqlalchemy import inspect
+        missing = sorted(set(USAGE_TABLES) - set(inspect(engine).get_table_names()))
+        if missing:
+            logger.warning(
+                "usage_tracking: faltan tablas %s — ejecuta `alembic upgrade head`",
+                ", ".join(missing),
+            )
+        else:
+            logger.info("usage_tracking: tablas de uso/sesiones verificadas")
     except Exception as e:
-        logger.warning("usage_tracking.ensure_tables falló: %s", str(e)[:200])
+        logger.warning("usage_tracking.check_tables falló: %s", str(e)[:200])
 
 
 def _utcnow() -> datetime:

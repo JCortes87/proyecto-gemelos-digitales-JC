@@ -8,6 +8,7 @@ import { normStatus, fmtPct, fmtGrade10FromPct, computeRiskFromPct } from "../..
 import { COLORS, colorForPct } from "../../utils/colors";
 import { isStudentRole } from "../../utils/roles";
 import { StatusBadge, CircularRing, Card, Stat, InfoTooltip } from "./primitives";
+import useDialogA11y from "../../hooks/useDialogA11y";
 export function LoginScreen({ orgUnitId }) {
   const loginUrl = apiUrl(
     orgUnitId && orgUnitId > 0
@@ -33,7 +34,7 @@ export function LoginScreen({ orgUnitId }) {
             width: 48, height: 48, borderRadius: 13,
             background: "var(--brand)", display: "flex",
             alignItems: "center", justifyContent: "center",
-            color: "#fff", fontSize: 15, fontWeight: 900, letterSpacing: "-0.03em",
+            color: "var(--on-brand)", fontSize: 15, fontWeight: 900, letterSpacing: "-0.03em",
           }}>CESA</div>
           <div style={{ textAlign: "left" }}>
             <div style={{ fontSize: 16, fontWeight: 900, color: "var(--text)", letterSpacing: "-0.02em" }}>
@@ -63,7 +64,7 @@ export function LoginScreen({ orgUnitId }) {
           style={{
             display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
             width: "100%", padding: "13px 20px",
-            background: "var(--brand)", color: "#fff",
+            background: "var(--brand)", color: "var(--on-brand)",
             borderRadius: 12, textDecoration: "none",
             fontSize: 14, fontWeight: 800,
             boxShadow: "0 4px 16px rgba(11,95,255,0.3)",
@@ -146,7 +147,7 @@ export function UnlinkedItemsList({ items }) {
               </div>
               <div style={{ display: "flex", gap: 6, flexShrink: 0, alignItems: "center" }}>
                 {it.weightPct != null && (
-                  <span className="tag" style={{ background: "var(--watch-bg)", color: "#9A3412", fontSize: 10 }}>
+                  <span className="tag" style={{ background: "var(--watch-bg)", color: "var(--watch-fg)", fontSize: 10 }}>
                     {Number(it.weightPct).toFixed(1)}% peso
                   </span>
                 )}
@@ -188,9 +189,10 @@ export function AlertsPanel({ alerts }) {
       <div
         role="button"
         tabIndex={0}
+        aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
         onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") setOpen((v) => !v);
+          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen((v) => !v); }
         }}
         style={{
           display: "flex",
@@ -209,19 +211,19 @@ export function AlertsPanel({ alerts }) {
           </div>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             {cCrit > 0 && (
-              <span className="badge" style={{ background: "var(--critical-bg)", color: "#B42318" }}>
+              <span className="badge" style={{ background: "var(--critical-bg)", color: "var(--critical-fg)" }}>
                 <span style={{ width: 6, height: 6, borderRadius: "50%", background: COLORS.critical, display: "inline-block" }} />
                 Críticos: {cCrit}
               </span>
             )}
             {cObs > 0 && (
-              <span className="badge" style={{ background: "var(--watch-bg)", color: "#9A3412" }}>
+              <span className="badge" style={{ background: "var(--watch-bg)", color: "var(--watch-fg)" }}>
                 <span style={{ width: 6, height: 6, borderRadius: "50%", background: COLORS.watch, display: "inline-block" }} />
                 Seguimiento: {cObs}
               </span>
             )}
             {cSol > 0 && (
-              <span className="badge" style={{ background: "var(--ok-bg)", color: "#1B5E20" }}>
+              <span className="badge" style={{ background: "var(--ok-bg)", color: "var(--ok-fg)" }}>
                 <span style={{ width: 6, height: 6, borderRadius: "50%", background: COLORS.ok, display: "inline-block" }} />
                 Óptimos: {cSol}
               </span>
@@ -286,11 +288,9 @@ export function AlertsPanel({ alerts }) {
 }
 
 export function Drawer({ open, onClose, title, subtitle, extraHeader, children }) {
-  React.useEffect(() => {
-    const handler = (e) => { if (e.key === "Escape") onClose(); };
-    if (open) document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, [open, onClose]);
+  // Foco inicial, focus trap, Esc, bloqueo de scroll y restauración del foco
+  const dialogRef = useDialogA11y({ open, onClose });
+  const titleId = React.useId();
 
   // Add a class to <body> when drawer is open so the @media print CSS
   // can hide the background dashboard and only print the drawer content.
@@ -309,8 +309,13 @@ export function Drawer({ open, onClose, title, subtitle, extraHeader, children }
       onClick={onClose}
     >
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
         className="drawer-enter"
-        style={{ width: "min(700px, 97vw)", height: "100%", background: "var(--card)", overflow: "auto", borderLeft: "1px solid var(--border)", color: "var(--text)", display: "flex", flexDirection: "column", gap: 0 }}
+        style={{ width: "min(700px, 97vw)", height: "100%", background: "var(--card)", overflow: "auto", borderLeft: "1px solid var(--border)", color: "var(--text)", display: "flex", flexDirection: "column", gap: 0, outline: "none" }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Sticky header */}
@@ -320,17 +325,17 @@ export function Drawer({ open, onClose, title, subtitle, extraHeader, children }
             <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, fontWeight: 700, color: "var(--muted)", padding: 0, display: "flex", alignItems: "center", gap: 4 }}>
               ← Estudiantes
             </button>
-            <span style={{ color: "var(--border2)", fontSize: 11 }}>›</span>
+            <span aria-hidden="true" style={{ color: "var(--border2)", fontSize: 11 }}>›</span>
             <span style={{ fontSize: 11, fontWeight: 700, color: "var(--brand)" }}>Expediente académico</span>
           </div>
           {/* Title row */}
           <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, paddingBottom: 14 }}>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 18, fontWeight: 900, color: "var(--text)", letterSpacing: "-0.02em", lineHeight: 1.15 }}>{title}</div>
+              <div id={titleId} style={{ fontSize: 18, fontWeight: 900, color: "var(--text)", letterSpacing: "-0.02em", lineHeight: 1.15 }}>{title}</div>
               {subtitle && <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 3, fontWeight: 500 }}>{subtitle}</div>}
               {extraHeader && <div style={{ marginTop: 6 }}>{extraHeader}</div>}
             </div>
-            <button className="btn" onClick={onClose} style={{ flexShrink: 0, marginTop: 2 }}>✕ Cerrar</button>
+            <button type="button" className="btn" onClick={onClose} style={{ flexShrink: 0, marginTop: 2 }}>✕ Cerrar</button>
           </div>
         </div>
         {/* Content */}
@@ -387,13 +392,7 @@ export function ProjectionBlock({ projection, thresholds }) {
 
 // Notificación de ítems sin RA vinculado
 export function NoRaMappingNotice({ evidences, units }) {
-  // Evidences with grades but whose gradeObjectId doesn't appear in any unit's evidence list
-  const gradedEvIds = new Set(
-    (Array.isArray(evidences) ? evidences : [])
-      .filter((e) => e.scorePct != null)
-      .map((e) => String(e.gradeObjectId))
-  );
-
+  const [open, setOpen] = React.useState(false);
   // Collect all gradeObjectIds that ARE linked to a RA unit
   const linkedIds = new Set();
   for (const u of (Array.isArray(units) ? units : [])) {
@@ -409,13 +408,11 @@ export function NoRaMappingNotice({ evidences, units }) {
 
   if (!unlinked.length) return null;
 
-  const [open, setOpen] = React.useState(false);
-
   return (
     <div style={{
       marginTop: 8,
       border: "1px solid var(--watch-bg)",
-      borderColor: "#FED7AA",
+      borderColor: "var(--watch-border)",
       borderRadius: 10,
       background: "var(--watch-bg)",
       overflow: "hidden",
@@ -423,8 +420,9 @@ export function NoRaMappingNotice({ evidences, units }) {
       <div
         role="button"
         tabIndex={0}
+        aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setOpen((v) => !v); }}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen((v) => !v); } }}
         style={{
           display: "flex", alignItems: "center", justifyContent: "space-between",
           padding: "10px 14px", cursor: "pointer", userSelect: "none", gap: 10,
@@ -433,7 +431,7 @@ export function NoRaMappingNotice({ evidences, units }) {
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontSize: 14 }}>⚠️</span>
           <div>
-            <div style={{ fontSize: 12, fontWeight: 800, color: "#9A3412" }}>
+            <div style={{ fontSize: 12, fontWeight: 800, color: "var(--watch-fg)" }}>
               {unlinked.length} asignación{unlinked.length !== 1 ? "es" : ""} calificada{unlinked.length !== 1 ? "s" : ""} sin Resultado de Aprendizaje
             </div>
             <div style={{ fontSize: 11, color: "var(--muted)" }}>
@@ -444,14 +442,14 @@ export function NoRaMappingNotice({ evidences, units }) {
         <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", flexShrink: 0 }}>{open ? "▴" : "▾"}</span>
       </div>
       {open && (
-        <div style={{ borderTop: "1px solid #FED7AA", padding: "10px 14px", display: "flex", flexDirection: "column", gap: 6 }}>
+        <div style={{ borderTop: "1px solid var(--watch-border)", padding: "10px 14px", display: "flex", flexDirection: "column", gap: 6 }}>
           {unlinked.map((e, i) => (
             <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 10px", background: "var(--card)", borderRadius: 8, border: "1px solid var(--border)" }}>
               <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {e.name || `Ítem ${e.gradeObjectId}`}
               </div>
               <div style={{ display: "flex", gap: 8, flexShrink: 0, alignItems: "center" }}>
-                <span className="tag" style={{ background: "var(--watch-bg)", color: "#9A3412" }}>
+                <span className="tag" style={{ background: "var(--watch-bg)", color: "var(--watch-fg)" }}>
                   {fmtPct(e.weightPct)} peso
                 </span>
                 <span style={{ fontFamily: "var(--font-mono)", fontSize: 13, fontWeight: 800, color: colorForPct(e.scorePct, null) }}>
@@ -482,9 +480,10 @@ export function QualityFlagsBlock({ flags }) {
       <div
         role="button"
         tabIndex={0}
+        aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
         onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") setOpen((v) => !v);
+          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen((v) => !v); }
         }}
         style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", userSelect: "none" }}
       >
@@ -516,9 +515,9 @@ export function QualityFlagsBlock({ flags }) {
 export function PendingItemsBlock({ pendingItems, missingValues }) {
   const items = Array.isArray(pendingItems) ? pendingItems : [];
   const missing = Array.isArray(missingValues) ? missingValues : [];
+  const [open, setOpen] = React.useState(false);
   if (!items.length && !missing.length) return null;
 
-  const [open, setOpen] = React.useState(false);
   const topPending = items.slice(0, 5);
 
   return (
@@ -526,9 +525,10 @@ export function PendingItemsBlock({ pendingItems, missingValues }) {
       <div
         role="button"
         tabIndex={0}
+        aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
         onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") setOpen((v) => !v);
+          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen((v) => !v); }
         }}
         style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", userSelect: "none" }}
       >
@@ -563,7 +563,7 @@ export function PendingItemsBlock({ pendingItems, missingValues }) {
                   <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", flex: 1, minWidth: 0 }}>
                     {it.name || `Ítem ${it.gradeObjectId}`}
                   </div>
-                  <span className="tag" style={{ background: "var(--watch-bg)", color: "#9A3412", flexShrink: 0 }}>
+                  <span className="tag" style={{ background: "var(--watch-bg)", color: "var(--watch-fg)", flexShrink: 0 }}>
                     {fmtPct(it.weightPct)} peso
                   </span>
                 </div>
@@ -587,8 +587,8 @@ export function PendingItemsBlock({ pendingItems, missingValues }) {
 
 export function EvidencesTimeline({ evidences, thresholds }) {
   const list = Array.isArray(evidences) ? evidences.filter((e) => e.scorePct !== null && e.scorePct !== undefined) : [];
-  if (!list.length) return null;
   const [open, setOpen] = React.useState(false);
+  if (!list.length) return null;
 
   const chartData = list.map((e) => ({
     name: (e.name || "").slice(0, 20),
@@ -600,9 +600,10 @@ export function EvidencesTimeline({ evidences, thresholds }) {
       <div
         role="button"
         tabIndex={0}
+        aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
         onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") setOpen((v) => !v);
+          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen((v) => !v); }
         }}
         style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", userSelect: "none" }}
       >
@@ -626,7 +627,11 @@ export function EvidencesTimeline({ evidences, thresholds }) {
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                 <XAxis dataKey="name" tick={{ fontSize: 10, fill: "var(--muted)" }} />
                 <YAxis domain={[0, 100]} tickFormatter={(v) => `${v}%`} tick={{ fontSize: 10, fill: "var(--muted)" }} />
-                <Tooltip formatter={(v) => [`${Number(v).toFixed(1)}%`, "Desempeño"]} />
+                <Tooltip
+                  formatter={(v) => [`${Number(v).toFixed(1)}%`, "Desempeño"]}
+                  contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text)" }}
+                  labelStyle={{ color: "var(--text)" }}
+                />
                 <ReferenceLine y={Number(thresholds?.watch || 70)} stroke={COLORS.watch} strokeDasharray="4 4" label={{ value: "70%", fill: COLORS.watch, fontSize: 10 }} />
                 <ReferenceLine y={Number(thresholds?.critical || 50)} stroke={COLORS.critical} strokeDasharray="4 4" label={{ value: "50%", fill: COLORS.critical, fontSize: 10 }} />
                 <Line type="monotone" dataKey="pct" stroke={COLORS.brand} strokeWidth={2} dot={{ fill: COLORS.brand, r: 4 }} activeDot={{ r: 6 }} />
@@ -644,6 +649,9 @@ export function EvidencesTimeline({ evidences, thresholds }) {
 // ─────────────────────────────────────────────────────────
 export function CoursePanel({ courses, loadingCourses, currentId, onSelect, onClose }) {
   const [search, setSearch] = React.useState("");
+  // El panel solo se monta abierto: foco, trap, Esc, scroll lock y restauración
+  const dialogRef = useDialogA11y({ onClose });
+  const titleId = React.useId();
 
   const filtered = React.useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -699,7 +707,16 @@ export function CoursePanel({ courses, loadingCourses, currentId, onSelect, onCl
 
   return (
     <div className="course-panel-overlay" onClick={onClose}>
-      <div className="course-panel" onClick={(e) => e.stopPropagation()}>
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        className="course-panel"
+        style={{ outline: "none" }}
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Header */}
         <div style={{
           padding: "16px 20px",
@@ -707,7 +724,7 @@ export function CoursePanel({ courses, loadingCourses, currentId, onSelect, onCl
           display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
         }}>
           <div>
-            <div style={{ fontSize: 15, fontWeight: 800, color: "var(--text)" }}>Mis cursos</div>
+            <div id={titleId} style={{ fontSize: 15, fontWeight: 800, color: "var(--text)" }}>Mis cursos</div>
             <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
               {loadingCourses
                 ? "Cargando…"
@@ -723,6 +740,7 @@ export function CoursePanel({ courses, loadingCourses, currentId, onSelect, onCl
         <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)" }}>
           <input
             autoFocus
+            aria-label="Buscar curso por nombre o código"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Buscar por nombre o código…"
@@ -786,7 +804,7 @@ export function CourseItem({ course, isActive, isCurrent, onSelect, accent }) {
       tabIndex={0}
       className={`course-item${isCurrent ? " active" : ""}`}
       onClick={handleClick}
-      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") handleClick(); }}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleClick(); } }}
       style={isCurrent ? { borderLeft: `3px solid ${accentColor}` } : undefined}
     >
       <div
@@ -831,7 +849,7 @@ export function StudentCard({ s, onOpen, weakestMacro }) {
       role="button"
       tabIndex={0}
       onClick={() => onOpen(s)}
-      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onOpen(s); }}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(s); } }}
       className="kpi-card fade-up"
       style={{ cursor: "pointer", borderRadius: 16, padding: "14px 14px 12px" }}
     >
@@ -886,7 +904,8 @@ export function StudentCard({ s, onOpen, weakestMacro }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // GradeDistributionCard — Barra de distribución de notas (inline en dashboard)
 // ─────────────────────────────────────────────────────────────────────────────
-export function GradeDistributionCard({ studentRows, thresholds, style }) {
+// (el padre también pasa `thresholds`; las bandas son fijas y no lo usan)
+export function GradeDistributionCard({ studentRows, style }) {
   const rows = Array.isArray(studentRows) ? studentRows : [];
   const withGrades = rows.filter(s => s.currentPerformancePct != null);
   const bands = [

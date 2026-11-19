@@ -1,5 +1,5 @@
 import React from "react";
-import { colorForPct } from "../../utils/colors";
+import { colorForPct, withAlpha } from "../../utils/colors";
 import { fmtPct, fmtGrade10FromPct } from "../../utils/helpers";
 
 const ROUTE_DEFS = {
@@ -120,11 +120,23 @@ export default function RoutesView({ studentRows, courseInfo, thresholds, onSele
               onMouseEnter={e => { if (!isSelected) { e.currentTarget.style.borderColor = route.color; e.currentTarget.style.background = route.bg; }}}
               onMouseLeave={e => { if (!isSelected) { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.background = "var(--card)"; }}}
             >
-              {/* Route header */}
-              <div style={{ padding: "14px 16px 12px", borderBottom: "1px solid var(--border)" }}>
+              {/* Route header — control accesible por teclado para expandir/contraer la ruta
+                  (la tarjeta completa sigue siendo clicable con el mouse) */}
+              <div
+                role="button"
+                tabIndex={0}
+                aria-expanded={isSelected}
+                onKeyDown={e => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setSelectedRoute(isSelected ? null : route.id);
+                  }
+                }}
+                style={{ padding: "14px 16px 12px", borderBottom: "1px solid var(--border)" }}
+              >
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <div style={{ width: 36, height: 36, borderRadius: 10, background: route.color + "22", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>
+                    <div style={{ width: 36, height: 36, borderRadius: 10, background: withAlpha(route.color, 13), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>
                       {route.icon}
                     </div>
                     <div>
@@ -151,7 +163,7 @@ export default function RoutesView({ studentRows, courseInfo, thresholds, onSele
                     </div>
                   ))}
                 </div>
-                <div style={{ marginTop: 10, padding: "6px 10px", borderRadius: 8, background: route.color + "14", fontSize: 11, color: route.color, fontWeight: 700 }}>
+                <div style={{ marginTop: 10, padding: "6px 10px", borderRadius: 8, background: withAlpha(route.color, 8), fontSize: 11, color: route.color, fontWeight: 700 }}>
                   Criterio de éxito: {route.success}
                 </div>
               </div>
@@ -165,13 +177,14 @@ export default function RoutesView({ studentRows, courseInfo, thresholds, onSele
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
                     {students.map(s => (
-                      <div key={s.userId}
+                      <button key={s.userId}
+                        type="button"
                         onClick={e => { e.stopPropagation(); onSelectStudent?.(s); }}
-                        style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 10px", borderRadius: 9, background: "var(--card)", border: "1px solid var(--border)", cursor: "pointer" }}
+                        style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 10px", borderRadius: 9, background: "var(--card)", border: "1px solid var(--border)", cursor: "pointer", width: "100%", textAlign: "left", font: "inherit", color: "inherit" }}
                         onMouseEnter={e => e.currentTarget.style.borderColor = route.color}
                         onMouseLeave={e => e.currentTarget.style.borderColor = "var(--border)"}
                       >
-                        <div style={{ width: 28, height: 28, borderRadius: "50%", background: route.color + "22", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 900, color: route.color, flexShrink: 0 }}>
+                        <div style={{ width: 28, height: 28, borderRadius: "50%", background: withAlpha(route.color, 13), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 900, color: route.color, flexShrink: 0 }}>
                           {(s.displayName || "?").charAt(0)}
                         </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
@@ -182,8 +195,8 @@ export default function RoutesView({ studentRows, courseInfo, thresholds, onSele
                           <div style={{ fontSize: 13, fontWeight: 900, fontFamily: "var(--font-mono)", color: colorForPct(s.currentPerformancePct, thresholds) }}>{fmtGrade10FromPct(s.currentPerformancePct)}</div>
                           <div style={{ fontSize: 9, color: "var(--muted)" }}>{fmtPct(s.coveragePct)}</div>
                         </div>
-                        <span style={{ color: "var(--muted)", fontSize: 12 }}>→</span>
-                      </div>
+                        <span aria-hidden="true" style={{ color: "var(--muted)", fontSize: 12 }}>→</span>
+                      </button>
                     ))}
                   </div>
                 </div>

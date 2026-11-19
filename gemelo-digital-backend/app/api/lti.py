@@ -2,7 +2,6 @@
 # LTI 1.3 (OIDC login initiation + launch) — MVP serio para Brightspace
 
 import logging
-import os
 import time
 import json
 import base64
@@ -15,8 +14,10 @@ from typing import Any, Dict, Optional, List
 import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse, JSONResponse
-from jose import jwt
-from jose.exceptions import JWTError
+import jwt
+from jwt import PyJWK, PyJWTError
+
+from app.config import settings
 
 router = APIRouter(prefix="/lti", tags=["LTI"])
 logger = logging.getLogger("uvicorn.error")
@@ -24,23 +25,34 @@ logger = logging.getLogger("uvicorn.error")
 # =========================
 # ENV / Config
 # =========================
-TOOL_BASE_URL = os.getenv("TOOL_BASE_URL", "").rstrip("/")
-FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", TOOL_BASE_URL).rstrip("/")
+# (valores desde app/config.py; los tests monkeypatchean estas constantes)
+TOOL_BASE_URL = settings.tool_base_url.rstrip("/")
+FRONTEND_BASE_URL = (
+    settings.frontend_base_url if settings.frontend_base_url is not None else TOOL_BASE_URL
+).rstrip("/")
 
-LTI_ISSUER = os.getenv("LTI_ISSUER", "https://cesa.brightspace.com").rstrip("/")
-LTI_AUTH_ENDPOINT = os.getenv("LTI_AUTH_ENDPOINT", "https://cesa.brightspace.com/d2l/lti/authenticate")
-LTI_JWKS_URL = os.getenv("LTI_JWKS_URL", "https://cesa.brightspace.com/d2l/.well-known/jwks")
-LTI_CLIENT_ID = os.getenv("LTI_CLIENT_ID", "")
-LTI_DEPLOYMENT_ID = os.getenv("LTI_DEPLOYMENT_ID", "").strip()  # opcional
+LTI_ISSUER = settings.lti_issuer.rstrip("/")
+LTI_AUTH_ENDPOINT = settings.lti_auth_endpoint
+LTI_JWKS_URL = settings.lti_jwks_url
+LTI_CLIENT_ID = settings.lti_client_id
+LTI_DEPLOYMENT_ID = settings.lti_deployment_id.strip()  # opcional
 
 from app.security import LTI_STATE_SECRET, SESSION_SECRET
 
 STATE_STORE: Dict[str, Dict[str, Any]] = {}
+# States ya usados en un launch (anti-replay). Es por proceso: con varias
+# tareas ECS un replay en otra tarea no se detecta, pero el state además
+# expira a los STATE_TTL_SECONDS y el nonce va firmado dentro del id_token.
+CONSUMED_STATES: Dict[str, int] = {}
 JWKS_CACHE: Dict[str, Any] = {"ts": 0, "jwks": None}
 JWKS_TTL_SECONDS = 3600
 
 STATE_TTL_SECONDS = 300
+# LTI 1.3 exige RS256. Nunca se toma el algoritmo del header del token
+# (ataque de confusión de algoritmo).
+LTI_ALLOWED_ALGS = ["RS256"]
 COOKIE_MAX_AGE = 60 * 60 * 8
+LTI_SESSION_COOKIE = "gemelo_lti_session"
 
 
 # =========================
@@ -89,6 +101,9 @@ def _cleanup_state_store(now: int) -> None:
     dead = [k for k, v in STATE_STORE.items() if now - int(v.get("ts", 0)) > STATE_TTL_SECONDS]
     for k in dead:
         STATE_STORE.pop(k, None)
+    used = [k for k, ts in CONSUMED_STATES.items() if now - ts > STATE_TTL_SECONDS]
+    for k in used:
+        CONSUMED_STATES.pop(k, None)
 
 def _tool_is_https() -> bool:
     return TOOL_BASE_URL.lower().startswith("https://")
@@ -259,16 +274,22 @@ async def lti_launch(request: Request):
     if now - int(state_payload.get("ts", 0)) > STATE_TTL_SECONDS:
         return JSONResponse({"detail": "state expired"}, status_code=400)
 
+    _cleanup_state_store(now)
+    if state in CONSUMED_STATES:
+        return JSONResponse({"detail": "state already used"}, status_code=400)
+
     try:
         header = jwt.get_unverified_header(id_token)
         kid = header.get("kid")
-        alg = header.get("alg") or "RS256"
+        alg = header.get("alg")
     except Exception:
         return JSONResponse({"detail": "invalid jwt header"}, status_code=400)
     if not kid:
         return JSONResponse({"detail": "missing kid in jwt header"}, status_code=400)
+    if alg not in LTI_ALLOWED_ALGS:
+        return JSONResponse({"detail": "unsupported jwt alg"}, status_code=400)
     try:
-        unverified = jwt.get_unverified_claims(id_token)
+        unverified = jwt.decode(id_token, options={"verify_signature": False})
         # Solo a nivel debug: los metadatos del JWT no deben ir a los logs
         # normales de producción.
         logger.debug("LTI header kid/alg: %s %s", kid, alg)
@@ -281,30 +302,34 @@ async def lti_launch(request: Request):
         if not any(k.get("kid") == kid for k in keys):
             # fuerza refresh por rotación de llaves
             jwks = await _get_platform_jwks(force=True)
-        key = _pick_key_from_jwks(jwks, kid)
+        key = PyJWK(_pick_key_from_jwks(jwks, kid), algorithm="RS256").key
         claims = jwt.decode(
             id_token,
             key,
-            algorithms=[alg],
+            algorithms=LTI_ALLOWED_ALGS,
             audience=state_payload.get("client_id") or LTI_CLIENT_ID,
             issuer=LTI_ISSUER,
-            options={
-                "verify_at_hash": False,
-                "leeway": 120,          # tolerancia 2 minutos
-            },
+            leeway=120,  # tolerancia 2 minutos
         )
-    except JWTError as e:
-        return JSONResponse({"detail": "jwt validation failed", "error": str(e)}, status_code=401)
-    except Exception as e:
-        return JSONResponse({"detail": "launch failed", "error": str(e)}, status_code=500)
+    except PyJWTError as e:
+        logger.warning("LTI launch: JWT inválido: %s", e)
+        return JSONResponse({"detail": "jwt validation failed"}, status_code=401)
+    except Exception:
+        logger.exception("LTI launch: error validando el id_token")
+        return JSONResponse({"detail": "launch failed"}, status_code=500)
 
     if claims.get("nonce") != state_payload.get("nonce"):
         return JSONResponse({"detail": "nonce mismatch"}, status_code=401)
 
     if LTI_DEPLOYMENT_ID:
+        # Si hay deployment configurado, el claim es obligatorio y debe coincidir.
         dep = claims.get("https://purl.imsglobal.org/spec/lti/claim/deployment_id")
-        if dep and dep != LTI_DEPLOYMENT_ID:
-            return JSONResponse({"detail": "deployment_id mismatch", "got": dep}, status_code=401)
+        if dep != LTI_DEPLOYMENT_ID:
+            return JSONResponse({"detail": "deployment_id mismatch"}, status_code=401)
+
+    # El state queda consumido solo tras un launch válido.
+    CONSUMED_STATES[state] = now
+    STATE_STORE.pop(state, None)
 
     ctx = _extract_context(claims)
 
@@ -338,7 +363,7 @@ async def lti_launch(request: Request):
     # Guardamos la sesión LTI como referencia adicional (rol, nombre del contexto, etc.)
     # aunque el token real de API viene del flujo OAuth.
     resp.set_cookie(
-        key="gemelo_lti_session",
+        key=LTI_SESSION_COOKIE,
         value=cookie_val,
         httponly=True,
         secure=_tool_is_https(),
@@ -351,7 +376,7 @@ async def lti_launch(request: Request):
 
 @router.get("/session")
 async def lti_session(request: Request):
-    cookie_val = request.cookies.get("gemelo_session")
+    cookie_val = request.cookies.get(LTI_SESSION_COOKIE)
     if not cookie_val:
         return JSONResponse({"authenticated": False}, status_code=200)
 

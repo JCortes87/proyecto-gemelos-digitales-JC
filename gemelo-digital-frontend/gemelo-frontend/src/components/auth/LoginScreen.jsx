@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Loader2, CheckCircle2 } from "lucide-react";
 import { injectStyles } from "../../styles/global";
-import { apiUrl } from "../../utils/api";
+import { apiUrl, setSessionId } from "../../utils/api";
 
 /**
  * LoginScreen — flujo OAuth via popup window.
@@ -33,28 +33,44 @@ import { apiUrl } from "../../utils/api";
 const OAUTH_PENDING_KEY = "gemelo_oauth_pending";
 const POPUP_TIMEOUT_MS  = 120_000; // 2 min maximos esperando al popup
 
+// ¿Hay un OAuth pendiente reciente (entre 2 s y el timeout del popup)?
+// Se usa para arrancar directamente en "retry" si el usuario volvió a mano.
+function hasRecentPendingOAuth() {
+  const pending = localStorage.getItem(OAUTH_PENDING_KEY);
+  if (!pending) return false;
+  const elapsed = Date.now() - Number(pending);
+  return elapsed > 2000 && elapsed < POPUP_TIMEOUT_MS;
+}
+
+// Libera listener, polling y timeout del popup. A nivel de módulo porque no
+// depende de props/estado (solo del objeto mutable que recibe).
+function _cleanup(ref) {
+  if (ref.msgH)  { window.removeEventListener("message", ref.msgH); ref.msgH = null; }
+  if (ref.poll)  { clearInterval(ref.poll);  ref.poll = null; }
+  if (ref.timer) { clearTimeout(ref.timer);  ref.timer = null; }
+}
+
 export default function LoginScreen({ orgUnitId }) {
   // 'idle' | 'waiting' | 'redirect' | 'retry'
-  const [status, setStatus] = useState("idle");
+  // Si el usuario volvio manualmente a gemelo despues de un OAuth fallido
+  // (termino en d2l/home), arrancar en "retry" para mostrar el boton de
+  // "Completar sesion" de inmediato (inicializador perezoso, sin setState en efecto).
+  const [status, setStatus] = useState(() => (hasRecentPendingOAuth() ? "retry" : "idle"));
   const s = useRef({ popup: null, msgH: null, poll: null, timer: null, retries: 0 });
 
   useEffect(() => {
     injectStyles();
 
-    // Si el usuario volvio manualmente a gemelo despues de un OAuth fallido
-    // (termino en d2l/home), detectarlo y mostrar el boton de "Completar sesion"
-    // de inmediato para que no tenga que volver a hacer click desde cero.
-    const pending = localStorage.getItem(OAUTH_PENDING_KEY);
-    if (pending) {
-      const elapsed = Date.now() - Number(pending);
-      if (elapsed > 2000 && elapsed < POPUP_TIMEOUT_MS) {
-        setStatus("retry");
-      } else {
-        localStorage.removeItem(OAUTH_PENDING_KEY);
-      }
+    // Marca de OAuth pendiente vieja o inválida: limpiarla (el caso reciente
+    // ya dejó status en "retry" desde el inicializador).
+    if (localStorage.getItem(OAUTH_PENDING_KEY) && !hasRecentPendingOAuth()) {
+      localStorage.removeItem(OAUTH_PENDING_KEY);
     }
 
-    return () => _cleanup(s.current);
+    // s.current nunca se reasigna (solo se mutan sus campos), así que capturarlo
+    // aquí es equivalente a leerlo en el cleanup.
+    const st = s.current;
+    return () => _cleanup(st);
   }, []);
 
   const loginPath = orgUnitId > 0
@@ -64,16 +80,10 @@ export default function LoginScreen({ orgUnitId }) {
 
   // ── helpers ─────────────────────────────────────────────────────────────────
 
-  function _cleanup(ref) {
-    if (ref.msgH)  { window.removeEventListener("message", ref.msgH); ref.msgH = null; }
-    if (ref.poll)  { clearInterval(ref.poll);  ref.poll = null; }
-    if (ref.timer) { clearTimeout(ref.timer);  ref.timer = null; }
-  }
-
   function _onAuthSuccess(sid) {
     _cleanup(s.current);
     if (s.current.popup && !s.current.popup.closed) s.current.popup.close();
-    localStorage.setItem("gemelo_sid", sid);
+    setSessionId(sid);
     localStorage.removeItem(OAUTH_PENDING_KEY);
     window.location.reload();
   }
@@ -197,7 +207,7 @@ export default function LoginScreen({ orgUnitId }) {
             width: 48, height: 48, borderRadius: 13,
             background: "var(--brand)", display: "flex",
             alignItems: "center", justifyContent: "center",
-            color: "#fff", fontSize: 15, fontWeight: 900, letterSpacing: "-0.03em",
+            color: "var(--on-brand)", fontSize: 15, fontWeight: 900, letterSpacing: "-0.03em",
           }}>CESA</div>
           <div style={{ textAlign: "left" }}>
             <div style={{ fontSize: 16, fontWeight: 900, color: "var(--text)", letterSpacing: "-0.02em" }}>Visor de desempeño estudiantil</div>
@@ -252,7 +262,7 @@ export default function LoginScreen({ orgUnitId }) {
               onClick={handleRetry}
               style={{
                 ...btnBase,
-                background: "var(--brand)", color: "#fff",
+                background: "var(--brand)", color: "var(--on-brand)",
                 boxShadow: "0 4px 16px rgba(11,95,255,0.3)",
               }}
               onMouseEnter={e => e.currentTarget.style.opacity = "0.88"}
@@ -290,7 +300,7 @@ export default function LoginScreen({ orgUnitId }) {
               onClick={handleLogin}
               style={{
                 ...btnBase,
-                background: "var(--brand)", color: "#fff",
+                background: "var(--brand)", color: "var(--on-brand)",
                 boxShadow: "0 4px 16px rgba(11,95,255,0.3)",
               }}
               onMouseEnter={e => e.currentTarget.style.opacity = "0.88"}

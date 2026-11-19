@@ -1,10 +1,11 @@
 import json
-import os
 from pathlib import Path
 from typing import Any, Dict
 
+from app.config import settings
+
 def _courses_dir() -> Path:
-    env_dir = os.getenv("COURSE_CONFIG_DIR")
+    env_dir = settings.course_config_dir
     if env_dir:
         return Path(env_dir)
 

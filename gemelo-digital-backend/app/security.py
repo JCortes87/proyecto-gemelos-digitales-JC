@@ -1,20 +1,21 @@
 # app/security.py
 # Carga estricta de secretos y guards de seguridad compartidos.
 
-import os
 import logging
 import secrets as _secrets
 
 from fastapi import HTTPException
 
+from app.config import settings
+
 logger = logging.getLogger("uvicorn.error")
 
 # TOOL_BASE_URL en https:// es el indicador de despliegue productivo.
-_IS_PRODUCTION = (os.getenv("TOOL_BASE_URL", "") or "").lower().startswith("https://")
+_IS_PRODUCTION = settings.is_production
 
 
-def _load_secret(name: str) -> str:
-    val = (os.getenv(name) or "").strip()
+def _load_secret(name: str, raw: str | None) -> str:
+    val = (raw or "").strip()
     if val and val != "change-me":
         return val
     if _IS_PRODUCTION:
@@ -30,11 +31,11 @@ def _load_secret(name: str) -> str:
     return _secrets.token_urlsafe(32)
 
 
-LTI_STATE_SECRET = _load_secret("LTI_STATE_SECRET")
-SESSION_SECRET = _load_secret("SESSION_SECRET")
+LTI_STATE_SECRET = _load_secret("LTI_STATE_SECRET", settings.lti_state_secret)
+SESSION_SECRET = _load_secret("SESSION_SECRET", settings.session_secret)
 
 DEBUG_ENDPOINTS_ENABLED = (
-    (os.getenv("DEBUG_ENDPOINTS_ENABLED", "") or "").strip().lower()
+    (settings.debug_endpoints_enabled or "").strip().lower()
     in ("1", "true", "yes")
 )
 

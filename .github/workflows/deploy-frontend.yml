@@ -7,6 +7,8 @@
 #   - Se ejecuta manualmente desde la pestana Actions de GitHub.
 #
 # Lo que hace:
+#   0. Corre lint (informativo), tests y build del frontend (ci.yml via
+#      workflow_call). Si fallan, no se despliega.
 #   1. Checkout del codigo.
 #   2. Instala Node.js y las dependencias de npm.
 #   3. Corre `npm run build` (que usa .env.production con la URL del backend).
@@ -46,18 +48,26 @@ env:
   IAM_ROLE_ARN: arn:aws:iam::718624265053:role/GemeloDigitalDeployerRole
 
 jobs:
+  tests:
+    name: Tests frontend
+    uses: ./.github/workflows/ci.yml
+    with:
+      backend: false
+      frontend: true
+
   deploy:
     name: Construir SPA y subir a S3 + invalidar CloudFront
+    needs: tests
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout del repo
         uses: actions/checkout@v4
 
-      - name: Setup Node.js 20
+      - name: Setup Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: gemelo-digital-frontend/gemelo-frontend/package-lock.json
 

@@ -17,11 +17,11 @@ Seguridad:
 from __future__ import annotations
 
 import logging
-import os
 from typing import List, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 
+from app.config import settings
 from app.services.cron_runner import run_sync_for_all_courses
 from app.state import get_session
 
@@ -42,7 +42,7 @@ def _validate_cron_secret(provided: Optional[str]) -> None:
         seria un agujero abierto).
       - 401 si el header esta ausente o no coincide.
     """
-    expected = os.getenv("CRON_SHARED_SECRET", "")
+    expected = settings.cron_shared_secret
     if not expected:
         raise HTTPException(
             status_code=503,
@@ -94,7 +94,7 @@ async def admin_sync_cron_all(
     """
     _validate_cron_secret(x_cron_secret)
 
-    refresh_token = os.getenv("BRIGHTSPACE_SERVICE_REFRESH_TOKEN", "")
+    refresh_token = settings.brightspace_service_refresh_token
     if not refresh_token:
         raise HTTPException(
             status_code=503,

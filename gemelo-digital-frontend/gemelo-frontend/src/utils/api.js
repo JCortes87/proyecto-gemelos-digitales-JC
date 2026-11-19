@@ -4,7 +4,9 @@ const API_BASE_URL = (
   ""
 ).replace(/\/$/, "");
 
-if (!API_BASE_URL) {
+// En dev la URL vacía es lo esperado (el proxy de Vite apunta al backend
+// local); solo en un build de producción es un error de configuración.
+if (!API_BASE_URL && import.meta.env?.PROD) {
   console.error("⚠️ Falta definir VITE_API_BASE_URL (o VITE_GEMELO_BASE_URL) en el .env");
 }
 
@@ -14,6 +16,73 @@ export function apiUrl(path) {
 
 export { API_BASE_URL };
 
+// ── Sesión (token) centralizada ──────────────────────────────────────────────
+// Único punto de acceso al session id guardado en localStorage. Antes cada
+// componente leía/escribía "gemelo_sid" a mano; ahora todos pasan por aquí.
+export const SESSION_STORAGE_KEY = "gemelo_sid";
+
+export function getSessionId() {
+  try {
+    return typeof localStorage !== "undefined" ? localStorage.getItem(SESSION_STORAGE_KEY) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setSessionId(sid) {
+  try {
+    if (sid) localStorage.setItem(SESSION_STORAGE_KEY, sid);
+  } catch { /* storage bloqueado: noop */ }
+}
+
+export function clearSessionId() {
+  try {
+    localStorage.removeItem(SESSION_STORAGE_KEY);
+  } catch { /* storage bloqueado: noop */ }
+}
+
+/** Header Authorization (Bearer) si hay sesión; objeto vacío si no. */
+export function authHeaders(sid = getSessionId()) {
+  return sid ? { Authorization: `Bearer ${sid}` } : {};
+}
+
+// ── 401 global ───────────────────────────────────────────────────────────────
+// Cuando una llamada AUTENTICADA (con sid) recibe 401, la sesión expiró o fue
+// revocada: se borra el sid y se avisa a la app con un CustomEvent en window.
+// AuthContext lo escucha y devuelve al usuario a la pantalla de login.
+// (El probe /auth/me de AuthContext usa fetch directo y maneja su respuesta
+// por su cuenta, así que no pasa por aquí ni puede provocar bucles.)
+export const UNAUTHORIZED_EVENT = "gemelo:unauthorized";
+
+function _notifyUnauthorized(detail) {
+  clearSessionId();
+  try {
+    window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT, { detail }));
+  } catch { /* entorno sin window: noop */ }
+}
+
+/** Suscribe un callback al evento de 401. Devuelve la función para desuscribir. */
+export function onUnauthorized(callback) {
+  const handler = (e) => callback(e.detail);
+  window.addEventListener(UNAUTHORIZED_EVENT, handler);
+  return () => window.removeEventListener(UNAUTHORIZED_EVENT, handler);
+}
+
+/** Error HTTP de la API: conserva el formato de mensaje "HTTP <status> - <detalle>". */
+export class ApiError extends Error {
+  constructor(message, status, body) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.body = body;
+  }
+}
+
+function _isJsonResponse(res) {
+  const ct = res.headers.get("content-type") || "";
+  return ct.includes("application/json") || ct.includes("application/problem+json");
+}
+
 /**
  * Descarga un endpoint binario autenticando con el header Authorization.
  * El sid NUNCA viaja en la URL (antes iba como ?sid= y quedaba expuesto en
@@ -21,15 +90,16 @@ export { API_BASE_URL };
  * Dispara la descarga en el navegador vía Blob + <a download>.
  */
 export async function apiDownload(path, fallbackFilename = "descarga") {
-  const sid = localStorage.getItem("gemelo_sid");
+  const sid = getSessionId();
   const res = await fetch(apiUrl(path), {
     method: "GET",
     credentials: "include",
-    headers: sid ? { Authorization: `Bearer ${sid}` } : {},
+    headers: authHeaders(sid),
   });
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
-    throw new Error(`HTTP ${res.status} - ${String(txt).slice(0, 300)}`);
+    if (res.status === 401 && sid) _notifyUnauthorized({ path, status: 401 });
+    throw new ApiError(`HTTP ${res.status} - ${String(txt).slice(0, 300)}`, res.status, txt);
   }
   // Nombre de archivo desde Content-Disposition, si el backend lo envía
   const cd = res.headers.get("content-disposition") || "";
@@ -85,98 +155,70 @@ async function _fetchGetWithRetry(url, init) {
   throw lastErr || new Error("Fallo de red");
 }
 
-export async function apiGet(path, opts = {}) {
-  const _sid = localStorage.getItem("gemelo_sid");
-  const _authHeader = _sid ? { "Authorization": `Bearer ${_sid}` } : {};
-  const res = await _fetchGetWithRetry(apiUrl(path), {
-    method: "GET",
+/**
+ * Helper interno común a apiGet/apiPost/apiPut: arma headers (Accept, JSON,
+ * Bearer), parsea errores en un ApiError con el formato histórico
+ * "HTTP <status> - <detalle>" y dispara el manejo global de 401.
+ *  - GET: reintenta fallos transitorios y exige respuesta JSON.
+ *  - POST/PUT: serializa `body` como JSON y devuelve JSON o texto.
+ */
+async function request(method, path, { body, headers, signal } = {}) {
+  const isGet = method === "GET";
+  const sid = getSessionId();
+  const init = {
+    method,
     credentials: "include",
-    headers: { Accept: "application/json", ..._authHeader, ...(opts.headers || {}) },
-    signal: opts.signal,
-  });
+    headers: {
+      Accept: "application/json",
+      ...(isGet ? {} : { "Content-Type": "application/json" }),
+      ...authHeaders(sid),
+      ...(headers || {}),
+    },
+    signal,
+  };
+  if (!isGet) init.body = body != null ? JSON.stringify(body) : undefined;
 
-  const ct = res.headers.get("content-type") || "";
-  const isJson =
-    ct.includes("application/json") ||
-    ct.includes("application/problem+json");
+  const res = isGet
+    ? await _fetchGetWithRetry(apiUrl(path), init)
+    : await fetch(apiUrl(path), init);
+
+  const isJson = _isJsonResponse(res);
 
   if (!res.ok) {
-    const body = isJson
+    const errBody = isJson
       ? await res.json().catch(() => ({}))
       : await res.text().catch(() => "");
     const msg =
-      typeof body === "string"
-        ? body
-        : body?.detail || body?.message || body?.error || JSON.stringify(body);
-    throw new Error(`HTTP ${res.status} - ${String(msg).slice(0, 600)}`);
+      typeof errBody === "string"
+        ? errBody
+        : errBody?.detail || errBody?.message || errBody?.error || JSON.stringify(errBody);
+    // Solo si la llamada iba autenticada: sin sid no hay sesión que invalidar
+    if (res.status === 401 && sid) _notifyUnauthorized({ path, status: 401 });
+    throw new ApiError(`HTTP ${res.status} - ${String(msg).slice(0, 600)}`, res.status, errBody);
   }
 
-  if (!isJson) {
-    const txt = await res.text().catch(() => "");
-    throw new Error(`Respuesta no JSON (${ct}): ${txt.slice(0, 300)}`);
+  if (isGet) {
+    if (!isJson) {
+      const ct = res.headers.get("content-type") || "";
+      const txt = await res.text().catch(() => "");
+      throw new Error(`Respuesta no JSON (${ct}): ${txt.slice(0, 300)}`);
+    }
+    return res.json();
   }
 
-  return res.json();
+  return isJson ? res.json() : res.text();
+}
+
+export async function apiGet(path, opts = {}) {
+  return request("GET", path, { headers: opts.headers, signal: opts.signal });
 }
 
 export async function apiPost(path, body, opts = {}) {
-  const _sid = localStorage.getItem("gemelo_sid");
-  const _authHeader = _sid ? { "Authorization": `Bearer ${_sid}` } : {};
-  const res = await fetch(apiUrl(path), {
-    method: "POST",
-    credentials: "include",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-      ..._authHeader,
-      ...(opts.headers || {}),
-    },
-    body: body != null ? JSON.stringify(body) : undefined,
-    signal: opts.signal,
-  });
-
-  const ct = res.headers.get("content-type") || "";
-  const isJson = ct.includes("application/json") || ct.includes("application/problem+json");
-
-  if (!res.ok) {
-    const errBody = isJson ? await res.json().catch(() => ({})) : await res.text().catch(() => "");
-    const msg = typeof errBody === "string"
-      ? errBody
-      : errBody?.detail || errBody?.message || errBody?.error || JSON.stringify(errBody);
-    throw new Error(`HTTP ${res.status} - ${String(msg).slice(0, 600)}`);
-  }
-
-  return isJson ? res.json() : res.text();
+  return request("POST", path, { body, headers: opts.headers, signal: opts.signal });
 }
 
 export async function apiPut(path, body, opts = {}) {
-  const _sid = localStorage.getItem("gemelo_sid");
-  const _authHeader = _sid ? { "Authorization": `Bearer ${_sid}` } : {};
-  const res = await fetch(apiUrl(path), {
-    method: "PUT",
-    credentials: "include",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-      ..._authHeader,
-      ...(opts.headers || {}),
-    },
-    body: body != null ? JSON.stringify(body) : undefined,
-    signal: opts.signal,
-  });
-
-  const ct = res.headers.get("content-type") || "";
-  const isJson = ct.includes("application/json") || ct.includes("application/problem+json");
-
-  if (!res.ok) {
-    const errBody = isJson ? await res.json().catch(() => ({})) : await res.text().catch(() => "");
-    const msg = typeof errBody === "string"
-      ? errBody
-      : errBody?.detail || errBody?.message || errBody?.error || JSON.stringify(errBody);
-    throw new Error(`HTTP ${res.status} - ${String(msg).slice(0, 600)}`);
-  }
-
-  return isJson ? res.json() : res.text();
+  return request("PUT", path, { body, headers: opts.headers, signal: opts.signal });
 }
 
 // ── Cache SWR-lite: TTL + dedup de requests en vuelo ─────────────────────────

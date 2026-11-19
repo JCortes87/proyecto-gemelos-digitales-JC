@@ -1,25 +1,14 @@
-import os
-from pathlib import Path
-
-from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 #|---- Aquí para preparar SessionLocal para uso transaccional--------|
 
-# Cargar .env de forma robusta: primero desde la raiz del backend
-# (independiente del cwd con que se levante uvicorn), luego fallback al
-# comportamiento default de python-dotenv que busca cwd hacia arriba.
-# En produccion (ECS) las env vars vienen del taskdef, no de .env —
-# en ese caso load_dotenv no encuentra archivo y eso esta bien.
-_BACKEND_ROOT = Path(__file__).resolve().parent.parent.parent
-_env_path = _BACKEND_ROOT / ".env"
-if _env_path.exists():
-    load_dotenv(_env_path, override=False)
-else:
-    load_dotenv(override=False)
+# El .env se carga UNA vez en app/config.py (primero desde la raiz del
+# backend, independiente del cwd; si no existe, fallback al default de
+# python-dotenv). En produccion (ECS) las env vars vienen del taskdef.
+from app.config import settings, _ENV_PATH as _env_path
 
-DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL = settings.database_url
 
 if not DATABASE_URL:
     raise RuntimeError(

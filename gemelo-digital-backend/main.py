@@ -7,6 +7,7 @@ import hashlib
 import secrets
 import urllib.parse
 import asyncio
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -18,6 +19,7 @@ from fastapi.responses import RedirectResponse, JSONResponse, FileResponse, HTML
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.config import settings
 from app.state import (
     TOKENS,               # dict vacío — solo para imports legacy
     save_session,
@@ -47,23 +49,23 @@ logger = logging.getLogger("uvicorn.error")
 # Sentry (error tracking) — opcional: solo se activa si SENTRY_DSN está definido
 # en el entorno. Sin DSN la app funciona exactamente igual que antes.
 # ──────────────────────────────────────────────────────────────────────────────
-_SENTRY_DSN = os.getenv("SENTRY_DSN", "").strip()
+_SENTRY_DSN = settings.sentry_dsn.strip()
 if _SENTRY_DSN:
     try:
         import sentry_sdk
 
         sentry_sdk.init(
             dsn=_SENTRY_DSN,
-            environment=os.getenv("SENTRY_ENVIRONMENT", "production"),
-            release=os.getenv("SENTRY_RELEASE") or None,
+            environment=settings.sentry_environment,
+            release=settings.sentry_release or None,
             # Muestreo bajo de performance para no inflar la cuota gratuita
-            traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.1")),
+            traces_sample_rate=float(settings.sentry_traces_sample_rate),
             # Nunca enviar PII (emails, cookies, headers de auth) a Sentry
             send_default_pii=False,
         )
         logger.info(
             "Sentry inicializado (environment=%s)",
-            os.getenv("SENTRY_ENVIRONMENT", "production"),
+            settings.sentry_environment,
         )
     except Exception as _sentry_err:  # sdk no instalado o DSN inválido
         logger.warning("Sentry no pudo inicializarse: %s", str(_sentry_err)[:200])
@@ -71,21 +73,37 @@ if _SENTRY_DSN:
 # ──────────────────────────────────────────────────────────────────────────────
 # App
 # ──────────────────────────────────────────────────────────────────────────────
-app = FastAPI(title="Gemelo Digital - Backend")
+async def _startup_usage_tables():
+    """Verifica que existan las tablas de uso/sesiones (las crea Alembic).
+    Best-effort — un fallo aquí no tumba la app."""
+    try:
+        from app.services.usage_tracking import check_tables
+        await asyncio.to_thread(check_tables)
+    except Exception as e:
+        logger.warning("startup usage tables falló: %s", str(e)[:200])
+
+
+async def _shutdown_http_client():
+    """Cierra el cliente HTTP compartido y vacía la cola de sesiones."""
+    from app.services.brightspace_client import close_http_client
+    from app.services import session_store_db
+    await close_http_client()
+    await asyncio.to_thread(session_store_db.flush)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Reemplaza los antiguos @app.on_event("startup"/"shutdown") con el
+    mismo orden y semántica: startup → app sirviendo → shutdown."""
+    await _startup_usage_tables()
+    yield
+    await _shutdown_http_client()
+
+
+app = FastAPI(title="Gemelo Digital - Backend", lifespan=lifespan)
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-
-
-@app.on_event("startup")
-async def _startup_usage_tables():
-    """Crea (si no existen) las tablas de tracking de uso: known_users y
-    login_events. Idempotente y best-effort — un fallo aquí no tumba la app."""
-    try:
-        from app.services.usage_tracking import ensure_tables
-        await asyncio.to_thread(ensure_tables)
-    except Exception as e:
-        logger.warning("startup usage tables falló: %s", str(e)[:200])
 
 app.include_router(lti.router)
 app.include_router(gemelo_router)
@@ -133,6 +151,16 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 app.add_middleware(SecurityHeadersMiddleware)
+
+# Request-id (último add = middleware más externo): cabecera X-Request-ID en
+# cada respuesta y prefijo [rid=...] en los logs de la app.
+from app.request_id import RequestIdMiddleware, install_log_filter
+from app.token_refresh import TokenRefreshMiddleware
+# Renueva el access_token de Brightspace antes del handler (sesiones inactivas
+# > 1 h ya no obligan a re-loguearse si hay refresh_token).
+app.add_middleware(TokenRefreshMiddleware)
+app.add_middleware(RequestIdMiddleware)
+install_log_filter("uvicorn.error")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -189,7 +217,8 @@ async def health_deep():
         await asyncio.wait_for(asyncio.to_thread(_db_ping), timeout=5.0)
         checks["postgres"] = {"ok": True, "ms": round((_t.monotonic() - t0) * 1000)}
     except Exception as e:
-        checks["postgres"] = {"ok": False, "ms": round((_t.monotonic() - t0) * 1000), "error": str(e)[:200]}
+        logger.warning("health/deep: postgres falló: %s", e)
+        checks["postgres"] = {"ok": False, "ms": round((_t.monotonic() - t0) * 1000)}
 
     t0 = _t.monotonic()
     try:
@@ -201,7 +230,8 @@ async def health_deep():
             "ms": round((_t.monotonic() - t0) * 1000),
         }
     except Exception as e:
-        checks["brightspace"] = {"ok": False, "ms": round((_t.monotonic() - t0) * 1000), "error": str(e)[:200]}
+        logger.warning("health/deep: brightspace falló: %s", e)
+        checks["brightspace"] = {"ok": False, "ms": round((_t.monotonic() - t0) * 1000)}
 
     all_ok = all(c.get("ok") for c in checks.values())
     return JSONResponse(
@@ -303,22 +333,26 @@ def well_known_jwks():
 # ──────────────────────────────────────────────────────────────────────────────
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
+    # El detalle va solo al log; al cliente, un mensaje genérico + request-id
+    # para poder ubicar el error en CloudWatch/Sentry.
+    rid = getattr(request.state, "request_id", None) or "-"
     logger.exception("Unhandled exception: %s", exc)
     return JSONResponse(
         status_code=500,
-        content={"error": "Internal server error", "detail": str(exc)},
+        content={"error": "Internal server error", "requestId": rid},
+        headers={"X-Request-ID": rid},
     )
 
 # ──────────────────────────────────────────────────────────────────────────────
 # ElevenLabs Speech Endpoints
 # ──────────────────────────────────────────────────────────────────────────────
-ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
+ELEVENLABS_API_KEY = settings.elevenlabs_api_key
 ELEVENLABS_BASE    = "https://api.elevenlabs.io/v1"
 
 # Voz neural en español latinoamericano — Valentina (multilingual)
 # Se puede sobreescribir con variable de entorno ELEVENLABS_VOICE_ID
-ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "pFZP5JQG7iQjIQuC4Bku")
-ELEVENLABS_MODEL    = os.getenv("ELEVENLABS_MODEL",    "eleven_multilingual_v2")
+ELEVENLABS_VOICE_ID = settings.elevenlabs_voice_id
+ELEVENLABS_MODEL    = settings.elevenlabs_model
 
 
 @app.post("/speech/tts")

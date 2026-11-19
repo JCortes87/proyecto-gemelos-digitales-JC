@@ -42,6 +42,30 @@ const GLOBAL_STYLES = `
     --pending: #8B96A8;
     --pending-bg: #F1F3F7;
     --pending-border: #D1D8E4;
+    /* (sincronizado con src/styles/global.js) */
+    /* Tokens semánticos para estilos inline (sustituyen hex hard-coded).
+       El valor light conserva el color exacto que se usaba antes. */
+    --ok-fg: #1B5E20;          /* texto sobre --ok-bg */
+    --watch-fg: #9A3412;       /* texto sobre --watch-bg */
+    --critical-fg: #B42318;    /* texto sobre --critical-bg */
+    --info-fg: #1E40AF;        /* texto informativo (azul oscuro) */
+    --info-bg: rgba(37,99,235,0.08);
+    --info-border: rgba(37,99,235,0.25);
+    --success-fg: #059669;
+    --success-bg: rgba(16,185,129,0.1);
+    --success-border: rgba(16,185,129,0.3);
+    --warning-fg: #B45309;
+    --warning-bg: rgba(245,158,11,0.1);
+    --warning-border: rgba(245,158,11,0.3);
+    --danger-fg: #DC2626;
+    --danger-bg: rgba(220,38,38,0.08);
+    --danger-border: rgba(220,38,38,0.3);
+    --brand-border: rgba(11,95,255,0.3);
+    --surface-muted: #F5F7FB;
+    --accent-fg: #7C3AED;      /* violeta: etiquetas/acentos secundarios */
+    --on-brand: #FFFFFF;       /* texto sobre fondos de marca */
+    --on-status: #FFFFFF;      /* texto sobre rellenos sólidos de estado (ok/watch/critical/danger) */
+    --overlay: rgba(13,17,23,0.65);
   }
 
   .dark {
@@ -69,6 +93,29 @@ const GLOBAL_STYLES = `
     --critical-border: #991B1B;
     --pending-bg: #1A2332;
     --pending-border: #2D3B4F;
+    /* (sincronizado con src/styles/global.js) */
+    /* Tokens semánticos — contraste ≥4.5:1 sobre --card/--bg oscuros */
+    --ok-fg: #6EE7B7;
+    --watch-fg: #FCD34D;
+    --critical-fg: #FCA5A5;
+    --info-fg: #93C5FD;
+    --info-bg: rgba(96,165,250,0.12);
+    --info-border: rgba(96,165,250,0.35);
+    --success-fg: #34D399;
+    --success-bg: rgba(52,211,153,0.12);
+    --success-border: rgba(52,211,153,0.35);
+    --warning-fg: #FBBF24;
+    --warning-bg: rgba(251,191,36,0.12);
+    --warning-border: rgba(251,191,36,0.35);
+    --danger-fg: #F87171;
+    --danger-bg: rgba(248,113,113,0.12);
+    --danger-border: rgba(248,113,113,0.35);
+    --brand-border: rgba(96,165,250,0.4);
+    --surface-muted: #131C2A;
+    --accent-fg: #C4B5FD;
+    --on-brand: #FFFFFF;
+    --on-status: #0B1120;
+    --overlay: rgba(0,0,0,0.7);
   }
 
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }

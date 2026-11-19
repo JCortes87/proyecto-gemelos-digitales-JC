@@ -1,1 +1,0 @@
-const e=[`estudiante ef`,`student`,`estudiante`],t=t=>e.some(e=>String(t||``).toLowerCase().includes(e));export{t};

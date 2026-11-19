@@ -2,6 +2,8 @@
 import React from "react";
 import { apiGet } from "../../utils/api";
 import { elSpeak } from "../../utils/speech";
+import { withAlpha } from "../../utils/colors";
+import useDialogA11y from "../../hooks/useDialogA11y";
 
 // INTERRUPTOR TEMPORAL: en false el tutorial no narra los pasos por voz
 // (etapa de pruebas con recargas frecuentes). Nota: aunque estuviera en
@@ -120,12 +122,9 @@ export function GuidedTour({ onFinish }) {
     };
   }, [step]);
 
-  // Salir con Escape
-  React.useEffect(() => {
-    const onKey = (e) => { if (e.key === "Escape") onFinish(); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onFinish]);
+  // Salir con Escape + foco dentro de la tarjeta del paso (focus trap).
+  // Sin bloqueo de scroll: el tour desplaza la página hasta cada opción.
+  const tourRef = useDialogA11y({ open: Boolean(step && rect), onClose: onFinish, lockScroll: false });
 
   if (!step || !rect) return null;
 
@@ -164,13 +163,16 @@ export function GuidedTour({ onFinish }) {
       />
       {/* Texto flotante del paso */}
       <div
+        ref={tourRef}
         role="dialog"
+        aria-modal="true"
         aria-label={`Tour: ${step.title}`}
+        tabIndex={-1}
         style={{
           position: "fixed", left: cardPos.left, top: cardPos.top, width: CARD_W,
           background: "var(--card)", borderRadius: 14, padding: "16px 18px",
           boxShadow: "0 18px 60px rgba(0,0,0,0.35)", border: "1px solid var(--border)",
-          transition: "top .25s ease, left .25s ease",
+          transition: "top .25s ease, left .25s ease", outline: "none",
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
@@ -202,7 +204,7 @@ export function GuidedTour({ onFinish }) {
           )}
           <button
             onClick={() => (isLast ? onFinish() : setIdx((i) => i + 1))}
-            style={{ padding: "7px 14px", borderRadius: 8, border: "none", background: "var(--brand)", color: "#fff", fontSize: 11.5, fontWeight: 800, cursor: "pointer" }}
+            style={{ padding: "7px 14px", borderRadius: 8, border: "none", background: "var(--brand)", color: "var(--on-brand)", fontSize: 11.5, fontWeight: 800, cursor: "pointer" }}
           >
             {isLast ? "Finalizar ✓" : "Siguiente →"}
           </button>
@@ -214,12 +216,12 @@ export function GuidedTour({ onFinish }) {
 
 // Colores por tipo de anuncio del administrador
 const ANN_TAG_COLORS = {
-  "Nuevo": "#16a34a",
+  "Nuevo": "var(--success-fg)",
   "Anuncio": "var(--brand)",
-  "Actualización": "#0891b2",
+  "Actualización": "var(--info-fg)",
   "Mejorado": "var(--brand)",
-  "Importante": "#dc2626",
-  "SuperAdmin": "#7c3aed",
+  "Importante": "var(--danger-fg)",
+  "SuperAdmin": "var(--accent-fg)",
 };
 
 function _fmtAnnDate(ts) {
@@ -244,12 +246,16 @@ export function AnnouncementsModal({ onClose }) {
       try {
         const data = await apiGet("/gemelo/announcements?limit=50");
         if (alive) setItems(Array.isArray(data?.items) ? data.items : []);
-      } catch (e) {
+      } catch {
         if (alive) { setItems([]); setError("No se pudieron cargar las novedades."); }
       }
     })();
     return () => { alive = false; };
   }, []);
+
+  // Foco inicial, focus trap, Esc, bloqueo de scroll y restauración del foco
+  const dialogRef = useDialogA11y({ onClose });
+  const titleId = React.useId();
 
   return (
     <div style={{
@@ -259,21 +265,29 @@ export function AnnouncementsModal({ onClose }) {
       fontFamily: "var(--font)", padding: 20,
       backdropFilter: "blur(4px)",
     }}>
-      <div style={{
-        background: "var(--card)", borderRadius: 20,
-        padding: "28px 30px", maxWidth: 540, width: "100%",
-        maxHeight: "82vh", display: "flex", flexDirection: "column",
-        boxShadow: "0 24px 80px rgba(0,0,0,0.3)",
-        position: "relative",
-      }}>
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        style={{
+          background: "var(--card)", borderRadius: 20,
+          padding: "28px 30px", maxWidth: 540, width: "100%",
+          maxHeight: "82vh", display: "flex", flexDirection: "column",
+          boxShadow: "0 24px 80px rgba(0,0,0,0.3)",
+          position: "relative", outline: "none",
+        }}
+      >
         <button
+          type="button"
           onClick={onClose}
-          aria-label="Cerrar"
+          aria-label="Cerrar novedades"
           style={{ position: "absolute", top: 14, right: 14, background: "none", border: "none", fontSize: 18, cursor: "pointer", color: "var(--muted)", padding: 4, lineHeight: 1 }}
         >✕</button>
 
         <div style={{ textAlign: "center", marginBottom: 18 }}>
-          <span style={{ fontSize: 11, fontWeight: 800, color: "var(--brand)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
+          <span id={titleId} style={{ fontSize: 11, fontWeight: 800, color: "var(--brand)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
             🆕 Novedades · Visor de desempeño estudiantil
           </span>
         </div>
@@ -303,7 +317,7 @@ export function AnnouncementsModal({ onClose }) {
                   <span style={{
                     fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em",
                     padding: "3px 9px", borderRadius: 99,
-                    background: color + "1a", color, border: "1px solid " + color + "40",
+                    background: withAlpha(color, 10), color, border: "1px solid " + withAlpha(color, 25),
                   }}>
                     {a.tag || "Anuncio"}
                   </span>
@@ -329,7 +343,7 @@ export function AnnouncementsModal({ onClose }) {
 
         <button
           onClick={onClose}
-          style={{ marginTop: 18, padding: "11px 0", borderRadius: 10, border: "none", background: "var(--brand)", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer", boxShadow: "0 4px 14px rgba(11,95,255,0.3)" }}
+          style={{ marginTop: 18, padding: "11px 0", borderRadius: 10, border: "none", background: "var(--brand)", color: "var(--on-brand)", fontSize: 13, fontWeight: 800, cursor: "pointer", boxShadow: "0 4px 14px rgba(11,95,255,0.3)" }}
         >
           Entendido ✓
         </button>
@@ -346,6 +360,11 @@ export function OnboardingTutorial({ userName, onFinish }) {
   // "cards" = tarjetas del tutorial · "offer" = tarjeta que ofrece el tour
   const [phase, setPhase] = React.useState("cards");
   const current = ONBOARDING_STEPS[step];
+  // Foco dentro de la tarjeta + focus trap. Esc no cierra (antes tampoco):
+  // el tutorial se cierra con sus botones. `open` cambia con la fase para
+  // volver a enfocar la tarjeta nueva al pasar a la oferta del tour.
+  const dialogRef = useDialogA11y({ open: phase, dismissOnEscape: false });
+  const titleId = React.useId();
   const isLast = step === ONBOARDING_STEPS.length - 1;
 
   const speak = React.useCallback((text) => {
@@ -357,14 +376,20 @@ export function OnboardingTutorial({ userName, onFinish }) {
     );
   }, []);
 
+  // userName vía ref: el auto-speak debe dispararse solo al cambiar de paso,
+  // no si el nombre llega/cambia a mitad del tutorial.
+  const userNameRef = React.useRef(userName);
+  React.useEffect(() => { userNameRef.current = userName; }, [userName]);
+
   // Auto-speak on step change (desactivado con TUTORIAL_VOICE_ENABLED=false)
   React.useEffect(() => {
     if (!TUTORIAL_VOICE_ENABLED) return;
-    const text = current.voice(userName);
+    const text = current.voice(userNameRef.current);
     // Small delay for better UX
     const t = setTimeout(() => speak(text), 300);
     return () => { clearTimeout(t); window.speechSynthesis?.cancel(); };
-  }, [step]);
+    // current depende solo de step y speak es estable (useCallback sin deps)
+  }, [current, speak]);
 
   const handleNext = () => {
     if (isLast) {
@@ -393,13 +418,20 @@ export function OnboardingTutorial({ userName, onFinish }) {
         fontFamily: "var(--font)", padding: 20,
         backdropFilter: "blur(4px)",
       }}>
-        <div style={{
-          background: "var(--card)", borderRadius: 20,
-          padding: "36px 40px", maxWidth: 460, width: "100%",
-          boxShadow: "0 24px 80px rgba(0,0,0,0.3)",
-        }}>
-          <div style={{ textAlign: "center", fontSize: 48, marginBottom: 16, lineHeight: 1 }}>🧭</div>
-          <h2 style={{ fontSize: 21, fontWeight: 900, color: "var(--text)", textAlign: "center", margin: "0 0 12px", letterSpacing: "-0.02em" }}>
+        <div
+          ref={dialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={titleId}
+          tabIndex={-1}
+          style={{
+            background: "var(--card)", borderRadius: 20,
+            padding: "36px 40px", maxWidth: 460, width: "100%",
+            boxShadow: "0 24px 80px rgba(0,0,0,0.3)", outline: "none",
+          }}
+        >
+          <div aria-hidden="true" style={{ textAlign: "center", fontSize: 48, marginBottom: 16, lineHeight: 1 }}>🧭</div>
+          <h2 id={titleId} style={{ fontSize: 21, fontWeight: 900, color: "var(--text)", textAlign: "center", margin: "0 0 12px", letterSpacing: "-0.02em" }}>
             ¿Quieres un tour por las opciones?
           </h2>
           <p style={{ fontSize: 14, color: "var(--muted)", lineHeight: 1.65, textAlign: "center", margin: "0 0 26px" }}>
@@ -417,7 +449,7 @@ export function OnboardingTutorial({ userName, onFinish }) {
             </button>
             <button
               onClick={() => onFinish(true)}
-              style={{ flex: 2, padding: "11px 0", borderRadius: 10, border: "none", background: "var(--brand)", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer", boxShadow: "0 4px 14px rgba(11,95,255,0.3)" }}
+              style={{ flex: 2, padding: "11px 0", borderRadius: 10, border: "none", background: "var(--brand)", color: "var(--on-brand)", fontSize: 13, fontWeight: 800, cursor: "pointer", boxShadow: "0 4px 14px rgba(11,95,255,0.3)" }}
             >
               Sí, iniciar el tour 🧭
             </button>
@@ -435,12 +467,19 @@ export function OnboardingTutorial({ userName, onFinish }) {
       fontFamily: "var(--font)", padding: 20,
       backdropFilter: "blur(4px)",
     }}>
-      <div style={{
-        background: "var(--card)", borderRadius: 20,
-        padding: "36px 40px", maxWidth: 520, width: "100%",
-        boxShadow: "0 24px 80px rgba(0,0,0,0.3)",
-        position: "relative",
-      }}>
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        style={{
+          background: "var(--card)", borderRadius: 20,
+          padding: "36px 40px", maxWidth: 520, width: "100%",
+          boxShadow: "0 24px 80px rgba(0,0,0,0.3)",
+          position: "relative", outline: "none",
+        }}
+      >
         {/* Progress dots */}
         <div style={{ display: "flex", gap: 6, marginBottom: 24, justifyContent: "center" }}>
           {ONBOARDING_STEPS.map((_, i) => (
@@ -458,7 +497,7 @@ export function OnboardingTutorial({ userName, onFinish }) {
         </div>
 
         {/* Title */}
-        <h2 style={{ fontSize: 22, fontWeight: 900, color: "var(--text)", textAlign: "center", margin: "0 0 12px", letterSpacing: "-0.02em" }}>
+        <h2 id={titleId} style={{ fontSize: 22, fontWeight: 900, color: "var(--text)", textAlign: "center", margin: "0 0 12px", letterSpacing: "-0.02em" }}>
           {current.title}
         </h2>
 
@@ -507,7 +546,7 @@ export function OnboardingTutorial({ userName, onFinish }) {
           </button>
           <button
             onClick={handleNext}
-            style={{ flex: 2, padding: "11px 0", borderRadius: 10, border: "none", background: "var(--brand)", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer", boxShadow: "0 4px 14px rgba(11,95,255,0.3)" }}
+            style={{ flex: 2, padding: "11px 0", borderRadius: 10, border: "none", background: "var(--brand)", color: "var(--on-brand)", fontSize: 13, fontWeight: 800, cursor: "pointer", boxShadow: "0 4px 14px rgba(11,95,255,0.3)" }}
           >
             {isLast ? "¡Comenzar! 🚀" : "Siguiente →"}
           </button>

@@ -2,6 +2,7 @@
 import React from "react";
 import { apiGet, apiPost } from "../../utils/api";
 import { AnnouncementsModal } from "./onboarding";
+import useDialogA11y from "../../hooks/useDialogA11y";
 export const BUG_REPORT_EMAIL = "desarrolloprofesoral@cesa.edu.co";
 
 export function BugReportModal({ onClose }) {
@@ -12,6 +13,9 @@ export function BugReportModal({ onClose }) {
   const [sending, setSending] = React.useState(false);
   const [delivered, setDelivered] = React.useState(false); // true si el backend lo envió por correo
   const [copied, setCopied] = React.useState(false);
+  // Foco inicial, focus trap, Esc, bloqueo de scroll y restauración del foco
+  const dialogRef = useDialogA11y({ onClose });
+  const fid = React.useId();
 
   const SEVERITIES = [
     { value: "baja", label: "Baja — algo menor" },
@@ -92,14 +96,23 @@ export function BugReportModal({ onClose }) {
       display: "flex", alignItems: "center", justifyContent: "center",
       fontFamily: "var(--font)", padding: 20, backdropFilter: "blur(4px)",
     }}>
-      <div style={{
-        background: "var(--card)", borderRadius: 20,
-        padding: "32px 34px", maxWidth: 500, width: "100%",
-        boxShadow: "0 24px 80px rgba(0,0,0,0.3)", position: "relative",
-        maxHeight: "90vh", overflowY: "auto",
-      }}>
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Reportar un error"
+        tabIndex={-1}
+        style={{
+          background: "var(--card)", borderRadius: 20,
+          padding: "32px 34px", maxWidth: 500, width: "100%",
+          boxShadow: "0 24px 80px rgba(0,0,0,0.3)", position: "relative",
+          maxHeight: "90vh", overflowY: "auto", outline: "none",
+        }}
+      >
         <button
+          type="button"
           onClick={onClose}
+          aria-label="Cerrar reporte de error"
           style={{ position: "absolute", top: 14, right: 14, background: "none", border: "none", fontSize: 18, cursor: "pointer", color: "var(--muted)", padding: 4, lineHeight: 1 }}
         >✕</button>
 
@@ -115,8 +128,9 @@ export function BugReportModal({ onClose }) {
             </p>
 
             <div style={{ marginBottom: 14 }}>
-              <label style={labelStyle}>Título breve (opcional)</label>
+              <label htmlFor={`${fid}-title`} style={labelStyle}>Título breve (opcional)</label>
               <input
+                id={`${fid}-title`}
                 type="text" value={title} maxLength={100}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="Ej: No cargan las calificaciones del curso"
@@ -125,8 +139,9 @@ export function BugReportModal({ onClose }) {
             </div>
 
             <div style={{ marginBottom: 14 }}>
-              <label style={labelStyle}>¿Qué pasó? *</label>
+              <label htmlFor={`${fid}-desc`} style={labelStyle}>¿Qué pasó? *</label>
               <textarea
+                id={`${fid}-desc`}
                 value={desc}
                 onChange={(e) => setDesc(e.target.value)}
                 placeholder="Describe el error: qué hacías, qué esperabas y qué ocurrió."
@@ -136,8 +151,8 @@ export function BugReportModal({ onClose }) {
             </div>
 
             <div style={{ marginBottom: 22 }}>
-              <label style={labelStyle}>Severidad</label>
-              <select value={severity} onChange={(e) => setSeverity(e.target.value)} style={{ ...inputStyle, cursor: "pointer" }}>
+              <label htmlFor={`${fid}-sev`} style={labelStyle}>Severidad</label>
+              <select id={`${fid}-sev`} value={severity} onChange={(e) => setSeverity(e.target.value)} style={{ ...inputStyle, cursor: "pointer" }}>
                 {SEVERITIES.map((s) => (
                   <option key={s.value} value={s.value}>{s.label}</option>
                 ))}
@@ -157,7 +172,7 @@ export function BugReportModal({ onClose }) {
                 style={{
                   flex: 2, padding: "11px 0", borderRadius: 10, border: "none",
                   background: canSend ? "var(--brand)" : "var(--border)",
-                  color: canSend ? "#fff" : "var(--muted)",
+                  color: canSend ? "var(--on-brand)" : "var(--muted)",
                   fontSize: 13, fontWeight: 800, cursor: canSend ? "pointer" : "not-allowed",
                   boxShadow: canSend ? "0 4px 14px rgba(11,95,255,0.3)" : "none",
                 }}
@@ -186,7 +201,7 @@ export function BugReportModal({ onClose }) {
               </button>
               <button
                 onClick={onClose}
-                style={{ flex: 1, padding: "11px 0", borderRadius: 10, border: "none", background: "var(--brand)", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer" }}
+                style={{ flex: 1, padding: "11px 0", borderRadius: 10, border: "none", background: "var(--brand)", color: "var(--on-brand)", fontSize: 13, fontWeight: 800, cursor: "pointer" }}
               >
                 Cerrar
               </button>
@@ -260,7 +275,9 @@ export function FloatingAI({ onOpenTutorial, onOpenAssistant }) {
                 <span style={{ fontSize: 12, fontWeight: 800 }}>Centro de ayuda</span>
               </div>
               <button
+                type="button"
                 onClick={() => setOpen(false)}
+                aria-label="Cerrar centro de ayuda"
                 style={{ background: "rgba(255,255,255,0.2)", border: "none", color: "#fff", borderRadius: 6, width: 24, height: 24, cursor: "pointer", fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center" }}
               >✕</button>
             </div>
@@ -288,7 +305,7 @@ export function FloatingAI({ onOpenTutorial, onOpenAssistant }) {
                   </div>
                   {item.badge != null && (
                     <span style={{
-                      fontSize: 9, fontWeight: 900, background: "#16a34a", color: "#fff",
+                      fontSize: 9, fontWeight: 900, background: "var(--success-fg)", color: "var(--on-status)",
                       padding: "2px 6px", borderRadius: 99, flexShrink: 0,
                     }}>
                       {item.badge}
@@ -304,8 +321,10 @@ export function FloatingAI({ onOpenTutorial, onOpenAssistant }) {
           className={`ai-fab-btn${open ? " active" : ""}`}
           onClick={() => setOpen(v => !v)}
           title="Centro de ayuda"
+          aria-label={open ? "Cerrar centro de ayuda" : "Abrir centro de ayuda"}
+          aria-expanded={open}
         >
-          <span style={{ color: "#fff", fontSize: open ? 20 : 22, fontWeight: 900 }}>{open ? "✕" : "?"}</span>
+          <span aria-hidden="true" style={{ color: "var(--on-brand)", fontSize: open ? 20 : 22, fontWeight: 900 }}>{open ? "✕" : "?"}</span>
         </button>
       </div>
     </>

@@ -344,7 +344,7 @@ export function RaLinker({ orgUnitId, courseName }) {
                 fontSize: 12.5, borderRadius: 10, padding: "9px 12px", marginBottom: 12,
                 display: "flex", alignItems: "center", gap: 8, fontWeight: 600,
                 color: msg.type === "ok" ? "var(--solid)" : "var(--critical)",
-                background: msg.type === "ok" ? "var(--solid-bg, rgba(16,185,129,0.1))" : "var(--critical-bg, rgba(220,38,38,0.08))",
+                background: msg.type === "ok" ? "var(--success-bg)" : "var(--critical-bg, rgba(220,38,38,0.08))",
               }}>
                 <span>{msg.type === "ok" ? "✅" : "⚠️"}</span>{msg.text}
               </div>
@@ -353,6 +353,7 @@ export function RaLinker({ orgUnitId, courseName }) {
             {activities.length > 6 && (
               <input
                 type="text"
+                aria-label="Buscar actividad"
                 placeholder="Buscar actividad…"
                 value={query}
                 onChange={e => setQuery(e.target.value)}
@@ -397,7 +398,7 @@ export function RaLinker({ orgUnitId, courseName }) {
                             padding: "6px 14px", borderRadius: 8, border: "none",
                             cursor: (savingKey === act.key || !isDirty) ? "not-allowed" : "pointer",
                             background: isDirty ? "linear-gradient(135deg, var(--brand) 0%, #1e40af 100%)" : "var(--bg)",
-                            color: isDirty ? "#fff" : "var(--muted)",
+                            color: isDirty ? "var(--on-brand)" : "var(--muted)",
                             fontSize: 12, fontWeight: 800, fontFamily: "var(--font)",
                             opacity: savingKey === act.key ? 0.6 : 1,
                           }}
@@ -430,7 +431,7 @@ export function RaLinker({ orgUnitId, courseName }) {
                                 fontSize: 11, fontWeight: 900,
                                 border: on ? "none" : "1.5px solid var(--border)",
                                 background: on ? "var(--brand)" : "transparent",
-                                color: on ? "#fff" : "transparent",
+                                color: on ? "var(--on-brand)" : "transparent",
                               }}>✓</span>
                               {p.code && (
                                 <span style={{ flex: "0 0 auto", fontFamily: "var(--font-mono)", fontWeight: 800, color: "var(--brand)", fontSize: 11.5, marginTop: 1 }}>
@@ -474,7 +475,7 @@ export function RaLinker({ orgUnitId, courseName }) {
                     flex: "0 0 auto", display: "inline-flex", alignItems: "center", gap: 5,
                     padding: "6px 12px", borderRadius: 8, textDecoration: "none",
                     background: "linear-gradient(135deg, var(--brand) 0%, #1e40af 100%)",
-                    color: "#fff", fontSize: 11.5, fontWeight: 800, whiteSpace: "nowrap",
+                    color: "var(--on-brand)", fontSize: 11.5, fontWeight: 800, whiteSpace: "nowrap",
                   }}
                 >
                   Abrir quizzes en Brightspace ↗

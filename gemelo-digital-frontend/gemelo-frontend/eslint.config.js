@@ -26,7 +26,11 @@ export default defineConfig([
     },
     rules: {
       // caughtErrorsIgnorePattern: el patrón `catch (_e)` es intencional en el código
-      'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]', caughtErrorsIgnorePattern: '^_' }],
+      // argsIgnorePattern '^[A-Z_]': sin eslint-plugin-react, el núcleo de ESLint no
+      // ve los usos en JSX (`<Icon />`), así que props renombradas a componente
+      // (`icon: Icon`, `as: Tag`) salían como falsos "unused". Mismo criterio
+      // que varsIgnorePattern; además permite marcar args sin usar con `_`.
+      'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]', argsIgnorePattern: '^[A-Z_]', caughtErrorsIgnorePattern: '^_' }],
       // react-hooks/exhaustive-deps ya viene activo (warn) via reactHooks.configs.flat.recommended;
       // lo dejamos explícito para que no se pierda si cambia el preset.
       'react-hooks/exhaustive-deps': 'warn',

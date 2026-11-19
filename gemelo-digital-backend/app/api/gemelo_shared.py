@@ -9,6 +9,7 @@ import traceback
 
 from fastapi import Depends, HTTPException, Request
 
+from app.request_id import get_request_id
 from app.services.brightspace_client import BrightspaceClient, get_brightspace_client
 from app.services.gemelo_service import GemeloService
 
@@ -31,5 +32,9 @@ def _http500(e: Exception, where: str, **ctx):
         raise e
     logger.error("HTTP 500 en %s | ctx=%s | err=%s", where, ctx, str(e))
     logger.error(traceback.format_exc())
-    raise HTTPException(status_code=500, detail=str(e))
+    # Detalle solo en el log (con request-id); nunca str(e) al cliente.
+    raise HTTPException(
+        status_code=500,
+        detail=f"Error interno del servidor (requestId={get_request_id()})",
+    )
 

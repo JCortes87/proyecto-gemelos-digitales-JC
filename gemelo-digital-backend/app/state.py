@@ -26,6 +26,8 @@ import time
 import threading
 from typing import Any, Dict, Optional
 
+from app.config import settings
+
 # ── Por sesión (nuevo) ────────────────────────────────────────────────────────
 SESSION_STORE: Dict[str, Dict[str, Any]] = {}
 _STORE_LOCK = threading.Lock()
@@ -39,8 +41,8 @@ _last_cleanup = 0.0
 # memoria y toca volver a loguearse en Brightspace. Con GEMELO_PERSIST_SESSIONS=1
 # guardamos el store en un JSON local (gitignored) para sobrevivir reinicios.
 # OFF por defecto → producción (ECS) nunca escribe tokens a disco.
-_PERSIST = os.getenv("GEMELO_PERSIST_SESSIONS") == "1"
-_PERSIST_PATH = os.getenv("GEMELO_SESSION_FILE") or os.path.join(
+_PERSIST = settings.gemelo_persist_sessions == "1"
+_PERSIST_PATH = settings.gemelo_session_file or os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".session_store.json"
 )
 
@@ -155,9 +157,43 @@ def get_session(session_id: str) -> Optional[Dict[str, Any]]:
             return None
         with _STORE_LOCK:
             SESSION_STORE[session_id] = s
-    if time.time() > float(s.get("expires_at", 0)):
+    now = time.time()
+    # expires_at se renueva con cada refresh del token; iat + SESSION_TTL es
+    # el techo absoluto de la sesión (igual que la cookie).
+    past_cap = now > float(s.get("iat") or now) + SESSION_TTL
+    if past_cap or now > float(s.get("expires_at", 0)):
+        # Un token vencido con refresh_token (y dentro del techo) se conserva:
+        # get_refreshable_session() / el middleware de refresh lo renuevan.
+        if past_cap or not s.get("refresh_token"):
+            with _STORE_LOCK:
+                SESSION_STORE.pop(session_id, None)
+        return None
+    return s
+
+
+def get_refreshable_session(session_id: str) -> Optional[Dict[str, Any]]:
+    """Como get_session pero también devuelve sesiones cuyo access_token ya
+    venció, si tienen refresh_token y no superaron el techo absoluto
+    (iat + SESSION_TTL). Lo usa el refresh de tokens: sin esto, un usuario
+    inactivo más de 1 h perdía la sesión aunque pudiera renovarse."""
+    if not session_id:
+        return None
+    with _STORE_LOCK:
+        s = SESSION_STORE.get(session_id)
+    if not s:
+        try:
+            from app.services import session_store_db
+            s = session_store_db.fetch(session_id, include_expired=True)
+        except Exception:
+            s = None
+        if not s:
+            return None
         with _STORE_LOCK:
-            SESSION_STORE.pop(session_id, None)
+            SESSION_STORE[session_id] = s
+    now = time.time()
+    if now > float(s.get("iat") or now) + SESSION_TTL:
+        return None
+    if now > float(s.get("expires_at", 0)) and not s.get("refresh_token"):
         return None
     return s
 
