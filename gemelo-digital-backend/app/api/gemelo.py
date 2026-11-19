@@ -962,6 +962,7 @@ from app.api.gemelo_admin import router as _admin_router
 from app.api.gemelo_gradescheme import router as _gradescheme_router
 from app.api.gemelo_scales import router as _scales_router
 from app.api.gemelo_rubrics import router as _rubrics_router
+from app.api.gemelo_coordinator import router as _coordinator_router
 
 router.include_router(_outcomes_router)
 router.include_router(_debug_router)
@@ -969,3 +970,4 @@ router.include_router(_admin_router)
 router.include_router(_gradescheme_router)
 router.include_router(_scales_router)
 router.include_router(_rubrics_router)
+router.include_router(_coordinator_router)

@@ -4,7 +4,7 @@
 // los átomos de UI renderizan en jsdom. Detecta imports rotos, exports
 // faltantes y ciclos de importación que el build no siempre revela.
 import { describe, it, expect } from "vitest";
-import React from "react";
+import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 
 // En arranque en frío (primer run, sin caché de transformación de Vite) el
@@ -110,9 +110,10 @@ describe("fase 2: render básico de pantallas extraídas", { timeout: COLD_IMPOR
     const div = document.createElement("div");
     document.body.appendChild(div);
     const root = createRoot(div);
-    await new Promise((resolve) => {
+    // act() vacía el render de forma determinista (con setTimeout(0) la
+    // aserción podía correr antes del commit cuando la máquina va cargada).
+    await act(async () => {
       root.render(element);
-      setTimeout(resolve, 0);
     });
     return { div, root };
   };
@@ -164,10 +165,10 @@ describe("átomos de UI renderizan en jsdom", { timeout: COLD_IMPORT_TIMEOUT }, 
     const div = document.createElement("div");
     document.body.appendChild(div);
     const root = createRoot(div);
-    await new Promise((resolve) => {
-      // React 19: render es async; flush con un microtask + rAF simulado
+    // act() vacía el render de forma determinista (con setTimeout(0) la
+    // aserción podía correr antes del commit cuando la máquina va cargada).
+    await act(async () => {
       root.render(element);
-      setTimeout(resolve, 0);
     });
     return { div, root };
   };

@@ -1,593 +1,459 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/useAuth";
-import { apiGet, apiGetCached } from "../utils/api";
-import { fmtGrade10FromPct } from "../utils/helpers";
-import { COLORS, colorForPct } from "../utils/colors";
 import { injectStyles } from "../styles/global";
 import Breadcrumb from "../components/ui/Breadcrumb";
-import { isStudentRole } from "../utils/roles";
+import { downloadCsv } from "../utils/export";
+import FiltersCard from "./coordinator/FiltersCard";
+import ProfessorsTab from "./coordinator/ProfessorsTab";
+import CoursesTab from "./coordinator/CoursesTab";
+import RiskTab from "./coordinator/RiskTab";
+import CourseDrawer from "./coordinator/CourseDrawer";
+import SavedQueryBanner from "./coordinator/SavedQueryBanner";
+import { KpiCard, LoadProgress, TabBar } from "./coordinator/parts";
+import {
+  fetchSemesterCourses, useCoordinatorCatalog, useCoordinatorSemesters, useCoordinatorSummaries,
+} from "./coordinator/useCoordinatorData";
+import {
+  aggregateProfessors, buildCourseCsv, buildProfessorCsv, buildRiskCsv,
+  computeKpis, extractSemester, filterCourses, formatSemester, pickDefaultSemester,
+  studentsAtRiskInMultipleCourses,
+} from "./coordinator/coordinatorUtils";
+import { buildRecord, lastQueryStore, missingSummaryIds } from "./coordinator/lastQueryStore";
+
+const TAB_IDS = { profesores: "profesores", cursos: "cursos", riesgo: "riesgo" };
+// Más cursos que esto no se analizan automáticamente (cada resumen consulta
+// varias cosas en Brightspace): se pide acotar o confirmar.
+const AUTO_ANALYZE_LIMIT = 150;
+// La última consulta se guarda en el navegador como máximo una vez por
+// segundo mientras llegan los lotes (y al salir de la página).
+const SAVE_INTERVAL_MS = 1000;
+
+function today() {
+  return new Date().toISOString().slice(0, 10);
+}
 
 /**
- * CoordinatorDashboard: aggregated view of courses filtered by the user.
- * Shows a filter screen first (semester, category, search term) before
- * loading any data, to avoid fetching everything upfront.
+ * Panel Coordinador: supervisa la actividad de los PROFESORES en Brightspace
+ * (reporte de notas por corte, contenido, actividades y calificación
+ * pendiente). El riesgo estudiantil es secundario.
+ *
+ * Flujo: se carga el catálogo, el usuario filtra y pulsa "Buscar cursos";
+ * los resúmenes se piden al endpoint batch en bloques de 10 cursos.
+ *
+ * La última consulta (filtros, cursos y resúmenes) se guarda en IndexedDB por
+ * usuario y se restaura al volver, sin red; solo se re-escanea a pedido
+ * ("Completar faltantes" / "Actualizar todo").
  */
 export default function CoordinatorDashboard({ onClose }) {
   useEffect(() => { injectStyles(); }, []);
   const navigate = useNavigate();
-  const { logout } = useAuth();
+  const { logout, authUser } = useAuth();
+  const userId = authUser?.user_id ?? authUser?.userId ?? null;
 
-  // ── Phase 1: pre-cargar el catálogo de cursos del coordinador ──────────────
-  // Se usa para (a) derivar los períodos disponibles del propio listado —igual
-  // que el panel de profesor, en lugar del endpoint /semesters que llega vacío—
-  // y (b) filtrar por período/categoría/nombre en cliente, que es más confiable
-  // que el filtro server-side por `period=`.
-  const [catalog, setCatalog] = useState([]);
-  const [catalogLoading, setCatalogLoading] = useState(true);
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      setCatalogLoading(true);
-      // Mismo patrón que el panel de profesor (RoleHome): si el endpoint
-      // principal `courses/enrolled` falla, caer a `my-course-offerings`.
-      // Sin este fallback el catálogo quedaba vacío y el dropdown de períodos
-      // solo mostraba "Todos los períodos".
-      try {
-        let items = [];
-        try {
-          const data = await apiGet("/brightspace/courses/enrolled?active_only=false&limit=500");
-          items = (Array.isArray(data?.items) ? data.items : []).filter((c) => !isStudentRole(c.roleName));
-        } catch {
-          const data = await apiGet("/brightspace/my-course-offerings?active_only=false&limit=50");
-          items = (Array.isArray(data?.items) ? data.items : []).map((c) => ({ ...c, roleName: "Instructor" }));
-        }
-        if (alive) setCatalog(items);
-      } catch {
-        if (alive) setCatalog([]);
-      } finally {
-        if (alive) setCatalogLoading(false);
-      }
-    })();
-    return () => { alive = false; };
-  }, []);
+  const { catalog, loading: catalogLoading } = useCoordinatorCatalog();
+  const { semesters: bsSemesters, loading: semestersLoading } = useCoordinatorSemesters();
+  const { summaries, progress, load, reset, hydrate } = useCoordinatorSummaries();
 
-  // ── Filter form state (shown BEFORE loading) ─────────────────────────────
-  const [filterSemester, setFilterSemester] = useState("");    // semesterCode e.g. "202510"
-  const [filterCategory, setFilterCategory] = useState("all"); // pregrado/posgrado/aula/etc
-  const [filterSearch, setFilterSearch] = useState("");        // free-text name search
-
-  // ── Phase 2: loaded data ─────────────────────────────────────────────────
+  // `semester` = id de la unidad organizativa del semestre en Brightspace, o
+  // "code:AAAAPP" cuando solo se conoce el código (respaldo derivado del catálogo).
+  const [semesterChoice, setSemesterChoice] = useState(null); // null = sin elegir aún
+  const [semesterCoursesLoading, setSemesterCoursesLoading] = useState(false);
+  const [semesterError, setSemesterError] = useState("");
+  const [pendingLarge, setPendingLarge] = useState(null); // cursos esperando confirmación
+  const [category, setCategory] = useState("all");
+  const [search, setSearch] = useState("");
   const [hasSearched, setHasSearched] = useState(false);
-  const [courses, setCourses] = useState([]);
-  const [courseMetrics, setCourseMetrics] = useState({});
-  const [sortBy, setSortBy] = useState("atRiskPct");
+  const [loadedCourses, setLoadedCourses] = useState([]);
+  const [tab, setTab] = useState(TAB_IDS.profesores);
+  const [drawerCourseId, setDrawerCourseId] = useState(null);
+  // Filtros con los que se obtuvo `loadedCourses` (lo que se guarda).
+  const [activeQuery, setActiveQuery] = useState(null);
+  // {savedAt} cuando la vista viene de la consulta guardada (muestra el aviso).
+  const [savedInfo, setSavedInfo] = useState(null);
+  const pendingQueryRef = useRef(null);  // filtros de `pendingLarge`
+  const userActedRef = useRef(false);    // ya buscó: no restaurar encima
+  const persistedRef = useRef(null);     // {courses, summaries} ya guardados
+  const pendingSaveRef = useRef(null);   // datos por guardar
+  const saveTimerRef = useRef(null);
 
-  const KNOWN_CATEGORIES = [
-    { value: "all", label: "Todas las categorías" },
-    { value: "PREGRADO", label: "Pregrado" },
-    { value: "POSGRADO", label: "Posgrado / Maestría" },
-    { value: "AULA", label: "Aula" },
-    { value: "DIPLOMADO", label: "Diplomado" },
-    { value: "EDUCACIÓN CONTINUA", label: "Educación Continua" },
-    { value: "DESARROLLO", label: "Desarrollo" },
-  ];
-
-  // ── Triggered when user clicks "Buscar cursos" ───────────────────────────
-  // Filtra en cliente el catálogo ya cargado (por período) y dispara la carga
-  // de métricas solo para el subconjunto resultante. El filtro por categoría y
-  // nombre se aplica en `sortedCourses` (useMemo) de forma reactiva.
-  const handleSearch = () => {
-    setHasSearched(true);
-    setCourseMetrics({});
-    const relevant = filterSemester
-      ? catalog.filter((c) => extractSemester(c) === filterSemester)
-      : catalog.slice();
-    setCourses(relevant);
-  };
-
-  // ── Load metrics for each course (rate-limited) ───────────────────────────
-  useEffect(() => {
-    if (courses.length === 0) return;
-    let alive = true;
-    (async () => {
-      const CONCURRENCY = 5;
-      const queue = [...courses];
-      async function worker() {
-        while (queue.length > 0 && alive) {
-          const c = queue.shift();
-          if (!c) break;
-          try {
-            const ov = await apiGetCached(`/gemelo/course/${c.id}/overview`);
-            if (!alive) return;
-            const total = Number(ov?.studentsCount ?? 0);
-            const atRiskCount = Number(ov?.studentsAtRisk?.length ?? 0);
-            const metric = {
-              totalStudents: total,
-              avgPct: ov?.courseGradebook?.avgCurrentPerformancePct ?? null,
-              avgCoverage: ov?.courseGradebook?.avgCoveragePct ?? null,
-              atRiskCount,
-              atRiskPct: total > 0 ? (atRiskCount / total) * 100 : null,
-            };
-            if (alive) setCourseMetrics((prev) => ({ ...prev, [c.id]: metric }));
-          } catch {
-            if (alive) setCourseMetrics((prev) => ({ ...prev, [c.id]: { error: true } }));
-          }
-        }
-      }
-      await Promise.all(Array.from({ length: CONCURRENCY }, worker));
-    })();
-    return () => { alive = false; };
-  }, [courses]);
-
-  // ── Helpers ───────────────────────────────────────────────────────────────
-  const extractSemester = (course) => {
-    const hay = `${course?.name || ""} ${course?.code || ""}`;
-    const strict = hay.match(/\b(20\d{2})(10|20|30)\b/);
-    if (strict) return `${strict[1]}${strict[2]}`;
-    const loose = hay.match(/\b(20\d{2})[\s\-._](\d)\b/);
-    if (loose) {
-      const q = loose[2];
-      if (q === "1") return `${loose[1]}10`;
-      if (q === "2") return `${loose[1]}20`;
-      if (q === "3") return `${loose[1]}30`;
+  // Períodos: los semestres reales de Brightspace (los nombres de los cursos
+  // actuales no traen el código). Si la API no responde, respaldo con los
+  // códigos que se puedan deducir del catálogo.
+  const semesterOptions = useMemo(() => {
+    if (bsSemesters.length > 0) {
+      return bsSemesters.map((s) => ({ value: String(s.id), label: s.name || s.code, code: s.code }));
     }
-    return null;
-  };
-
-  const extractCategory = (course) => {
-    let name = String(course?.name || "").trim();
-    name = name.replace(/^20\d{2}(?:10|20|30)\s*[-·_]?\s*/i, "");
-    const upper = name.toUpperCase();
-    if (/PREGRADO/.test(upper)) return "PREGRADO";
-    if (/POSGRADO|MAESTR|DOCTORADO/.test(upper)) return "POSGRADO";
-    if (/AULA/.test(upper)) return "AULA";
-    if (/DESARROLLO/.test(upper)) return "DESARROLLO";
-    if (/DIPLOMADO/.test(upper)) return "DIPLOMADO";
-    if (/EDUCACI/.test(upper)) return "EDUCACIÓN CONTINUA";
-    const words = name.split(/\s+/).filter(w => w.length > 0 && !/^\d+$/.test(w));
-    return words.length > 0 ? words[0].toUpperCase() : "SIN CATEGORÍA";
-  };
-
-  const formatSemester = (code) => {
-    if (!code || code.length !== 6) return code;
-    const year = code.slice(0, 4);
-    const q = code.slice(4, 6);
-    const roman = q === "10" ? "I" : q === "20" ? "II" : q === "30" ? "III" : q;
-    return `${year}-${roman}`;
-  };
-
-  // Períodos disponibles derivados del catálogo real (no del endpoint /semesters,
-  // que viene vacío). Ordenados del más reciente al más antiguo. Mismo criterio
-  // que el panel de profesor, garantizando que el dropdown solo muestre períodos
-  // que sí tienen cursos y que el filtro siempre funcione.
-  const availableSemesters = useMemo(() => {
     const set = new Set();
     for (const c of catalog) {
       const s = extractSemester(c);
       if (s) set.add(s);
     }
-    return Array.from(set).sort().reverse();
-  }, [catalog]);
+    return Array.from(set).sort().reverse().map((code) => ({ value: `code:${code}`, label: formatSemester(code), code }));
+  }, [bsSemesters, catalog]);
 
-  // ── Client-side filtering + sorting on loaded courses ────────────────────
-  const sortedCourses = useMemo(() => {
-    const q = filterSearch.trim().toLowerCase();
-    const list = courses.filter((c) => {
-      if (q && !(String(c.name || "").toLowerCase().includes(q) || String(c.code || "").toLowerCase().includes(q))) {
-        return false;
-      }
-      if (filterCategory !== "all") {
-        const cat = extractCategory(c);
-        if (cat !== filterCategory) return false;
-      }
-      return true;
+  // Semestre vigente de pregrado/posgrado como valor por defecto mientras el
+  // usuario no elija otro (valor derivado, sin efectos).
+  const defaultSemesterId = useMemo(() => {
+    const d = pickDefaultSemester(bsSemesters);
+    return d ? String(d.id) : "";
+  }, [bsSemesters]);
+  const semester = semesterChoice ?? defaultSemesterId;
+
+  const chooseSemester = useCallback((v) => setSemesterChoice(v), []);
+  const isBsSemester = semester !== "" && !semester.startsWith("code:");
+
+  // Filtros del catálogo (solo cuando no se usa un semestre de Brightspace).
+  const catalogFilters = useMemo(() => ({
+    semester: semester.startsWith("code:") ? semester.slice(5) : "",
+    category, search,
+  }), [semester, category, search]);
+  const matchCount = useMemo(
+    () => (isBsSemester ? null : filterCourses(catalog, catalogFilters).length),
+    [isBsSemester, catalog, catalogFilters],
+  );
+
+  // Conjunto visible: lo cargado (ya acotado al período), re-filtrado en vivo
+  // por categoría y nombre.
+  const courses = useMemo(
+    () => filterCourses(loadedCourses, { category, search }),
+    [loadedCourses, category, search],
+  );
+
+  const semesterLabelFor = useCallback((value) => {
+    if (!value) return "Todos los períodos";
+    const opt = semesterOptions.find((o) => o.value === value);
+    if (opt) return opt.label;
+    return value.startsWith("code:") ? formatSemester(value.slice(5)) : value;
+  }, [semesterOptions]);
+
+  // ── Persistencia de la última consulta ───────────────────────────────────
+  const flushSave = useCallback(() => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    const pending = pendingSaveRef.current;
+    pendingSaveRef.current = null;
+    if (!pending) return;
+    persistedRef.current = { courses: pending.courses, summaries: pending.summaries };
+    const record = buildRecord(pending);
+    lastQueryStore.save(record).then((ok) => {
+      if (ok) setSavedInfo((prev) => (prev ? { savedAt: record.savedAt } : prev));
     });
-    const withMetrics = list.map((c) => ({
-      ...c,
-      m: courseMetrics[c.id] || {},
-      _semester: extractSemester(c),
-      _category: extractCategory(c),
-    }));
-    withMetrics.sort((a, b) => {
-      if (sortBy === "name") return String(a.name || "").localeCompare(String(b.name || ""), "es");
-      if (sortBy === "avgPct") return (b.m.avgPct ?? -1) - (a.m.avgPct ?? -1);
-      if (sortBy === "atRiskPct") return (b.m.atRiskPct ?? -1) - (a.m.atRiskPct ?? -1);
-      return 0;
+  }, []);
+
+  const cancelPendingSave = useCallback(() => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = null;
+    pendingSaveRef.current = null;
+    persistedRef.current = null;
+  }, []);
+
+  // Restaurar al entrar (sin red) si hay una consulta guardada de este usuario.
+  useEffect(() => {
+    if (userId == null) return undefined;
+    let alive = true;
+    lastQueryStore.load(userId).then((rec) => {
+      if (!alive || !rec || userActedRef.current) return;
+      persistedRef.current = { courses: rec.courses, summaries: rec.summaries };
+      const f = rec.filters;
+      if (typeof f.semester === "string" && f.semester !== "") setSemesterChoice(f.semester);
+      setCategory(f.category || "all");
+      setSearch(f.search || "");
+      setActiveQuery(f);
+      setLoadedCourses(rec.courses);
+      hydrate(rec.summaries);
+      setHasSearched(true);
+      setSavedInfo({ savedAt: rec.savedAt });
     });
-    return withMetrics;
-  }, [courses, courseMetrics, filterSearch, sortBy, filterCategory]);
+    return () => { alive = false; };
+  }, [userId, hydrate]);
 
-  const filteredTotals = useMemo(() => {
-    const metrics = sortedCourses.map((c) => c.m).filter((m) => m && !m.error);
-    if (metrics.length === 0) return { totalStudents: 0, atRiskCount: 0, avgGrade: null, avgCoverage: null };
-    const totalStudents = metrics.reduce((a, m) => a + (m.totalStudents || 0), 0);
-    const atRiskCount = metrics.reduce((a, m) => a + (m.atRiskCount || 0), 0);
-    // Promedio SIMPLE de promedios de curso (cada curso pesa igual).
-    const withAvg = metrics.filter((m) => m.avgPct != null);
-    const avgGrade = withAvg.length > 0
-      ? withAvg.reduce((a, m) => a + m.avgPct, 0) / withAvg.length
-      : null;
-    const withCov = metrics.filter((m) => m.avgCoverage != null);
-    const avgCoverage = withCov.length > 0
-      ? withCov.reduce((a, m) => a + m.avgCoverage, 0) / withCov.length
-      : null;
-    return { totalStudents, atRiskCount, avgGrade, avgCoverage };
-  }, [sortedCourses]);
+  // Guardado progresivo: como máximo cada SAVE_INTERVAL_MS mientras llegan lotes.
+  useEffect(() => {
+    if (userId == null || !hasSearched || !activeQuery || loadedCourses.length === 0) return;
+    const p = persistedRef.current;
+    if (p && p.courses === loadedCourses && p.summaries === summaries) return;
+    pendingSaveRef.current = { userId, filters: activeQuery, courses: loadedCourses, summaries };
+    if (!saveTimerRef.current) saveTimerRef.current = setTimeout(flushSave, SAVE_INTERVAL_MS);
+  }, [userId, hasSearched, activeQuery, loadedCourses, summaries, flushSave]);
 
-  const metricsLoaded = Object.values(courseMetrics).filter((m) => !m?.error).length;
-  const metricsDone = Object.keys(courseMetrics).length;      // atendidos (éxito + error)
-  const metricsTotal = courses.length;                        // conjunto que se está cargando
-  const metricsPct = metricsTotal > 0 ? Math.round((metricsDone / metricsTotal) * 100) : 0;
+  // Al salir o recargar: guardar lo pendiente de inmediato.
+  useEffect(() => {
+    const onHide = () => flushSave();
+    window.addEventListener("pagehide", onHide);
+    return () => {
+      window.removeEventListener("pagehide", onHide);
+      flushSave();
+    };
+  }, [flushSave]);
+
+  const startAnalysis = useCallback((list, query) => {
+    userActedRef.current = true;
+    setPendingLarge(null);
+    pendingQueryRef.current = null;
+    setSavedInfo(null);
+    setActiveQuery(query);
+    setHasSearched(true);
+    setLoadedCourses(list);
+    load(list.map((c) => c.id));
+  }, [load]);
+
+  const handleSearch = async () => {
+    userActedRef.current = true;
+    setSemesterError("");
+    setPendingLarge(null);
+    const query = { semester, semesterLabel: semesterLabelFor(semester), category, search };
+    let relevant;
+    if (isBsSemester) {
+      setSemesterCoursesLoading(true);
+      try {
+        relevant = filterCourses(await fetchSemesterCourses(semester), { category, search });
+      } catch (e) {
+        setSemesterError(e?.status === 401 ? "Sesión expirada" : "No se pudieron cargar los cursos del período");
+        setSemesterCoursesLoading(false);
+        return;
+      }
+      setSemesterCoursesLoading(false);
+    } else {
+      relevant = filterCourses(catalog, catalogFilters);
+    }
+    if (relevant.length > AUTO_ANALYZE_LIMIT) {
+      reset();
+      setHasSearched(false);
+      setLoadedCourses([]);
+      setSavedInfo(null);
+      pendingQueryRef.current = query;
+      setPendingLarge(relevant);
+      return;
+    }
+    startAnalysis(relevant, query);
+  };
+
+  // Descarta la consulta guardada y vuelve al estado vacío.
+  const discardSaved = () => {
+    userActedRef.current = true;
+    cancelPendingSave();
+    if (userId != null) lastQueryStore.clear(userId);
+    reset();
+    setHasSearched(false);
+    setLoadedCourses([]);
+    setActiveQuery(null);
+    setSavedInfo(null);
+    setPendingLarge(null);
+  };
+
+  const handleClear = () => {
+    discardSaved();
+    setHasSearched(false);
+    setLoadedCourses([]);
+    setSemesterError("");
+    setPendingLarge(null);
+    setCategory("all");
+    setSearch("");
+  };
+
+  const retry = useCallback((ids) => load(ids, { reset: false }), [load]);
+  const missingIds = useMemo(() => missingSummaryIds(loadedCourses, summaries), [loadedCourses, summaries]);
+  const completeMissing = () => load(missingIds, { reset: false });
+  const refreshAll = () => load(loadedCourses.map((c) => c.id), { refresh: true });
+
+  const kpis = useMemo(() => computeKpis(courses, summaries), [courses, summaries]);
+  const { professors, coursesWithoutTeacher } = useMemo(
+    () => aggregateProfessors(courses, summaries),
+    [courses, summaries],
+  );
+  const multiRisk = useMemo(() => studentsAtRiskInMultipleCourses(courses, summaries, 2), [courses, summaries]);
+
+  // Abrir el curso en la vista docente SIN recargar la página.
+  const openTeacherView = useCallback((courseId) => {
+    sessionStorage.setItem("gemelo_pending_org", String(courseId));
+    navigate("/dashboard", { state: { orgUnitId: Number(courseId) } });
+  }, [navigate]);
+
+  const drawerCourse = drawerCourseId != null
+    ? loadedCourses.find((c) => String(c.id) === String(drawerCourseId)) || null
+    : null;
+
+  const exportProfessors = (sortedList) => {
+    const { headers, rows } = buildProfessorCsv(sortedList);
+    downloadCsv(`coordinador_profesores_${today()}.csv`, headers, rows);
+  };
+  const exportCourses = () => {
+    const { headers, rows } = buildCourseCsv(courses, summaries);
+    downloadCsv(`coordinador_cursos_${today()}.csv`, headers, rows);
+  };
+  const exportRisk = () => {
+    const { headers, rows } = buildRiskCsv(multiRisk);
+    downloadCsv(`coordinador_riesgo_multicurso_${today()}.csv`, headers, rows);
+  };
+
+  const loading = progress.total > 0 && progress.done < progress.total;
+  const tabs = [
+    { id: TAB_IDS.profesores, label: "Profesores", count: professors.length },
+    { id: TAB_IDS.cursos, label: "Cursos", count: courses.length },
+    { id: TAB_IDS.riesgo, label: "Estudiantes en riesgo", count: multiRisk.length },
+  ];
+  const pctFmt = (v) => (v == null ? "—" : `${Math.round(v)}%`);
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--bg)", fontFamily: "var(--font)" }}>
-      {/* Topbar */}
       <header style={{
         position: "sticky", top: 0, zIndex: 50,
         background: "color-mix(in srgb, var(--card) 90%, transparent)", backdropFilter: "blur(16px) saturate(180%)",
         borderBottom: "1px solid var(--border)",
-        display: "flex", alignItems: "center", justifyContent: "space-between",
+        display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
         padding: "0 24px", height: 56,
       }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ width: 32, height: 32, borderRadius: 8, background: "var(--brand)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--on-brand)", fontSize: 10, fontWeight: 900 }}>CESA</div>
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)" }}>Visor de desempeño estudiantil</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+          <div aria-hidden="true" style={{ width: 32, height: 32, borderRadius: 8, background: "var(--brand)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--on-brand)", fontSize: 10, fontWeight: 900 }}>CESA</div>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)" }}>Gemelo Digital</div>
             <div style={{ fontSize: 9, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Panel Coordinador</div>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <button className="btn" onClick={() => navigate("/")} style={{ padding: "7px 12px", fontSize: 12, background: "var(--brand)", color: "var(--on-brand)", border: "none", borderRadius: 8, fontWeight: 700, cursor: "pointer" }}>
-            🏠 Inicio
+          <button type="button" className="btn btn-primary" onClick={() => navigate("/")} style={{ padding: "7px 12px", fontSize: 12 }}>
+            Inicio
           </button>
-          <button className="btn" onClick={onClose ? onClose : () => navigate("/dashboard")} style={{ padding: "7px 12px", fontSize: 12 }}>
-            📊 Vista docente
+          <button type="button" className="btn" onClick={onClose ? onClose : () => navigate("/dashboard")} style={{ padding: "7px 12px", fontSize: 12 }}>
+            Vista docente
           </button>
-          <button onClick={logout} style={{ background: "none", border: "1px solid var(--border)", borderRadius: 7, padding: "4px 8px", fontSize: 10, fontWeight: 700, color: "var(--muted)", cursor: "pointer" }}>
+          <button type="button" className="btn" onClick={logout} style={{ padding: "6px 10px", fontSize: 11, color: "var(--muted)" }}>
             Salir
           </button>
         </div>
       </header>
 
-      <main id="main-content" tabIndex={-1} style={{ padding: "24px 28px", maxWidth: 1200, margin: "0 auto" }}>
+      <main id="main-content" tabIndex={-1} style={{ padding: "24px 16px", maxWidth: 1240, margin: "0 auto" }}>
         <Breadcrumb items={[
           { label: "Inicio", icon: "🏠", onClick: () => navigate("/") },
           { label: "Panel Coordinador" },
         ]} />
 
-        <div style={{ fontSize: 10, fontWeight: 800, color: "var(--brand)", textTransform: "uppercase", letterSpacing: "0.12em", marginBottom: 4 }}>
-          Visor de desempeño estudiantil
-        </div>
-        <h1 style={{ fontSize: 28, fontWeight: 900, color: "var(--text)", letterSpacing: "-0.03em", marginBottom: 16 }}>
-          Panel Coordinador
+        <h1 style={{ fontSize: 26, fontWeight: 900, color: "var(--text)", letterSpacing: "-0.03em", margin: "4px 0 4px" }}>
+          Actividad docente en Brightspace
         </h1>
+        <p style={{ fontSize: 13, color: "var(--muted)", margin: "0 0 16px", maxWidth: 760 }}>
+          Reporte de notas por corte, contenido publicado, actividades y entregas por calificar de los profesores de tus cursos.
+        </p>
 
-        {/* ── Filter form (always visible) ── */}
-        <div className="kpi-card" style={{ marginBottom: 20 }}>
-          <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)", marginBottom: 14, display: "flex", alignItems: "center", gap: 8 }}>
-            🔍 Configura los filtros y haz clic en Buscar
-          </div>
+        <FiltersCard
+          catalogLoading={catalogLoading || semestersLoading || semesterCoursesLoading}
+          busyLabel={semesterCoursesLoading ? "Buscando cursos del período…" : null}
+          semesterError={semesterError}
+          semesters={semesterOptions}
+          semester={semester} setSemester={chooseSemester}
+          category={category} setCategory={setCategory}
+          search={search} setSearch={setSearch}
+          onSearch={handleSearch}
+          onClear={handleClear}
+          hasSearched={hasSearched}
+          matchCount={matchCount}
+        />
 
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-            {/* Semester */}
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, flex: "1 1 200px" }}>
-              <span style={{ fontSize: 10, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Período / Semestre</span>
-              <select
-                value={filterSemester}
-                onChange={(e) => setFilterSemester(e.target.value)}
-                disabled={catalogLoading}
-                style={{
-                  padding: "9px 12px", borderRadius: 8, border: "1px solid var(--border)",
-                  background: "var(--bg)", color: "var(--text)",
-                  fontSize: 12, fontFamily: "var(--font)", outline: "none",
-                  cursor: catalogLoading ? "wait" : "pointer",
-                }}
-              >
-                <option value="">
-                  {catalogLoading ? "Cargando períodos…" : "Todos los períodos"}
-                </option>
-                {availableSemesters.map((code) => (
-                  <option key={code} value={code}>{formatSemester(code)}</option>
-                ))}
-              </select>
-            </label>
-
-            {/* Category */}
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, flex: "1 1 180px" }}>
-              <span style={{ fontSize: 10, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Tipo / Categoría</span>
-              <select
-                value={filterCategory}
-                onChange={(e) => setFilterCategory(e.target.value)}
-                style={{
-                  padding: "9px 12px", borderRadius: 8, border: "1px solid var(--border)",
-                  background: "var(--bg)", color: "var(--text)",
-                  fontSize: 12, fontFamily: "var(--font)", outline: "none", cursor: "pointer",
-                }}
-              >
-                {KNOWN_CATEGORIES.map((c) => (
-                  <option key={c.value} value={c.value}>{c.label}</option>
-                ))}
-              </select>
-            </label>
-
-            {/* Free-text search */}
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, flex: "2 1 220px" }}>
-              <span style={{ fontSize: 10, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Buscar por nombre</span>
-              <input
-                type="text"
-                value={filterSearch}
-                onChange={(e) => setFilterSearch(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") handleSearch(); }}
-                placeholder="Ej: Finanzas, Mercadeo..."
-                style={{
-                  padding: "9px 12px", borderRadius: 8, border: "1px solid var(--border)",
-                  background: "var(--bg)", color: "var(--text)",
-                  fontSize: 12, fontFamily: "var(--font)", outline: "none",
-                }}
-              />
-            </label>
-
-            {/* Search button */}
-            <button
-              onClick={handleSearch}
-              disabled={catalogLoading}
-              style={{
-                padding: "9px 20px", borderRadius: 8, border: "none",
-                background: catalogLoading ? "var(--border)" : "var(--brand)",
-                color: catalogLoading ? "var(--muted)" : "var(--on-brand)",
-                fontSize: 13, fontWeight: 800, cursor: catalogLoading ? "not-allowed" : "pointer",
-                fontFamily: "var(--font)", flexShrink: 0, alignSelf: "flex-end",
-              }}
-            >
-              {catalogLoading ? "Cargando catálogo…" : "🔍 Buscar cursos"}
-            </button>
-
-            {hasSearched && (
-              <button
-                onClick={() => {
-                  setHasSearched(false);
-                  setCourses([]);
-                  setCourseMetrics({});
-                  setFilterSearch("");
-                  setFilterCategory("all");
-                  setFilterSemester("");
-                }}
-                style={{
-                  padding: "9px 14px", borderRadius: 8,
-                  border: "1px solid var(--border)", background: "var(--bg)",
-                  color: "var(--muted)", fontSize: 12, fontWeight: 700,
-                  cursor: "pointer", fontFamily: "var(--font)", flexShrink: 0,
-                  alignSelf: "flex-end",
-                }}
-              >
-                ✕ Limpiar
-              </button>
-            )}
-          </div>
-
-          {/* Active filter summary */}
-          {hasSearched && (
-            <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {filterSemester && (
-                <span style={{ fontSize: 10, fontWeight: 800, padding: "3px 10px", borderRadius: 99, background: "var(--brand-light)", color: "var(--brand)", textTransform: "uppercase" }}>
-                  Período: {formatSemester(filterSemester)}
-                </span>
-              )}
-              {filterCategory !== "all" && (
-                <span style={{ fontSize: 10, fontWeight: 800, padding: "3px 10px", borderRadius: 99, background: "var(--brand-light)", color: "var(--brand)", textTransform: "uppercase" }}>
-                  {filterCategory}
-                </span>
-              )}
-              {filterSearch && (
-                <span style={{ fontSize: 10, fontWeight: 800, padding: "3px 10px", borderRadius: 99, background: "var(--brand-light)", color: "var(--brand)" }}>
-                  "{filterSearch}"
-                </span>
-              )}
-              {!filterSemester && filterCategory === "all" && !filterSearch && (
-                <span style={{ fontSize: 10, color: "var(--muted)" }}>Todos los cursos activos</span>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* ── Empty / pre-search state ── */}
-        {!hasSearched && (
-          <div style={{
-            textAlign: "center", padding: "60px 20px",
-            background: "var(--card)", border: "1px solid var(--border)",
-            borderRadius: 16, color: "var(--muted)",
+        {pendingLarge && (
+          <div role="status" className="kpi-card" style={{
+            marginBottom: 16, padding: "14px 16px", display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap",
+            background: "var(--warning-bg)", border: "1px solid var(--warning-border)", color: "var(--warning-fg)",
           }}>
-            <div style={{ fontSize: 40, opacity: 0.35, marginBottom: 12 }}>🏛</div>
-            <div style={{ fontSize: 15, fontWeight: 800, color: "var(--text)", marginBottom: 6 }}>
-              Selecciona los filtros y busca
+            <div style={{ flex: "1 1 320px", fontSize: 13, lineHeight: 1.5 }}>
+              <strong>{pendingLarge.length} cursos</strong> coinciden con la búsqueda. Analizarlos todos puede tardar
+              muchos minutos; acota con el nombre (programa, asignatura) o la categoría y vuelve a buscar.
             </div>
-            <div style={{ fontSize: 12, maxWidth: 380, margin: "0 auto" }}>
-              Elige el período académico, tipo de programa o nombre de asignatura y haz clic en <strong>Buscar cursos</strong> para cargar los datos.
+            <button type="button" className="btn" onClick={() => startAnalysis(pendingLarge, pendingQueryRef.current)} style={{ padding: "8px 14px" }}>
+              Analizar los {pendingLarge.length} de todas formas
+            </button>
+          </div>
+        )}
+
+        {!hasSearched && !pendingLarge && (
+          <div className="empty-state" style={{ padding: "60px 20px" }}>
+            <div className="empty-state-icon" aria-hidden="true">🏛</div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: "var(--text)" }}>Selecciona los filtros y busca</div>
+            <div style={{ fontSize: 12, maxWidth: 420 }}>
+              Elige el período, el tipo de programa o el nombre de la asignatura y pulsa <strong>Buscar cursos</strong> para analizar la actividad docente.
             </div>
           </div>
         )}
 
-        {/* ── Results ── */}
+        {hasSearched && savedInfo && (
+          <SavedQueryBanner
+            semesterLabel={activeQuery?.semesterLabel}
+            courseCount={loadedCourses.length}
+            savedAt={savedInfo.savedAt}
+            missingCount={loading ? 0 : missingIds.length}
+            busy={loading}
+            onCompleteMissing={completeMissing}
+            onRefreshAll={refreshAll}
+            onDiscard={discardSaved}
+          />
+        )}
+
         {hasSearched && (
           <>
-            {/* KPI totals */}
-            {sortedCourses.length > 0 && (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12, marginBottom: 20 }}>
-                <div className="kpi-card">
-                  <div style={{ fontSize: 10, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Cursos</div>
-                  <div style={{ fontSize: 32, fontWeight: 900, color: "var(--text)", marginTop: 4 }}>{sortedCourses.length}</div>
-                  <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>
-                    {metricsLoaded} con datos · {courses.length} total
-                  </div>
-                </div>
-                <div className="kpi-card">
-                  <div style={{ fontSize: 10, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Estudiantes</div>
-                  <div style={{ fontSize: 32, fontWeight: 900, color: "var(--text)", marginTop: 4 }}>{filteredTotals.totalStudents}</div>
-                </div>
-                <div className="kpi-card">
-                  <div style={{ fontSize: 10, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Nota promedio</div>
-                  <div style={{ fontSize: 32, fontWeight: 900, color: colorForPct(filteredTotals.avgGrade, null), marginTop: 4 }}>
-                    {filteredTotals.avgGrade != null ? fmtGrade10FromPct(filteredTotals.avgGrade) : "—"}
-                    <span style={{ fontSize: 14, color: "var(--muted)", fontWeight: 600 }}>/10</span>
-                  </div>
-                </div>
-                <div className="kpi-card">
-                  <div style={{ fontSize: 10, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.08em" }}>En riesgo</div>
-                  <div style={{ fontSize: 32, fontWeight: 900, color: COLORS.critical, marginTop: 4 }}>
-                    {filteredTotals.atRiskCount}
-                    <span style={{ fontSize: 14, color: "var(--muted)", fontWeight: 600 }}>
-                      {filteredTotals.totalStudents > 0 && ` · ${((filteredTotals.atRiskCount / filteredTotals.totalStudents) * 100).toFixed(0)}%`}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            )}
+            <LoadProgress done={progress.done} total={progress.total} />
 
-            {/* Table */}
-            <div className="kpi-card" style={{ padding: 0, overflow: "hidden" }}>
-              {/* Sort bar */}
-              {sortedCourses.length > 0 && (
-                <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--border)", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700 }}>Ordenar:</span>
-                  <select
-                    aria-label="Ordenar cursos"
-                    value={sortBy}
-                    onChange={(e) => setSortBy(e.target.value)}
-                    style={{
-                      padding: "6px 10px", borderRadius: 8, border: "1px solid var(--border)",
-                      background: "var(--card)", color: "var(--text)",
-                      fontSize: 12, fontFamily: "var(--font)", outline: "none",
-                    }}
-                  >
-                    <option value="atRiskPct">Mayor riesgo primero</option>
-                    <option value="avgPct">Mejor nota primero</option>
-                    <option value="name">Nombre A-Z</option>
-                  </select>
-                  <span style={{ fontSize: 11, color: "var(--muted)", marginLeft: "auto" }}>
-                    {sortedCourses.length} curso{sortedCourses.length !== 1 ? "s" : ""}
-                  </span>
-                </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12, marginBottom: 20 }}>
+              <KpiCard label="Cursos" value={kpis.courses} hint={`${kpis.loaded} con datos${kpis.failed ? ` · ${kpis.failed} con error` : ""}`} />
+              <KpiCard label="Profesores" value={kpis.professors} />
+              <KpiCard
+                label="Cortes reportados"
+                value={pctFmt(kpis.cortesPct)}
+                hint={`${kpis.cortesPublished}/${kpis.cortesTotal} publicados (≥90% con nota)${kpis.cortesLate ? ` · ${kpis.cortesLate} vencidos` : ""}`}
+                tone={kpis.cortesLate > 0 ? "critical" : kpis.cortesPct != null && kpis.cortesPct >= 90 ? "ok" : undefined}
+              />
+              <KpiCard label="Entregas por calificar" value={kpis.backlog} tone={kpis.backlog > 0 ? "watch" : undefined} />
+              <KpiCard
+                label="Estudiantes en riesgo"
+                value={kpis.atRiskUnique}
+                hint={`únicos · ${kpis.students} estudiantes · nota prom. ${kpis.avgPct != null ? (kpis.avgPct / 10).toFixed(1) : "—"}`}
+                tone={kpis.atRiskUnique > 0 ? "critical" : undefined}
+              />
+            </div>
+
+            <TabBar tabs={tabs} active={tab} onChange={setTab} idPrefix="coord" />
+
+            <div role="tabpanel" id={`coord-panel-${tab}`} aria-labelledby={`coord-tab-${tab}`}>
+              {tab === TAB_IDS.profesores && (
+                <ProfessorsTab
+                  professors={professors}
+                  coursesWithoutTeacher={coursesWithoutTeacher}
+                  onOpenCourse={setDrawerCourseId}
+                  onExport={exportProfessors}
+                  loading={loading}
+                />
               )}
-
-              {/* Barra de progreso de carga de métricas — reemplaza el texto
-                  "cargando métricas x/y" por un indicador visual con porcentaje. */}
-              {metricsTotal > 0 && metricsDone < metricsTotal && (
-                <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--border)", background: "var(--bg)" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 7 }}>
-                    <span style={{ fontSize: 11, fontWeight: 800, color: "var(--brand)", display: "flex", alignItems: "center", gap: 7 }}>
-                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--brand)", display: "inline-block", animation: "pulse 1.2s ease-in-out infinite" }} />
-                      Analizando cursos… {metricsDone}/{metricsTotal}
-                    </span>
-                    <span style={{ fontSize: 12, fontWeight: 900, color: "var(--brand)", fontFamily: "var(--font-mono)" }}>{metricsPct}%</span>
-                  </div>
-                  <div style={{ height: 7, borderRadius: 99, background: "var(--border)", overflow: "hidden" }}>
-                    <div style={{ height: "100%", width: `${metricsPct}%`, background: "var(--brand)", borderRadius: 99, transition: "width 0.35s ease" }} />
-                  </div>
-                </div>
+              {tab === TAB_IDS.cursos && (
+                <CoursesTab
+                  courses={courses}
+                  summaries={summaries}
+                  onOpenCourse={setDrawerCourseId}
+                  onRetry={retry}
+                  onExport={exportCourses}
+                />
               )}
-
-              <div style={{ overflowX: "auto" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                  <thead>
-                    <tr style={{ background: "var(--bg)", borderBottom: "1px solid var(--border)" }}>
-                      <th style={thStyle}>Curso</th>
-                      <th style={{ ...thStyle, textAlign: "right" }}>Estudiantes</th>
-                      <th style={{ ...thStyle, textAlign: "right" }}>Nota prom.</th>
-                      <th style={{ ...thStyle, textAlign: "right" }}>Cobertura</th>
-                      <th style={{ ...thStyle, textAlign: "right" }}>En riesgo</th>
-                      <th />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {catalogLoading && (
-                      <tr>
-                        <td colSpan={6} style={{ padding: 40, textAlign: "center", color: "var(--muted)" }}>
-                          <div style={{ fontSize: 13 }}>Cargando catálogo de cursos…</div>
-                        </td>
-                      </tr>
-                    )}
-                    {!catalogLoading && sortedCourses.length === 0 && (
-                      <tr>
-                        <td colSpan={6} style={{ padding: 40, textAlign: "center", color: "var(--muted)" }}>
-                          <div style={{ fontSize: 36, opacity: 0.35, marginBottom: 8 }}>📚</div>
-                          <div style={{ fontSize: 13 }}>Sin cursos encontrados con estos filtros.</div>
-                        </td>
-                      </tr>
-                    )}
-                    {sortedCourses.map(({ id, name, code, m, _semester, _category }) => {
-                      const openCourse = (courseId) => {
-                        sessionStorage.setItem("gemelo_pending_org", String(courseId));
-                        window.location.href = window.location.origin + "/dashboard";
-                      };
-                      const avgColor = m.avgPct != null ? colorForPct(m.avgPct, null) : "var(--muted)";
-                      const riskColor = m.atRiskPct == null ? "var(--muted)"
-                        : m.atRiskPct > 30 ? COLORS.critical
-                        : m.atRiskPct > 15 ? COLORS.watch
-                        : COLORS.ok;
-                      return (
-                        <tr
-                          key={id}
-                          onClick={() => openCourse(id)}
-                          // Accesible por teclado: Enter/Espacio abren el curso
-                          tabIndex={0}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openCourse(id); }
-                          }}
-                          style={{ borderBottom: "1px solid var(--border)", cursor: "pointer" }}
-                          className="tr-hover"
-                        >
-                          <td style={{ padding: "10px 14px", fontSize: 13, fontWeight: 700, color: "var(--text)" }}>
-                            <div>{name}</div>
-                            <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 2 }}>
-                              {code && <span style={{ fontSize: 10, color: "var(--muted)", fontFamily: "var(--font-mono)" }}>{code}</span>}
-                              {_semester && <span className="tag" style={{ fontSize: 9, padding: "1px 6px" }}>{formatSemester(_semester)}</span>}
-                              {_category && _category !== "SIN CATEGORÍA" && (
-                                <span style={{ fontSize: 9, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                                  {_category}
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                          <td style={{ padding: "10px 14px", textAlign: "right", fontSize: 13, fontFamily: "var(--font-mono)", color: "var(--text)", fontWeight: 700 }}>
-                            {m.totalStudents != null ? m.totalStudents : "..."}
-                          </td>
-                          <td style={{ padding: "10px 14px", textAlign: "right", fontSize: 16, fontWeight: 900, fontFamily: "var(--font-mono)", color: avgColor }}>
-                            {m.avgPct != null ? (m.avgPct / 10).toFixed(1) : "—"}
-                          </td>
-                          <td style={{ padding: "10px 14px", textAlign: "right", fontSize: 13, fontFamily: "var(--font-mono)", color: "var(--text)" }}>
-                            {m.avgCoverage != null ? `${m.avgCoverage.toFixed(0)}%` : "—"}
-                          </td>
-                          <td style={{ padding: "10px 14px", textAlign: "right", fontSize: 13, fontWeight: 800, color: riskColor }}>
-                            {m.atRiskCount != null ? `${m.atRiskCount} (${m.atRiskPct?.toFixed(0)}%)` : "—"}
-                          </td>
-                          <td style={{ padding: "10px 14px", textAlign: "right" }}>
-                            <span aria-hidden="true" style={{ color: "var(--brand)", fontSize: 16 }}>→</span>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+              {tab === TAB_IDS.riesgo && (
+                <RiskTab students={multiRisk} onOpenCourse={setDrawerCourseId} onExport={exportRisk} />
+              )}
             </div>
           </>
         )}
 
         <div style={{ textAlign: "center", padding: "24px 0", fontSize: 11, color: "var(--muted)" }}>
-          CESA · Visor de desempeño estudiantil 2026.8.7 · Panel Coordinador
+          CESA · Gemelo Digital · Panel Coordinador
         </div>
       </main>
+
+      {drawerCourse && (
+        <CourseDrawer
+          course={drawerCourse}
+          summary={summaries[drawerCourse.id]}
+          onClose={() => setDrawerCourseId(null)}
+          onOpenTeacherView={openTeacherView}
+        />
+      )}
     </div>
   );
 }
-
-const thStyle = {
-  padding: "10px 14px",
-  fontSize: 10,
-  fontWeight: 800,
-  textTransform: "uppercase",
-  letterSpacing: "0.08em",
-  color: "var(--muted)",
-  textAlign: "left",
-};

@@ -166,6 +166,52 @@ async def _collect_semesters(headers: dict, semesters: list, max_pages: int = 50
         bookmark = new_bm
 
 
+async def fetch_semester_course_offerings(headers: dict, sem: dict, max_pages: int = 20) -> list:
+    """Ofertas de curso (ouTypeId=3) que cuelgan de un semestre en la
+    estructura organizacional de Brightspace. Cada item lleva el código y el
+    nombre del semestre (los nombres de los cursos actuales NO lo incluyen)."""
+    sem_id = sem.get("Identifier") or sem.get("Id") or sem.get("id")
+    if not sem_id:
+        return []
+    url = (
+        f"{BRIGHTSPACE_BASE_URL}/d2l/api/lp/{LP_VERSION}"
+        f"/orgstructure/{sem_id}/descendants/"
+    )
+    out = []
+    bm = None
+    pg = 0
+    while pg < max_pages:
+        p: dict = {"ouTypeId": "3"}
+        if bm:
+            p["bookmark"] = bm
+        # Descendientes de un semestre: casi estático → caché 5 min (#11)
+        st, dt = await _bs_get_cached(url, headers, p)
+        if st != 200:
+            break
+        items = dt if isinstance(dt, list) else (dt.get("Items") or dt.get("items") or [])
+        if not items:
+            break
+        for it in items:
+            ou_id = it.get("Identifier") or it.get("Id") or it.get("id")
+            if ou_id:
+                out.append({
+                    "id": ou_id,
+                    "name": it.get("Name", ""),
+                    "code": it.get("Code", ""),
+                    "semesterCode": str(sem.get("Code") or ""),
+                    "semesterName": str(sem.get("Name") or ""),
+                })
+        pg += 1
+        paging = dt.get("PagingInfo") if isinstance(dt, dict) else None
+        if not paging or not paging.get("HasMoreItems"):
+            break
+        new_bm = paging.get("Bookmark")
+        if not new_bm or new_bm == bm:
+            break
+        bm = new_bm
+    return out
+
+
 async def search_course_offerings(
     headers: dict, search: str | None, active_only: bool, limit: int
 ) -> dict:
@@ -344,46 +390,7 @@ async def enrolled_courses_for_target(
 
         # For each relevant semester, get descendant course offerings
         async def _fetch_semester_courses(sem):
-            sem_id = sem.get("Identifier") or sem.get("Id") or sem.get("id")
-            if not sem_id:
-                return []
-            url = (
-                f"{BRIGHTSPACE_BASE_URL}/d2l/api/lp/{LP_VERSION}"
-                f"/orgstructure/{sem_id}/descendants/"
-            )
-            out = []
-            bm = None
-            pg = 0
-            while pg < 20:
-                p: dict = {"ouTypeId": "3"}
-                if bm:
-                    p["bookmark"] = bm
-                # Descendientes de un semestre: casi estático → caché 5 min (#11)
-                st, dt = await _bs_get_cached(url, headers, p)
-                if st != 200:
-                    break
-                items = dt if isinstance(dt, list) else (dt.get("Items") or dt.get("items") or [])
-                if not items:
-                    break
-                for it in items:
-                    ou_id = it.get("Identifier") or it.get("Id") or it.get("id")
-                    if ou_id:
-                        out.append({
-                            "id": ou_id,
-                            "name": it.get("Name", ""),
-                            "code": it.get("Code", ""),
-                            "semesterCode": str(sem.get("Code") or ""),
-                            "semesterName": str(sem.get("Name") or ""),
-                        })
-                pg += 1
-                paging = dt.get("PagingInfo") if isinstance(dt, dict) else None
-                if not paging or not paging.get("HasMoreItems"):
-                    break
-                new_bm = paging.get("Bookmark")
-                if not new_bm or new_bm == bm:
-                    break
-                bm = new_bm
-            return out
+            return await fetch_semester_course_offerings(headers, sem)
 
         # Fetch courses from all relevant semesters in parallel
         sem_courses_lists = await asyncio.gather(*[

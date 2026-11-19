@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate, useSearchParams, Navigate } from "react-router-dom";
+import { useNavigate, useSearchParams, Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "../context/useAuth";
 import { useTheme } from "../context/useTheme";
 import CommandPalette from "../components/ui/CommandPalette";
@@ -76,6 +76,10 @@ export default function TeacherDashboard() {
   // context value instead of reading sessionStorage directly here.
   const { initialOrgUnitId: ctxInitialOrgUnitId, isDualRole, isSuperAdmin, logout } = useAuth();
   const navigate = useNavigate();
+  // Curso elegido desde otra vista sin recargar la página (p. ej. el panel
+  // coordinador navega con state.orgUnitId): tiene prioridad sobre el contexto.
+  const location = useLocation();
+  const navOrgUnitId = Number(location.state?.orgUnitId) > 0 ? Number(location.state.orgUnitId) : 0;
 
   const isNarrow = useMediaQuery("(max-width: 900px)");
   const isMobile = useMediaQuery("(max-width: 640px)");
@@ -208,6 +212,8 @@ export default function TeacherDashboard() {
   }, [activeSection]);
 
   const [orgUnitId, setOrgUnitId] = useState(() => {
+    // Priority 0: navegación interna con state.orgUnitId
+    if (navOrgUnitId) return navOrgUnitId;
     // Priority 1: AuthContext initial value (from LTI hash fragment or RoleHome selection)
     if (ctxInitialOrgUnitId && Number(ctxInitialOrgUnitId) > 0) {
       return Number(ctxInitialOrgUnitId);
@@ -232,6 +238,7 @@ export default function TeacherDashboard() {
     return DEFAULT_ORG_UNIT_ID;
   });
   const [orgUnitInput, setOrgUnitInput] = useState(() => {
+    if (navOrgUnitId) return String(navOrgUnitId);
     if (ctxInitialOrgUnitId && Number(ctxInitialOrgUnitId) > 0) {
       return String(ctxInitialOrgUnitId);
     }

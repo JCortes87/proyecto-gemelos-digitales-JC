@@ -208,9 +208,18 @@ async def course_grading_status(headers: dict, org_unit_id: int) -> dict:
                     continue
                 base["submittedIds"].append(str(eid))
                 if not entry.get("Feedback"):
+                    # submittedAt: fecha de la entrega más reciente (la que
+                    # espera calificación). La usa la vista de coordinador
+                    # para calcular la antigüedad del backlog.
+                    sub_dates = [
+                        str(s.get("SubmissionDate"))
+                        for s in inner
+                        if isinstance(s, dict) and s.get("SubmissionDate")
+                    ]
                     base["pendingGrading"].append({
                         "id": str(eid),
                         "name": ent.get("DisplayName") or ent.get("Name") or str(eid),
+                        "submittedAt": max(sub_dates) if sub_dates else None,
                     })
             base["ok"] = True
         except Exception as e:

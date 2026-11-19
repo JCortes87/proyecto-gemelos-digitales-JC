@@ -230,6 +230,7 @@ class BrightspaceClient:
         self.base_url = settings.brightspace_base_url.rstrip("/")
         self.lp_version   = settings.brightspace_lp_version
         self.grade_version = settings.brightspace_grade_version
+        self.le_version    = settings.brightspace_le_version
         self.lo_version    = settings.brightspace_lo_version
         # El endpoint /lo/alignments/ requiere version 1.93+ (LMS v20.26.4+).
         # Se mantiene separado de lo_version (1.92) para no romper outcomeSets.
@@ -408,6 +409,61 @@ class BrightspaceClient:
         url = (
             f"{self.base_url}/d2l/api/le/{self.grade_version}/{orgUnitId}"
             f"/grades/values/{int(userId)}/"
+        )
+        data = await self._request_json("GET", url)
+        return self._as_list_of_dicts(data)
+
+    async def list_grade_values_for_item(
+        self, orgUnitId: int, gradeObjectId: int, max_pages: int = 50
+    ) -> List[Dict[str, Any]]:
+        """Valores de TODOS los usuarios para un grade object:
+        GET /d2l/api/le/(v)/(ou)/grades/(goId)/values/ (paginado).
+
+        Cada fila es un UserGradeValue: {User: {Identifier, ...},
+        GradeValue: {...} | null}. Soporta las dos formas de paginación de
+        Brightspace: ObjectListPage (Objects + Next) y PagedResultSet
+        (Items + PagingInfo.Bookmark)."""
+        url: Optional[str] = (
+            f"{self.base_url}/d2l/api/le/{self.grade_version}/{orgUnitId}"
+            f"/grades/{int(gradeObjectId)}/values/"
+        )
+        params: Optional[Dict[str, Any]] = None
+        out: List[Dict[str, Any]] = []
+        for _ in range(max_pages):
+            if not url:
+                break
+            data = await self._request_json("GET", url, params=params)
+            out.extend(self._as_list_of_dicts(data))
+            if not isinstance(data, dict):
+                break
+            nxt = data.get("Next")
+            paging = data.get("PagingInfo") or {}
+            if isinstance(nxt, str) and nxt:
+                # Next es una URL completa (o relativa) del mismo tenant
+                if nxt.startswith(self.base_url):
+                    url, params = nxt, None
+                elif nxt.startswith("/"):
+                    url, params = f"{self.base_url}{nxt}", None
+                else:
+                    break  # nunca seguir URLs de otro host
+            elif paging.get("HasMoreItems") and paging.get("Bookmark"):
+                params = {"bookmark": paging.get("Bookmark")}
+            else:
+                break
+        return out
+
+    async def get_content_toc(self, orgUnitId: int) -> Dict[str, Any]:
+        """Tabla de contenidos completa del curso en una sola llamada:
+        GET /d2l/api/le/(v)/(ou)/content/toc → {Modules: [{Modules, Topics}]}."""
+        url = f"{self.base_url}/d2l/api/le/{self.le_version}/{orgUnitId}/content/toc"
+        data = await self._request_json("GET", url)
+        return data if isinstance(data, dict) else {"Modules": []}
+
+    async def list_discussion_forums(self, orgUnitId: int) -> List[Dict[str, Any]]:
+        """Foros de discusión del curso (una llamada; no recorre los temas)."""
+        url = (
+            f"{self.base_url}/d2l/api/le/{self.le_version}/{orgUnitId}"
+            f"/discussions/forums/"
         )
         data = await self._request_json("GET", url)
         return self._as_list_of_dicts(data)
